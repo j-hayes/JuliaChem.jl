@@ -3,12 +3,13 @@ using LinearAlgebra
 using HDF5
 using PrettyTables
 using Printf
+using JuliaChem.JCRHF.Constants
 
 const do_continue_print = false 
 const print_eri = false 
 
 function rhf_energy(mol::Molecule, basis::Basis,
-  scf_flags::Union{Dict{String,Any},Dict{Any,Any}}; output)
+  scf_flags::Union{Dict{String,Any},Dict{Any,Any}}; output, method = Methods.RHF)
   
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
   niter::Int = haskey(scf_flags, "niter") ? scf_flags["niter"] : 50
@@ -555,8 +556,30 @@ H = One-electron Hamiltonian Matrix
   batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)*
     Threads.nthreads()*batches_per_thread))
 
+  if load == "sequential"
+    #== set up initial indices ==#                                              
+    stride = 1                                  
+    top_index = nindices
+                                                                                
+    #== execute kernel of calculation ==#                                       
+    for ijkl in top_index:-stride:1                     
+        thread = Threads.threadid()                                             
+      
+        eri_quartet_batch_priv = eri_quartet_batch_thread[thread]               
+        jeri_tei_engine_priv = jeri_engine_thread[thread]                       
+        F_priv = F_thread[thread]         
+
+        fock_build_thread_kernel(F_priv, D,                                 
+          H, basis, eri_quartet_batch_priv,                                 
+          ijkl, jeri_tei_engine_priv,                                       
+          schwarz_bounds, Dsh,                                              
+          cutoff, debug)                
+                                                                               
+    end     
+    #== reduce into Fock matrix ==#    
+    axpy!(1.0, F_thread[1], F) 
   #== use static task distribution for multirank runs if selected... ==#
-  if MPI.Comm_size(comm) == 1  || load == "static"
+  elseif MPI.Comm_size(comm) == 1  || load == "static"
     #== set up initial indices ==#                                              
     stride = MPI.Comm_size(comm)*batch_size                                       
     top_index = nindices - (MPI.Comm_rank(comm)*batch_size)
@@ -569,8 +592,8 @@ H = One-electron Hamiltonian Matrix
         eri_quartet_batch_priv = eri_quartet_batch_thread[thread]               
         jeri_tei_engine_priv = jeri_engine_thread[thread]                       
         F_priv = F_thread[thread]                                               
-                                                                                
-        for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))              
+
+        for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))   
           fock_build_thread_kernel(F_priv, D,                                 
             H, basis, eri_quartet_batch_priv,                                 
             ijkl, jeri_tei_engine_priv,                                       
