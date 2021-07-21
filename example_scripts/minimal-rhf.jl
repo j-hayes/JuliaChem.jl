@@ -9,6 +9,6 @@ import JuliaChem
 include("minimal-rhf-repl.jl")
 
 JuliaChem.initialize()
-minimal_rhf(ARGS[1])
+minimal_rhf("/home/jackson/Source/JuliaChem.jl/example_inputs/H2.json")
 JuliaChem.finalize()
 

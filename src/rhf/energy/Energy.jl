@@ -35,7 +35,7 @@ scf = RHF.run(input_info, basis)
 ```
 """
 function run(mol::Molecule, basis::Basis, 
-  scf_flags = Dict(); output=0)
+  scf_flags = Dict(); output=0, auxillary_basis::Basis=nothing)
   
   comm=MPI.COMM_WORLD
 
@@ -49,7 +49,7 @@ function run(mol::Molecule, basis::Basis,
   end
 
   #== actually perform scf calculation ==#
-  rhfenergy = rhf_energy(mol, basis, scf_flags; output=output)
+  rhfenergy = rhf_energy(mol, basis, scf_flags; output=output, auxillary_basis=auxillary_basis)
 
   if MPI.Comm_rank(comm) == 0 && output >= 2
     println("                       ========================================                 ")

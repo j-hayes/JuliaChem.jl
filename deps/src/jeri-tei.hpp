@@ -20,22 +20,34 @@ typedef int64_t julia_int;
 class TEIEngine {
   const libint2::BasisSet* m_basis_set;
   const libint2::ShellPair* m_shellpair_data;
-  
+  const libint2::BasisSet* m_auxillary_basis_set;
+  const libint2::ShellPair* m_shellpair_data_ri;
+
   libint2::Engine m_coulomb_eng;
+  libint2::Engine m_coulomb_eng_ri;
 
 public:
  //-- ctors and dtors --//
   TEIEngine(const libint2::BasisSet& t_basis_set, 
-    const std::vector<libint2::ShellPair>& t_shellpair_data)
+    const libint2::BasisSet& t_auxillary_basis_set, 
+    const std::vector<libint2::ShellPair>& t_shellpair_data,
+    const std::vector<libint2::ShellPair>& t_shellpair_data_ri)
     : m_basis_set(&t_basis_set),
+      m_auxillary_basis_set(&t_auxillary_basis_set),
       m_shellpair_data(t_shellpair_data.data()),
+      m_shellpair_data_ri(t_shellpair_data_ri.data()),
       m_coulomb_eng(libint2::Operator::coulomb,
         m_basis_set->max_nprim(),
         m_basis_set->max_l(),
         0)
+        ,
+      m_coulomb_eng_ri(libint2::Operator::coulomb,
+       std::max(m_basis_set.max_nprim(), m_auxillary_basis_set.max_nprim()),
+       std::max(m_basis_set.max_l(), m_auxillary_basis_set.max_l()), 0);
   {
     //-- no screening done in engine --// 
     m_coulomb_eng.set_precision(0.0); 
+    m_coulomb_eng_ri.set_precision(0.0); 
   }
     
   ~TEIEngine() { };
@@ -70,6 +82,27 @@ public:
     //assert(m_coulomb_eng.results()[0] != nullptr); 
     if (m_coulomb_eng.results()[0] != nullptr) {
       memcpy(eri_block.data(), m_coulomb_eng.results()[0],
+        absize*cdsize*sizeof(double));
+      
+      return false;
+    } else {
+      //memset(eri_block.data(), 0.0, absize*cdsize*sizeof(double)); 
+      return true;
+    }
+  }
+
+  inline bool compute_eri_block_ri(jlcxx::ArrayRef<double> eri_block, 
+    julia_int ash, julia_int bsh, julia_int csh, julia_int dsh, 
+    julia_int bra_idx, julia_int ket_idx,
+    julia_int absize, julia_int cdsize) 
+  {
+     auto unitShell = libint2::Shell::unit();
+     m_coulomb_eng_ri.compute2<libint2::Operator::coulomb, 
+      libint2::BraKet::xs_xx, 0>((*m_auxillary_basis_set)[0], unitShell,
+      (*m_basis_set)[0], (*m_basis_set)[0]);
+
+      if (m_coulomb_eng_ri.results()[0] != nullptr) {
+      memcpy(eri_block.data(), m_coulomb_eng_ri.results()[0],
         absize*cdsize*sizeof(double));
       
       return false;

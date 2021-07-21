@@ -22,5 +22,5 @@ module JERI
   
   export PropEngine, compute_dipole_block
   
-  export TEIEngine, compute_eri_block
+  export TEIEngine, compute_eri_block, compute_eri_block_ri
 end

@@ -1,0 +1,24 @@
+{
+    "molecule": {
+      "geometry": [
+       0,    0,  0,
+       0.74, 0 , 0
+      ],
+      "symbols": ["H", "H"],
+      "molecular_charge":0
+    },
+    "driver": "energy",
+    "model": {
+      "method": "RHF",
+      "basis": "6-21G",
+      "auxillary_basis":"6-21G"
+    },
+    "keywords": {
+      "scf":{
+        "dele":1.0,
+        "rmsd":2E-6,
+        "debug": true
+      }
+    }
+  }
+  

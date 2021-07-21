@@ -9,7 +9,7 @@ const do_continue_print = false
 const print_eri = false 
 
 function rhf_energy(mol::Molecule, basis::Basis,
-  scf_flags::Union{Dict{String,Any},Dict{Any,Any}}; output, method = Methods.RHF)
+  scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output=0, auxillary_basis::Basis=nothing)
   
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
   niter::Int = haskey(scf_flags, "niter") ? scf_flags["niter"] : 50
@@ -20,10 +20,15 @@ function rhf_energy(mol::Molecule, basis::Basis,
   rmsd::Float64 = haskey(scf_flags, "rmsd") ? scf_flags["rmsd"] : 1E-6
   load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
+  method::String = haskey(scf_flags, "method") ? scf_flags["method"] : Methods.RIHF
+
+  if auxillary_basis != nothing
+    println("aux_basis not null")
+  end
 
   return rhf_kernel(mol,basis; output=output, debug=debug, 
     niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
-    fdiff=fdiff)
+    fdiff=fdiff, method=method, auxillary_basis=auxillary_basis)
 end
 
 
@@ -47,7 +52,7 @@ type = Precision of variables in calculation
 function rhf_kernel(mol::Molecule, 
   basis::Basis; 
   output::Int64, debug::Bool, niter::Int, guess::String, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool)
+  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, method::String = Methods.RHF, auxillary_basis::Basis=nothing)
 
   comm=MPI.COMM_WORLD
   calculation_status = Dict([])
@@ -163,7 +168,7 @@ function rhf_kernel(mol::Molecule,
     F_eval, F_evec, F_old, workspace_a, workspace_b, workspace_c,
     E_nuc, E_elec, E_old, basis; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele,
-    rmsd=rmsd, load=load, fdiff=fdiff)
+    rmsd=rmsd, load=load, fdiff=fdiff, method=method, auxillary_basis=auxillary_basis)
 
   if !converged
     if MPI.Comm_rank(comm) == 0 && output >= 1
@@ -234,7 +239,8 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
   workspace_c::Vector{Matrix{Float64}}, E_nuc::Float64, E_elec::Float64, 
   E_old::Float64, basis::Basis;
   output::Int64, debug::Bool, niter::Int, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool)
+  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, 
+  method::String = Methods.RHF, auxillary_basis::Basis=nothing)
 
   #== read in some more variables from scf flags input ==#
   nsh = length(basis)
@@ -291,7 +297,8 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
     D_old, ΔD, D_input, scf_converged, FDS, 
     schwarz_bounds, Dsh; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele, 
-    rmsd=rmsd, load=load, fdiff=fdiff)
+    rmsd=rmsd, load=load, fdiff=fdiff,
+    method=method, auxillary_basis=auxillary_basis)
 
   #== we are done! ==#
   if debug
@@ -320,7 +327,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   ΔD::Matrix{Float64}, D_input::Matrix{Float64}, scf_converged::Bool,  
   FDS::Matrix{Float64}, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64}; 
-  output, debug, niter, ndiis, dele, rmsd, load, fdiff)
+  output, debug, niter, ndiis, dele, rmsd, load, fdiff,
+  method::String = Methods.RHF, auxillary_basis::Basis=nothing)
 
   #== initialize a few more variables ==#
   comm=MPI.COMM_WORLD
@@ -346,9 +354,17 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     for thread in 1:nthreads ]
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
-  jeri_engine_thread = [ JERI.TEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
+
+  if method == Methods.RIHF
+    jeri_engine_thread = [ JERI.TEIEngine(basis.basis_cxx, auxillary_basis.basis_cxx, 
+    basis.shpdata_cxx, auxillary_basis.shpdata_cxx)
+    for thread in 1:nthreads ]    
+  else
+    jeri_engine_thread = [ JERI.TEIEngine(basis.basis_cxx, auxillary_basis.basis_cxx, 
+    basis.shpdata_cxx, auxillary_basis.shpdata_cxx) 
     for thread in 1:nthreads ]
-  
+  end
+
   while !iter_converged
     #== reset eri arrays ==#
     #if quartet_batch_num_old != 1 && iter != 1
@@ -399,7 +415,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     #== build new Fock matrix ==#
     workspace_a .= fock_build(workspace_b, F_thread, D_input, H, basis, 
       schwarz_bounds, Dsh, eri_quartet_batch_thread, jeri_engine_thread, 
-      iter, cutoff, debug, load)
+      iter, cutoff, debug, load, 
+      method, auxillary_basis)
 
     workspace_b .= MPI.Allreduce(workspace_a,MPI.SUM,comm)
     MPI.Barrier(comm)
@@ -538,7 +555,8 @@ H = One-electron Hamiltonian Matrix
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64},
   eri_quartet_batch_thread::Vector{Vector{Float64}}, 
   jeri_engine_thread, iter::Int64,
-  cutoff::Float64, debug::Bool, load::String)
+  cutoff::Float64, debug::Bool, load::String,
+  method::String, auxillary_basis::Basis=nothing)
 
   comm = MPI.COMM_WORLD
   
@@ -556,6 +574,23 @@ H = One-electron Hamiltonian Matrix
   batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)*
     Threads.nthreads()*batches_per_thread))
 
+  if method == Methods.RIHF
+    stride = 1                                  
+    top_index = nindices
+
+    thread = Threads.threadid()                                             
+    for ijkl in top_index:-stride:1                     
+      thread = Threads.threadid()         
+      eri_quartet_batch_priv = eri_quartet_batch_thread[thread]               
+      jeri_tei_engine_priv = jeri_engine_thread[thread]                       
+      F_priv = F_thread[thread]         
+      fock_build_thread_kernel(F_priv, D,                                 
+            H, basis, eri_quartet_batch_priv,                                 
+            ijkl, jeri_tei_engine_priv,                                       
+            schwarz_bounds, Dsh,                                              
+            cutoff, debug; method=method, auxillary_basis=auxillary_basis)          
+    end
+  end
   if load == "sequential"
     #== set up initial indices ==#                                              
     stride = 1                                  
@@ -573,7 +608,7 @@ H = One-electron Hamiltonian Matrix
           H, basis, eri_quartet_batch_priv,                                 
           ijkl, jeri_tei_engine_priv,                                       
           schwarz_bounds, Dsh,                                              
-          cutoff, debug)                
+          cutoff, debug; method=method, auxillary_basis=auxillary_basis)        
                                                                                
     end     
     #== reduce into Fock matrix ==#    
@@ -598,7 +633,7 @@ H = One-electron Hamiltonian Matrix
             H, basis, eri_quartet_batch_priv,                                 
             ijkl, jeri_tei_engine_priv,                                       
             schwarz_bounds, Dsh,                                              
-            cutoff, debug)                                                    
+            cutoff, debug; method=method, auxillary_basis=auxillary_basis)                                                 
         end
       end                                                                       
     end      
@@ -685,7 +720,7 @@ H = One-electron Hamiltonian Matrix
               H, basis, eri_quartet_batch_priv, #mutex,
               ijkl, jeri_tei_engine_priv,
               schwarz_bounds, Dsh,
-              cutoff, debug)
+              cutoff, debug; method=method, auxillary_basis=auxillary_basis)   
           end
   
           #== complete rest of tasks ==#
@@ -702,7 +737,7 @@ H = One-electron Hamiltonian Matrix
                 H, basis, eri_quartet_batch_priv, #mutex,
                ijkl, jeri_tei_engine_priv,
                schwarz_bounds, Dsh,
-               cutoff, debug)
+               cutoff, debug; method=method, auxillary_basis=auxillary_basis)   
             end
           end
         end
@@ -730,8 +765,8 @@ end
   H::Matrix{Float64}, basis::Basis, 
   eri_quartet_batch::Vector{Float64}, 
   ijkl_index::Int64, 
-  jeri_tei_engine, schwarz_bounds::Matrix{Float64}, 
-  Dsh::Matrix{Float64}, cutoff::Float64, debug::Bool)
+  jeri_tei_engine::JERI.TEIEngine, schwarz_bounds::Matrix{Float64}, 
+  Dsh::Matrix{Float64}, cutoff::Float64, debug::Bool; method::String=Methods.RHF, auxillary_basis::Basis=nothing)
 
   comm=MPI.COMM_WORLD
   
@@ -791,7 +826,7 @@ end
 
     #== compute electron repulsion integrals ==#
     screened = compute_eris(ish, jsh, ksh, lsh, bra_pair, ket_pair, nμ, nν, 
-      nλ, nσ, eri_quartet_batch, jeri_tei_engine)
+      nλ, nσ, eri_quartet_batch, jeri_tei_engine, method)
   
     if !screened
       #= axial normalization =#
@@ -811,11 +846,19 @@ end
   nμ::Int64, nν::Int64,
   nλ::Int64, nσ::Int64,
   eri_quartet_batch::Vector{Float64},
-  jeri_tei_engine)
+  jeri_tei_engine, method::String)
 
   #= actually compute integrals =#
-  return JERI.compute_eri_block(jeri_tei_engine, eri_quartet_batch, 
+  if method == Methods.RIHF 
+    eri_return = JERI.compute_eri_block_ri(jeri_tei_engine, eri_quartet_batch, 
     ish, jsh, ksh, lsh, bra_pair, ket_pair, nμ*nν, nλ*nσ)
+    for eri_ind in eachindex(eri_quartet_batch)
+      println("eri_quartet_batch[$(eri_ind)] value for RIHF = $(eri_quartet_batch[eri_ind])")
+    end
+    else
+    return JERI.compute_eri_block(jeri_tei_engine, eri_quartet_batch, 
+    ish, jsh, ksh, lsh, bra_pair, ket_pair, nμ*nν, nλ*nσ)
+  end
   
   #=
   if am[1] == 3 || am[2] == 3 || am[3] == 3 || am[4] == 3

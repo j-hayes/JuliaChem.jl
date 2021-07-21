@@ -22,10 +22,10 @@ function minimal_rhf(input_file)
     rhf_energy = Dict()
     if haskey(keywords, "scf")
       rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"];
-        output=0)
+        output=2)
     else
       rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis;
-        output=0)
+        output=2)
     end
 
     #display(rhf_energy["Density"]); println()
@@ -33,6 +33,21 @@ function minimal_rhf(input_file)
 
     #== perform gradient ==#
     #rhf_gradient = JuliaChem.JCGrad.run(mol, basis; output=2)
+
+
+    keywords = Dict(
+      "scf" => Dict(),
+      "prop" => Dict(
+        "formation" => true,
+        "mo energies" => true,
+        "mulliken" => true,
+        "multipole" => "dipole"
+      ) 
+
+    )    
+    
+    rhf_properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy,
+    keywords["prop"]; output=2)  
 
     return rhf_energy
   catch e                                                                       

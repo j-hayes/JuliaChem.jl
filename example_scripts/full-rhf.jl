@@ -43,7 +43,8 @@ function full_rhf(input_file)
 
     #== calculation driver ==# 
     if driver == "energy"
-      if model["method"] == "RHF"
+      method = model["method"]
+      if method == "RHF" || method == "RIHF"
         #== perform scf calculation ==#
         if haskey(keywords, "scf")
           rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
@@ -57,7 +58,7 @@ function full_rhf(input_file)
         properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, 
           keywords["prop"]; output=2)
       else
-        throw("Exception: Methods other than RHF are not supported yet!")
+          throw("Exception: Methods other than RHF and RIHF are not supported yet!")
       end  
     else
       throw("Exception: Only energy calculations are currently supported!")
