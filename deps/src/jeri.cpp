@@ -51,8 +51,21 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
 
   //-- tei engine information --//
   mod.add_type<TEIEngine>("TEIEngine")
-    .constructor<const libint2::BasisSet&, 
-      const std::vector<libint2::ShellPair>& >() 
-    .method("compute_eri_block", &TEIEngine::compute_eri_block);
+      .constructor<const libint2::BasisSet &,
+                   const std::vector<libint2::ShellPair>,
+                   const int, const int &>()
+      .method("compute_eri_block", &TEIEngine::compute_eri_block);
+
+  mod.add_type<RHFTEIEngine>("RHFTEIEngine")
+      .constructor<const libint2::BasisSet &,
+                   const std::vector<libint2::ShellPair> &>()
+      .method("compute_eri_block", &RHFTEIEngine::compute_eri_block);
+
+  mod.add_type<DFRHFTEIEngine>("DFRHFTEIEngine")
+      .constructor<const libint2::BasisSet &,
+                   const libint2::BasisSet &,
+                   const std::vector<libint2::ShellPair>,
+                   const std::vector<libint2::ShellPair> &>()
+      .method("compute_eri_block", &DFRHFTEIEngine::compute_eri_block);
 } 
 
