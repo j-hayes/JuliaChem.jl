@@ -178,6 +178,14 @@ struct Basis
 end
 export Basis
 
+
+struct CalculationBasisSets
+  primary::Basis
+  auxillary::Union{Basis,Nothing}
+end
+export CalculationBasisSets
+
+
 function max_ang_mom(basis_set::Basis)
   max_am = 0
   for shell in basis_set.shells

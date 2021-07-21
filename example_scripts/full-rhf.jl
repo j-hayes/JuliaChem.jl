@@ -80,4 +80,4 @@ function full_rhf(input_file)
   println("--------------------------------------------------------------------------------")
 end
 
-full_rhf(ARGS[1])
+full_rhf("/home/jackson/Source/JuliaChem.jl/example_inputs/S22/02_MP2.json")

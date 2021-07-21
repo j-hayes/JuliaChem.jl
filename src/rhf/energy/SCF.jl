@@ -8,8 +8,8 @@ using JuliaChem.JCRHF.Constants
 const do_continue_print = false 
 const print_eri = false 
 
-function rhf_energy(mol::Molecule, basis::Basis,
-  scf_flags::Union{Dict{String,Any},Dict{Any,Any}}; output, method = Methods.RHF)
+function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
+  scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
   
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
   niter::Int = haskey(scf_flags, "niter") ? scf_flags["niter"] : 50
@@ -20,15 +20,16 @@ function rhf_energy(mol::Molecule, basis::Basis,
   rmsd::Float64 = haskey(scf_flags, "rmsd") ? scf_flags["rmsd"] : 1E-6
   load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
+  method::String = haskey(scf_flags, "method") ? scf_flags["method"] : Methods.RHF
 
-  return rhf_kernel(mol,basis; output=output, debug=debug, 
+  return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
     niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
-    fdiff=fdiff)
+    fdiff=fdiff, method=method)
 end
 
 
 """
-	 rhf_kernel(FLAGS::RHF_Flags, basis::Basis, read_in::Dict{String,Any},
+	 rhf_kernel(FLAGS::RHF_Flags, basis_sets::CalculationBasisSets, read_in::Dict{String,Any},
        type::T)
 Summary
 ======
@@ -43,12 +44,15 @@ basis = Generated basis set
 read_in = file required to read in from input file
 
 type = Precision of variables in calculation
+
+method = the method to calculate the SCF E.G. RHF (Restricted Hatree Fock) or DFRIHF (Density fitted RHF)
 """
 function rhf_kernel(mol::Molecule, 
-  basis::Basis; 
+  basis_sets::CalculationBasisSets; 
   output::Int64, debug::Bool, niter::Int, guess::String, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool)
-
+  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, method::String)
+  
+  basis = basis_sets.primary
   comm=MPI.COMM_WORLD
   calculation_status = Dict([])
 
@@ -232,7 +236,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
   F_evec::Matrix{Float64},  F_old::Matrix{Float64},
   workspace_a::Matrix{Float64}, workspace_b::Matrix{Float64}, 
   workspace_c::Vector{Matrix{Float64}}, E_nuc::Float64, E_elec::Float64, 
-  E_old::Float64, basis::Basis;
+  E_old::Float64, basis_sets::CalculationBasisSets;
   output::Int64, debug::Bool, niter::Int, ndiis::Int, 
   dele::Float64, rmsd::Float64, load::String, fdiff::Bool)
 
@@ -308,7 +312,7 @@ end
 function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   W::Matrix{Float64}, C::Matrix{Float64}, E::Float64, H::Matrix{Float64}, 
   ortho::Matrix{Float64}, S::Matrix{Float64}, E_nuc::Float64, 
-  E_elec::Float64, E_old::Float64, basis::Basis,
+  E_elec::Float64, E_old::Float64, basis_sets::CalculationBasisSets,
   F_array::Vector{Matrix{Float64}}, 
   e_array::Vector{Matrix{Float64}}, e_array_old::Vector{Matrix{Float64}},
   F_array_old::Vector{Matrix{Float64}}, 
@@ -346,6 +350,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     for thread in 1:nthreads ]
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
+  
   jeri_engine_thread = [ JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
     for thread in 1:nthreads ]
   
@@ -534,7 +539,7 @@ H = One-electron Hamiltonian Matrix
 
 @inline function fock_build(F::Matrix{Float64}, 
   F_thread::Vector{Matrix{Float64}}, D::Matrix{Float64}, 
-  H::Matrix{Float64}, basis::Basis, 
+  H::Matrix{Float64}, basis_sets::CalculationBasisSets, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64},
   eri_quartet_batch_thread::Vector{Vector{Float64}}, 
   jeri_engine_thread, iter::Int64,
@@ -727,7 +732,7 @@ H = One-electron Hamiltonian Matrix
 end
 
 @inline function fock_build_thread_kernel(F::Matrix{Float64}, D::Matrix{Float64},
-  H::Matrix{Float64}, basis::Basis, 
+  H::Matrix{Float64}, basis_sets::CalculationBasisSets, 
   eri_quartet_batch::Vector{Float64}, 
   ijkl_index::Int64, 
   jeri_tei_engine, schwarz_bounds::Matrix{Float64}, 
@@ -925,7 +930,7 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
   C::Matrix{Float64}, H::Matrix{Float64}, F_eval::Vector{Float64},
   F_evec::Matrix{Float64}, workspace_a::Matrix{Float64}, 
   workspace_b::Matrix{Float64}, ortho::Matrix{Float64}, 
-  basis::Basis, iter::Int, debug::Bool)
+  basis_sets::CalculationBasisSets, iter::Int, debug::Bool)
 
   comm=MPI.COMM_WORLD
  
