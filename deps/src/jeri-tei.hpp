@@ -44,7 +44,7 @@ public:
   virtual bool compute_eri_block(jlcxx::ArrayRef<double> eri_block,
                                  julia_int ash, julia_int bsh, julia_int csh, julia_int dsh,
                                  julia_int bra_idx, julia_int ket_idx,
-                                 julia_int absize, julia_int cdsize);
+                                 julia_int absize, julia_int cdsize){};
 };
 
 //------------------------------------------------------------------------//

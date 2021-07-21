@@ -23,4 +23,6 @@ module JERI
   export PropEngine, compute_dipole_block
   
   export TEIEngine, compute_eri_block
+  export RHFTEIEngine, compute_eri_block
+  export DFRHFTEIEngine, compute_eri_block
 end

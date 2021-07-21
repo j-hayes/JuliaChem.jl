@@ -346,7 +346,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     for thread in 1:nthreads ]
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
-  jeri_engine_thread = [ JERI.TEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
+  jeri_engine_thread = [ JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
     for thread in 1:nthreads ]
   
   while !iter_converged
