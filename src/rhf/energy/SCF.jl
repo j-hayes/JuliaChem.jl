@@ -287,7 +287,6 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
 
   #== execute convergence procedure ==#
   scf_converged = true
-  println("Jackson 21df2965-1e15-4334-a31c-44c94cc5d27b")
 
   E = scf_cycles_kernel(F, D, W, C, E, H, ortho, S, E_nuc,
     E_elec, E_old, basis_sets, F_array, e_array, e_array_old,
