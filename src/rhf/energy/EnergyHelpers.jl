@@ -81,7 +81,7 @@ function compute_overlap(S::Matrix{Float64}, basis::Basis,
       idx += 1 
     end
   end
- 
+
   for iorb in 1:basis.norb, jorb in 1:iorb
     if iorb != jorb
       S[min(iorb,jorb),max(iorb,jorb)] = S[max(iorb,jorb),min(iorb,jorb)]

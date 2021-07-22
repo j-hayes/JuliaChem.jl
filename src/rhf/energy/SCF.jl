@@ -148,7 +148,7 @@ function rhf_kernel(mol::Molecule,
   F_eval = zeros(size(F)[1])
   if guess == "hcore"
     E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a, 
-      workspace_b, ortho, basis, 0, debug)
+      workspace_b, ortho, basis_sets, 0, debug)
   end
   
   F_old = deepcopy(F)
@@ -165,7 +165,7 @@ function rhf_kernel(mol::Molecule,
   #=============================#
   F, D, W, C, E, converged = scf_cycles(F, D, W, C, E, H, ortho, S, 
     F_eval, F_evec, F_old, workspace_a, workspace_b, workspace_c,
-    E_nuc, E_elec, E_old, basis; 
+    E_nuc, E_elec, E_old, basis_sets; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele,
     rmsd=rmsd, load=load, fdiff=fdiff)
 
@@ -239,7 +239,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
   E_old::Float64, basis_sets::CalculationBasisSets;
   output::Int64, debug::Bool, niter::Int, ndiis::Int, 
   dele::Float64, rmsd::Float64, load::String, fdiff::Bool)
-
+  basis = basis_sets.primary
   #== read in some more variables from scf flags input ==#
   nsh = length(basis)
   nindices = (muladd(nsh,nsh,nsh)*(muladd(nsh,nsh,nsh) + 2)) >> 3
@@ -287,16 +287,16 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
 
   #== execute convergence procedure ==#
   scf_converged = true
+  println("Jackson 21df2965-1e15-4334-a31c-44c94cc5d27b")
 
   E = scf_cycles_kernel(F, D, W, C, E, H, ortho, S, E_nuc,
-    E_elec, E_old, basis, F_array, e_array, e_array_old,
+    E_elec, E_old, basis_sets, F_array, e_array, e_array_old,
     F_array_old, F_eval, F_evec, F_old, workspace_a, 
     workspace_b, workspace_c, ΔF, F_cumul, 
     D_old, ΔD, D_input, scf_converged, FDS, 
     schwarz_bounds, Dsh; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele, 
     rmsd=rmsd, load=load, fdiff=fdiff)
-
   #== we are done! ==#
   if debug
     h5write("debug.h5","RHF/Iteration-Final/F", F)
@@ -325,6 +325,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   FDS::Matrix{Float64}, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64}; 
   output, debug, niter, ndiis, dele, rmsd, load, fdiff)
+  basis = basis_sets.primary
 
   #== initialize a few more variables ==#
   comm=MPI.COMM_WORLD
@@ -402,7 +403,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   
     #== build new Fock matrix ==#
-    workspace_a .= fock_build(workspace_b, F_thread, D_input, H, basis, 
+    workspace_a .= fock_build(workspace_b, F_thread, D_input, H, basis_sets, 
       schwarz_bounds, Dsh, eri_quartet_batch_thread, jeri_engine_thread, 
       iter, cutoff, debug, load)
 
@@ -473,9 +474,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     #== obtain new F,D,C matrices ==#
     LinearAlgebra.BLAS.blascopy!(length(D), D, 1, 
       D_old, 1) 
- 
-    E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a,
-      workspace_b, ortho, basis, iter, debug)
+      E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a,
+      workspace_b, ortho, basis_sets, iter, debug)
 
     #== check for convergence ==#
     #LinearAlgebra.BLAS.blascopy!(length(FDS), FDS, 1, 
@@ -544,6 +544,7 @@ H = One-electron Hamiltonian Matrix
   eri_quartet_batch_thread::Vector{Vector{Float64}}, 
   jeri_engine_thread, iter::Int64,
   cutoff::Float64, debug::Bool, load::String)
+  basis = basis_sets.primary
 
   comm = MPI.COMM_WORLD
   
@@ -575,7 +576,7 @@ H = One-electron Hamiltonian Matrix
         F_priv = F_thread[thread]         
 
         fock_build_thread_kernel(F_priv, D,                                 
-          H, basis, eri_quartet_batch_priv,                                 
+          H, basis_sets, eri_quartet_batch_priv,                                 
           ijkl, jeri_tei_engine_priv,                                       
           schwarz_bounds, Dsh,                                              
           cutoff, debug)                
@@ -600,7 +601,7 @@ H = One-electron Hamiltonian Matrix
 
         for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))   
           fock_build_thread_kernel(F_priv, D,                                 
-            H, basis, eri_quartet_batch_priv,                                 
+            H, basis_sets, eri_quartet_batch_priv,                                 
             ijkl, jeri_tei_engine_priv,                                       
             schwarz_bounds, Dsh,                                              
             cutoff, debug)                                                    
@@ -687,7 +688,7 @@ H = One-electron Hamiltonian Matrix
           
           for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))
             fock_build_thread_kernel(F_priv, D,
-              H, basis, eri_quartet_batch_priv, #mutex,
+              H, basis_sets, eri_quartet_batch_priv, #mutex,
               ijkl, jeri_tei_engine_priv,
               schwarz_bounds, Dsh,
               cutoff, debug)
@@ -704,7 +705,7 @@ H = One-electron Hamiltonian Matrix
 
             for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))
               fock_build_thread_kernel(F_priv, D,
-                H, basis, eri_quartet_batch_priv, #mutex,
+                H, basis_sets, eri_quartet_batch_priv, #mutex,
                ijkl, jeri_tei_engine_priv,
                schwarz_bounds, Dsh,
                cutoff, debug)
@@ -737,6 +738,7 @@ end
   ijkl_index::Int64, 
   jeri_tei_engine, schwarz_bounds::Matrix{Float64}, 
   Dsh::Matrix{Float64}, cutoff::Float64, debug::Bool)
+  basis = basis_sets.primary
 
   comm=MPI.COMM_WORLD
   
@@ -931,7 +933,7 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
   F_evec::Matrix{Float64}, workspace_a::Matrix{Float64}, 
   workspace_b::Matrix{Float64}, ortho::Matrix{Float64}, 
   basis_sets::CalculationBasisSets, iter::Int, debug::Bool)
-
+  basis = basis_sets.primary
   comm=MPI.COMM_WORLD
  
   transpose!(workspace_b, LinearAlgebra.Hermitian(ortho)) 

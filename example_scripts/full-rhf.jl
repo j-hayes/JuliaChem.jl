@@ -2,6 +2,7 @@
 #== put needed modules here ==#
 #=============================#
 import JuliaChem
+using JuliaChem.JCModules
 
 #================================#
 #== JuliaChem execution script ==#
@@ -24,6 +25,7 @@ function full_rhf(input_file)
   println("                     Theory Compute. 2020, 16, 8, 5006-5013.                    ")
   println("                                                                                ")
   println("       For questions on usage, email David Poole at davpoole@iastate.edu.       ")
+  println("                             Jackson                                            ")
   println("--------------------------------------------------------------------------------")
  
   try
@@ -36,20 +38,29 @@ function full_rhf(input_file)
     
     #== generate basis set ==#
     mol, basis = JuliaChem.JCBasis.run(molecule, model; 
-      output=2)          
-
+      output=2) 
+    aux_model = deepcopy(model) #todo remove this when JCBasis correctly reads basis
+    if haskey(model, "auxillary_basis") 
+      aux_model["basis"] = model["auxillary_basis"]
+      mol, auxillary_basis = JuliaChem.JCBasis.run(molecule, aux_model; 
+        output=2) 
+      basis_sets = CalculationBasisSets(basis, auxillary_basis)
+    else
+      basis_sets = CalculationBasisSets(basis, nothing)
+    end
+    
     #== molecule info ==#
     JuliaChem.JCMolecule.run(mol)
 
     #== calculation driver ==# 
     if driver == "energy"
-      if model["method"] == "RHF"
+      if model["method"] == "RHF" || model["method"] == "DFRHF"
         #== perform scf calculation ==#
         if haskey(keywords, "scf")
-          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
+          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis_sets, keywords["scf"]; 
             output=2) 
         else
-          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis; 
+          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis_sets; 
             output=2) 
         end
     
@@ -57,7 +68,7 @@ function full_rhf(input_file)
         properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, 
           keywords["prop"]; output=2)
       else
-        throw("Exception: Methods other than RHF are not supported yet!")
+        throw("Exception: Methods other than RHF and DFRFH are not supported yet!")
       end  
     else
       throw("Exception: Only energy calculations are currently supported!")
@@ -80,4 +91,4 @@ function full_rhf(input_file)
   println("--------------------------------------------------------------------------------")
 end
 
-full_rhf("/home/jackson/Source/JuliaChem.jl/example_inputs/S22/02_MP2.json")
+full_rhf(ARGS[1])
