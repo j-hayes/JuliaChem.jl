@@ -73,6 +73,7 @@ function run(molecule, model; output="none")
     println()
   end
 
+  #initialize variables and structs for basis set build
   basis_set_shells = Vector{JCModules.Shell}([])
   shells_cxx = StdVector([ StdVector{JERI.Shell}() for i in 1:55 ]) 
   shells_cxx_added = [ false for i in 1:55 ]
@@ -80,6 +81,19 @@ function run(molecule, model; output="none")
   basis_set_nels = -charge 
   basis_set_norb = 0
   pos = 1
+  shell_id = 1
+
+  #initialize variables and structs for auxillary basis set build if building auxillary basis set 
+  if build_auxillary    
+    auxillary_basis_set_shells = Vector{JCModules.Shell}([])
+    auxillary_shells_cxx = StdVector([ StdVector{JERI.Shell}() for i in 1:55 ]) 
+    auxillary_shells_cxx_added = [ false for i in 1:55 ]
+
+    auxillary_basis_set_nels = -charge 
+    auxillary_basis_set_norb = 0
+    auxillary_pos = 1
+    auxillary_shell_id = 1
+  end
   
   #== relocate center of mass of system to origin ==# 
   center_of_mass = Vector{Float64}([0.0, 0.0, 0.0])
@@ -100,8 +114,6 @@ function run(molecule, model; output="none")
   
   #== create basis set ==#
   h5open(joinpath(@__DIR__, "../../records/bsed.h5"),"r") do bsed
-    shell_id = 1
-    
     for (atom_idx, symbol) in enumerate(symbols)
       #== initialize variables needed for shell ==#
       atom_center = atom_centers[atom_idx] 
@@ -115,6 +127,9 @@ function run(molecule, model; output="none")
 
       pos, basis_set_norb, shell_id = add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbol, basis, 
       shell_am_mapping, atom_idx, atomic_number, pos, atom_center, basis_set_norb, shell_id, output)
+
+      auxillary_pos, auxillary_basis_set_norb, auxillary_shell_id = add_shells!(bsed, auxillary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxillary_basis, 
+      shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxillary_basis_set_norb, auxillary_shell_id, output)
       
       shells_cxx_added[atomic_number+1] = true 
       #display(shells_cxx)
@@ -144,27 +159,17 @@ function run(molecule, model; output="none")
     basis_set_norb, basis_set_nels)                                       
 
   precompute_shell_pair_data(basis_set.shpdata_cxx, basis_set.basis_cxx)
+  return_val = mol, basis_set
+  if build_auxillary   
+    auxillary_basis_set_cxx = JERI.BasisSet(mol.mol_cxx, shells_cxx)
+    auxillary_basis_set::Basis = Basis(basis_set_shells, basis_set_cxx, 
+    StdVector{JERI.ShellPair}(), basis, 
+    basis_set_norb, basis_set_nels)   
+    
+    precompute_shell_pair_data(auxillary_basis_set.shpdata_cxx, auxillary_basis_set.basis_cxx)
 
-  #== set up shell pair ordering ==#
-  #for ish in 1:length(basis_set.shells), jsh in 1:ish
-  #  push!(basis_set.shpair_ordering, ShPair(basis_set.shells[ish], 
-  #    basis_set.shells[jsh])) 
-  #end
-  
-  #sort!(basis_set.shpair_ordering, by = x->((x.nbas2*x.nprim2),x.am2,unsafe_string(x.class)))
- 
-  #for ish in 1:length(basis_set.shells), jsh in 1:ish 
-  #  idx = ceil(Int64, ish*(ish-1)/2) + jsh
-  #  push!(basis_set.shpair_ordering,(shellpairs[idx].sh_a.shell_id, 
-  #    shellpairs[idx].sh_b.shell_id))
-  #end
-
-  #for shellpair in shellpairs 
-  #  basis_set.shpair_ordering = vcat(basis_set.shpair_ordering, [shellpair.sh_a.shell_id shellpair.sh_b.shell_id])
-  #end
-  
-  #delete first row, as it is simply zeroes
-  #basis_set.shpair_ordering = basis_set.shpair_ordering[setdiff(1:end, 1),:]
+    return_val = mol, CalculationBasisSets(basis_set,auxillary_basis_set)
+  end
 
   if MPI.Comm_rank(comm) == 0 && output >= 2
     println(" ")
@@ -174,7 +179,7 @@ function run(molecule, model; output="none")
     println("--------------------------------------------------------------------------------")
   end
 
-  return mol, basis_set
+  return return_val
 end
 
 function add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbol, basis, 

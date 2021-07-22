@@ -39,16 +39,7 @@ function full_rhf(input_file)
     #== generate basis set ==#
     mol, basis = JuliaChem.JCBasis.run(molecule, model; 
       output=2) 
-    aux_model = deepcopy(model) #todo remove this when JCBasis correctly reads basis
-    if haskey(model, "auxillary_basis") 
-      aux_model["basis"] = model["auxillary_basis"]
-      mol, auxillary_basis = JuliaChem.JCBasis.run(molecule, aux_model; 
-        output=2) 
-      basis_sets = CalculationBasisSets(basis, auxillary_basis)
-    else
-      basis_sets = CalculationBasisSets(basis, nothing)
-    end
-    
+   
     #== molecule info ==#
     JuliaChem.JCMolecule.run(mol)
 
@@ -57,10 +48,10 @@ function full_rhf(input_file)
       if model["method"] == "RHF" || model["method"] == "DFRHF"
         #== perform scf calculation ==#
         if haskey(keywords, "scf")
-          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis_sets, keywords["scf"]; 
+          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
             output=2) 
         else
-          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis_sets; 
+          rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis; 
             output=2) 
         end
     

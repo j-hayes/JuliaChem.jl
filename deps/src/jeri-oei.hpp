@@ -58,11 +58,6 @@ public:
   void compute_overlap_block(jlcxx::ArrayRef<double> S_block, julia_int ash, 
     julia_int bsh, julia_int absize)
   {
-    std::cout << "c++ running compute_overlap_block: " << ash << std::endl;
-    std::cout << "m_basis_set: ash-1" << (*m_basis_set)[ash - 1] << std::endl;
-    std::cout << "m_basis_set: bsh-1" << (*m_basis_set)[bsh - 1] << std::endl;   
-    std::cout << "c++ ran m_overlap_eng.compute: " << ash << std::endl;
-    
     m_overlap_eng.compute((*m_basis_set)[ash-1], (*m_basis_set)[bsh-1]);
     for (int i = 0; i != absize; ++i) {      
       S_block[i] = m_overlap_eng.results()[0][i];
