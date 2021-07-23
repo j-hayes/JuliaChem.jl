@@ -547,16 +547,14 @@ function rfh_fock_build(workspace_a, workspace_b, F,
 end
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 function df_rfh_fock_build(jeri_engine_thread, basis_sets::CalculationBasisSets, eri_block::Vector{Float64}) 
-  println("entering df_rfh_fock_build")
   auxillary_basis_shells_count = length(basis_sets.auxillary)
   basis_shells_count = length(basis_sets.primary)
-  println("auxillary_basis_shells_count $auxillary_basis_shells_count")
-  println("basis_shells_count $basis_shells_count")
-
+  s123 = 1
   for s1 in 1:auxillary_basis_shells_count
+    n1 = basis_sets.auxillary.shells[s1].nbas
     for s2 in 1:basis_shells_count
       for s3 in 1:basis_shells_count
-        JERI.compute_eri_block_df(jeri_engine_thread[1],
+        JERI.compute_eri_block(jeri_engine_thread[1],
                                 s1, -1, s2, s3,
                                 0, 0,
                                 0, 0)
