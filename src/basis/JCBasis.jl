@@ -147,6 +147,7 @@ function run(molecule, model; output="none")
     println()
     println("Basis set: $basis")
     println("Number of basis functions: $basis_set_norb")
+    println("Number of auxillary basis functions: $auxillary_basis_set_norb")
     println("Number of electrons: $basis_set_nels")
   end
   
@@ -156,19 +157,19 @@ function run(molecule, model; output="none")
   basis_set_cxx = JERI.BasisSet(mol.mol_cxx, shells_cxx)
   basis_set::Basis = Basis(basis_set_shells, basis_set_cxx, 
     StdVector{JERI.ShellPair}(), basis, 
-    basis_set_norb, basis_set_nels)                                       
+    basis_set_norb, auxillary_basis_set_nels)                                       
 
   precompute_shell_pair_data(basis_set.shpdata_cxx, basis_set.basis_cxx)
   return_val = mol, basis_set
   if build_auxillary   
-    auxillary_basis_set_cxx = JERI.BasisSet(mol.mol_cxx, shells_cxx)
-    auxillary_basis_set::Basis = Basis(basis_set_shells, basis_set_cxx, 
-    StdVector{JERI.ShellPair}(), basis, 
-    basis_set_norb, basis_set_nels)   
+    auxillary_basis_set_cxx = JERI.BasisSet(mol.mol_cxx, auxillary_shells_cxx)
+    auxillary_basis_set::Basis = Basis(auxillary_basis_set_shells, auxillary_basis_set_cxx, 
+    StdVector{JERI.ShellPair}(), auxillary_basis, 
+    auxillary_basis_set_norb, basis_set_nels)   
     
     precompute_shell_pair_data(auxillary_basis_set.shpdata_cxx, auxillary_basis_set.basis_cxx)
 
-    return_val = mol, CalculationBasisSets(basis_set,auxillary_basis_set)
+    return_val = mol, CalculationBasisSets(basis_set, auxillary_basis_set)
   end
 
   if MPI.Comm_rank(comm) == 0 && output >= 2

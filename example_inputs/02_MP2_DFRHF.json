@@ -1,21 +1,23 @@
 {
   "molecule": {
     "geometry": [
-      -1.551007, -0.114520, 0.000000,
-      -1.934259, 0.762503, 0.000000
+      0.00000,       -0.07579,        0.00000,
+      0.86681,        0.60144,        0.00000,
+     -0.86681,        0.60144,        0.00000
     ],
-    "symbols": [ "H", "H"],
+    "symbols": [ "O", "H", "H"],
     "molecular_charge":0
   },
   "driver": "energy",
   "model": {
-    "method": "DFRHF",
-    "basis": "3-21G",
-    "auxillary_basis": "6-31G"
+   
+    "basis": "6-31G",
+    "auxillary_basis": "3-21G"
   },
   "keywords": {
     "scf":{
-      "guess":"sad"
+      "guess":"sad",
+      "method": "DFRHF"
     },
     "prop":{
       "mo energies":true,

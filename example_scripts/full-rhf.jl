@@ -45,22 +45,22 @@ function full_rhf(input_file)
 
     #== calculation driver ==# 
     if driver == "energy"
-      if model["method"] == "RHF" || model["method"] == "DFRHF"
         #== perform scf calculation ==#
         if haskey(keywords, "scf")
+          method = keywords["scf"]["method"]
+          if !(method == "RHF" || method == "DFRHF")
+            throw("Exception: Methods other than RHF and DFRFH are not supported yet!")
+          end
           rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
-            output=2) 
+            output=2,) 
         else
           rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis; 
             output=2) 
-        end
-    
+        end    
         #== compute molecular properties such as dipole moment ==#
-        properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, 
+        properties = JuliaChem.JCRHF.Properties.run(mol, basis.primary, rhf_energy, 
           keywords["prop"]; output=2)
-      else
-        throw("Exception: Methods other than RHF and DFRFH are not supported yet!")
-      end  
+        
     else
       throw("Exception: Only energy calculations are currently supported!")
     end

@@ -167,7 +167,7 @@ function rhf_kernel(mol::Molecule,
     F_eval, F_evec, F_old, workspace_a, workspace_b, workspace_c,
     E_nuc, E_elec, E_old, basis_sets; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele,
-    rmsd=rmsd, load=load, fdiff=fdiff)
+    rmsd=rmsd, load=load, fdiff=fdiff, method=method)
 
   if !converged
     if MPI.Comm_rank(comm) == 0 && output >= 1
@@ -238,7 +238,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
   workspace_c::Vector{Matrix{Float64}}, E_nuc::Float64, E_elec::Float64, 
   E_old::Float64, basis_sets::CalculationBasisSets;
   output::Int64, debug::Bool, niter::Int, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool)
+  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, method)
   basis = basis_sets.primary
   #== read in some more variables from scf flags input ==#
   nsh = length(basis)
@@ -295,7 +295,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
     D_old, ΔD, D_input, scf_converged, FDS, 
     schwarz_bounds, Dsh; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele, 
-    rmsd=rmsd, load=load, fdiff=fdiff)
+    rmsd=rmsd, load=load, fdiff=fdiff, method)
   #== we are done! ==#
   if debug
     h5write("debug.h5","RHF/Iteration-Final/F", F)
@@ -323,9 +323,9 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   ΔD::Matrix{Float64}, D_input::Matrix{Float64}, scf_converged::Bool,  
   FDS::Matrix{Float64}, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64}; 
-  output, debug, niter, ndiis, dele, rmsd, load, fdiff)
+  output, debug, niter, ndiis, dele, rmsd, load, fdiff, method)
   basis = basis_sets.primary
-
+  auxillary_basis = basis_sets.auxillary
   #== initialize a few more variables ==#
   comm=MPI.COMM_WORLD
 
@@ -350,9 +350,10 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     for thread in 1:nthreads ]
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
-  
-  jeri_engine_thread = [ JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
-    for thread in 1:nthreads ]
+  engine = method != Methods.DFRHF ? 
+  JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) : 
+  JERI.DFRHFTEIEngine(basis.basis_cxx, auxillary_basis.basis_cxx, basis.shpdata_cxx, auxillary_basis.shpdata_cxx)
+  jeri_engine_thread = [ engine for thread in 1:nthreads ]
   
   while !iter_converged
     #== reset eri arrays ==#
@@ -402,27 +403,18 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   
     #== build new Fock matrix ==#
-    workspace_a .= fock_build(workspace_b, F_thread, D_input, H, basis_sets, 
-      schwarz_bounds, Dsh, eri_quartet_batch_thread, jeri_engine_thread, 
-      iter, cutoff, debug, load)
-
-    workspace_b .= MPI.Allreduce(workspace_a,MPI.SUM,comm)
-    MPI.Barrier(comm)
-
-    if debug && MPI.Comm_rank(comm) == 0
-      h5write("debug.h5","RHF/Iteration-$iter/F/Skeleton", workspace_b)
-    end
- 
-    if fdiff 
-      ΔF .= workspace_b
-      F_cumul .+= ΔF
-      F .= F_cumul .+ H
+    if method == Methods.RHF
+      rfh_fock_build(workspace_a, workspace_b, F, 
+      F_thread, D, 
+      H, basis_sets, 
+      schwarz_bounds, Dsh,
+      eri_quartet_batch_thread, 
+      jeri_engine_thread, iter,
+      cutoff, debug, load, fdiff, ΔF, F_cumul)
+    elseif method == Methods.DFRHF
+      df_rfh_fock_build(jeri_engine_thread, basis_sets, eri_quartet_batch_thread[1])
     else
-      LinearAlgebra.BLAS.axpy!(1.0, H, workspace_b) 
-      LinearAlgebra.BLAS.blascopy!(length(workspace_b), workspace_b, 1, 
-        F, 1) 
-  
-      #F .= workspace_b .+ H
+      throw(exit("Selected RHF method, ($method), not supported"))
     end
 
     if debug && MPI.Comm_rank(comm) == 0
@@ -516,10 +508,65 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
  
   return E
 end
+#== Restricted Hartree-Fock, Fock build step ==#
+function rfh_fock_build(workspace_a, workspace_b, F, 
+  F_thread, D, 
+  H, basis_sets, 
+  schwarz_bounds, Dsh,
+  eri_quartet_batch_thread, 
+  jeri_engine_thread, iter,
+  cutoff, debug, load, fdiff, ΔF, F_cumul)
 
+  workspace_a .= run_rfh_fock_build_kernel(F, 
+  F_thread, D, 
+  H, basis_sets, 
+  schwarz_bounds, Dsh,
+  eri_quartet_batch_thread, 
+  jeri_engine_thread, iter,
+  cutoff, debug, load)
+
+  workspace_b .= MPI.Allreduce(workspace_a,MPI.SUM,MPI.COMM_WORLD)
+  MPI.Barrier(MPI.COMM_WORLD)
+
+  if debug && MPI.Comm_rank(MPI.COMM_WORLD) == 0
+    h5write("debug.h5","RHF/Iteration-$iter/F/Skeleton", workspace_b)
+  end
+
+  if fdiff 
+    ΔF .= workspace_b
+    F_cumul .+= ΔF
+    F .= F_cumul .+ H
+  else
+    LinearAlgebra.BLAS.axpy!(1.0, H, workspace_b) 
+    LinearAlgebra.BLAS.blascopy!(length(workspace_b), workspace_b, 1, 
+      F, 1) 
+
+    #F .= workspace_b .+ H
+  end
+  return F
+end
+#== Density Fitted Restricted Hartree-Fock, Fock build step ==#
+function df_rfh_fock_build(jeri_engine_thread, basis_sets::CalculationBasisSets, eri_block::Vector{Float64}) 
+  println("entering df_rfh_fock_build")
+  auxillary_basis_shells_count = length(basis_sets.auxillary)
+  basis_shells_count = length(basis_sets.primary)
+  println("auxillary_basis_shells_count $auxillary_basis_shells_count")
+  println("basis_shells_count $basis_shells_count")
+
+  for s1 in 1:auxillary_basis_shells_count
+    for s2 in 1:basis_shells_count
+      for s3 in 1:basis_shells_count
+        JERI.compute_eri_block_df(jeri_engine_thread[1],
+                                s1, -1, s2, s3,
+                                0, 0,
+                                0, 0)
+      end
+    end
+  end
+end
 #=
 """
-	 fock_build(F::Array{Float64}, D::Array{Float64}, tei::Array{Float64}, H::Array{Float64})
+	 run_rfh_fock_build_kernel(F::Array{Float64}, D::Array{Float64}, tei::Array{Float64}, H::Array{Float64})
 Summary
 ======
 Perform Fock build step.
@@ -536,7 +583,7 @@ H = One-electron Hamiltonian Matrix
 """
 =#
 
-@inline function fock_build(F::Matrix{Float64}, 
+@inline function run_rfh_fock_build_kernel(F::Matrix{Float64}, 
   F_thread::Vector{Matrix{Float64}}, D::Matrix{Float64}, 
   H::Matrix{Float64}, basis_sets::CalculationBasisSets, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64},
@@ -561,6 +608,7 @@ H = One-electron Hamiltonian Matrix
   batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)*
     Threads.nthreads()*batches_per_thread))
 
+  #== sequential method is here for debugging, not reccomended for actual calculations ==#
   if load == "sequential"
     #== set up initial indices ==#                                              
     stride = 1                                  

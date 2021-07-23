@@ -8,6 +8,7 @@ wave function for closed-shell systems.
 module Energy 
 
 using JuliaChem.JCModules
+using JuliaChem.JCRHF.Constants
 using JuliaChem.JERI
 
 using MPI
@@ -45,7 +46,7 @@ scf = RHF.run(input_info, basis)
 ```
 """
 function run(mol::Molecule, basis_sets::CalculationBasisSets, 
-  scf_flags = Dict(); output=0)
+  scf_flags = Dict(); output=0, method=Methods.RHF)
   
   comm=MPI.COMM_WORLD
 

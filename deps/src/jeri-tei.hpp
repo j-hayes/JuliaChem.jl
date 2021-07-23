@@ -37,7 +37,7 @@ public:
                       max_l,
                       0)
   {
-    m_coulomb_eng.set_precision(0.0);
+    m_coulomb_eng.set_precision(0.0); // no screening in the c++ engine
   };
 
   ~TEIEngine(){};
@@ -95,10 +95,12 @@ public:
 
 class DFRHFTEIEngine : public TEIEngine
 {
+ 
+public:
+
   const libint2::BasisSet *m_auxillary_basis_set;
   const libint2::ShellPair *m_auxillary_shellpair_data;
 
-public:
   //-- ctors and dtors --//
   DFRHFTEIEngine(
       const libint2::BasisSet &t_basis_set,
@@ -118,28 +120,31 @@ public:
 
   //-- compute_eri_block --//
   //-- ash, bsh, csh, dsh, are shell indicies --//
-  inline bool compute_eri_block(jlcxx::ArrayRef<double> eri_block,
-                                julia_int ash, julia_int bsh, julia_int csh, julia_int dsh,
+  inline bool compute_eri_block_df(julia_int ash, julia_int bsh, julia_int csh, julia_int dsh,
                                 julia_int bra_idx, julia_int ket_idx,
                                 julia_int absize, julia_int cdsize)
   {
-    auto unitShell = libint2::Shell::unit();
+    auto unitShell = libint2::Shell::unit();    
     m_coulomb_eng.compute2<libint2::Operator::coulomb,
                            libint2::BraKet::xs_xx, 0>((*m_auxillary_basis_set)[ash - 1], unitShell,
                                                       (*m_basis_set)[csh - 1], (*m_basis_set)[dsh - 1]);
+    std::cout << "(dfbs[" << ash-1 << "], unitshell||obs[" << csh-1 << "], obs["<< dsh-1 << "]) = " << *m_coulomb_eng.results()[0] << std::endl;
 
     if (m_coulomb_eng.results()[0] != nullptr)
     {
-      memcpy(eri_block.data(), m_coulomb_eng.results()[0],
-             absize * cdsize * sizeof(double));
-
       return false;
+
+      // memcpy(eri_block.data(), m_coulomb_eng.results()[0],
+      //        absize * cdsize * sizeof(double));
+
+      // return false;
     }
     else
     {
       //memset(eri_block.data(), 0.0, absize*cdsize*sizeof(double));
       return true;
     }
+    
   }
 };
 
