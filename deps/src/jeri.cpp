@@ -66,6 +66,7 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
                    const libint2::BasisSet &,
                    const std::vector<libint2::ShellPair>,
                    const std::vector<libint2::ShellPair> &>()
-      .method("compute_eri_block", &DFRHFTEIEngine::compute_eri_block);
+      .method("compute_eri_block", &DFRHFTEIEngine::compute_eri_block)
+      .method("compute_two_center_eri_block", &DFRHFTEIEngine::compute_two_center_eri_block);
 } 
 

@@ -24,5 +24,5 @@ module JERI
   
   export TEIEngine, compute_eri_block
   export RHFTEIEngine, compute_eri_block
-  export DFRHFTEIEngine, compute_eri_block
+  export DFRHFTEIEngine, compute_eri_block, compute_two_center_eri_block
 end

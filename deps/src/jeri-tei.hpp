@@ -95,11 +95,11 @@ public:
 
 class DFRHFTEIEngine : public TEIEngine
 {
- 
-public:
 
+public:
   const libint2::BasisSet *m_auxillary_basis_set;
   const libint2::ShellPair *m_auxillary_shellpair_data;
+  libint2::Engine m_two_center_engine;
 
   //-- ctors and dtors --//
   DFRHFTEIEngine(
@@ -108,11 +108,13 @@ public:
       const std::vector<libint2::ShellPair> &t_shellpair_data,
       const std::vector<libint2::ShellPair> &t_auxillary_shellpair_data)
       : TEIEngine(t_basis_set, t_shellpair_data, (int)std::max(t_basis_set.max_nprim(), t_auxillary_basis_set.max_nprim()),
-                  (int)std::max(t_basis_set.max_l(), t_auxillary_basis_set.max_l())) 
-                  {
-                      m_auxillary_basis_set = &t_auxillary_basis_set;
-                      m_auxillary_shellpair_data = t_auxillary_shellpair_data.data();                      
-                  }
+                  (int)std::max(t_basis_set.max_l(), t_auxillary_basis_set.max_l()))
+  {
+    m_two_center_engine = libint2::Engine(libint2::Operator::coulomb,
+                                          t_basis_set.max_nprim(), t_basis_set.max_l(), 0);
+    m_auxillary_basis_set = &t_auxillary_basis_set;
+    m_auxillary_shellpair_data = t_auxillary_shellpair_data.data();
+  }
 
   ~DFRHFTEIEngine(){};
 
@@ -124,11 +126,11 @@ public:
                                 julia_int bra_idx, julia_int ket_idx,
                                 julia_int absize, julia_int cdsize)
   {
-    auto unitShell = libint2::Shell::unit();    
+    auto unitShell = libint2::Shell::unit();
     m_coulomb_eng.compute2<libint2::Operator::coulomb,
                            libint2::BraKet::xs_xx, 0>((*m_auxillary_basis_set)[ash - 1], unitShell,
                                                       (*m_basis_set)[csh - 1], (*m_basis_set)[dsh - 1]);
-    std::cout << "(dfbs[" << ash-1 << "], unitshell||obs[" << csh-1 << "], obs["<< dsh-1 << "]) = " << *m_coulomb_eng.results()[0] << std::endl;
+    std::cout << "(dfbs[" << ash - 1 << "], unitshell||obs[" << csh - 1 << "], obs[" << dsh - 1 << "]) = " << *m_coulomb_eng.results()[0] << std::endl;
     if (m_coulomb_eng.results()[0] != nullptr)
     {
       return false;
@@ -143,7 +145,12 @@ public:
       //memset(eri_block.data(), 0.0, absize*cdsize*sizeof(double));
       return true;
     }
-    
+  }
+  inline bool compute_two_center_eri_block(julia_int ash, julia_int bsh)
+  {
+    m_two_center_engine.compute((*m_auxillary_basis_set)[ash - 1], (*m_auxillary_basis_set)[bsh - 1]);
+    std::cout << "(obs[" << ash - 1 << "]||obs[" << bsh - 1 << "]) = " << *m_two_center_engine.results()[0] << std::endl;
+    return false;
   }
 };
 

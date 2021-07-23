@@ -412,7 +412,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jeri_engine_thread, iter,
       cutoff, debug, load, fdiff, ΔF, F_cumul)
     elseif method == Methods.DFRHF
-      df_rfh_fock_build(jeri_engine_thread, basis_sets, eri_quartet_batch_thread[1])
+      df_rfh_fock_build(engine, basis_sets, eri_quartet_batch_thread[1])
     else
       throw(exit("Selected RHF method, ($method), not supported"))
     end
@@ -546,7 +546,7 @@ function rfh_fock_build(workspace_a, workspace_b, F,
   return F
 end
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rfh_fock_build(jeri_engine_thread, basis_sets::CalculationBasisSets, eri_block::Vector{Float64}) 
+function df_rfh_fock_build(engine::DFRHFTEIEngine, basis_sets::CalculationBasisSets, eri_block::Vector{Float64}) 
   auxillary_basis_shells_count = length(basis_sets.auxillary)
   basis_shells_count = length(basis_sets.primary)
   s123 = 1
@@ -554,14 +554,24 @@ function df_rfh_fock_build(jeri_engine_thread, basis_sets::CalculationBasisSets,
     n1 = basis_sets.auxillary.shells[s1].nbas
     for s2 in 1:basis_shells_count
       for s3 in 1:basis_shells_count
-        JERI.compute_eri_block(jeri_engine_thread[1],
+        JERI.compute_eri_block(engine,
                                 s1, -1, s2, s3,
                                 0, 0,
                                 0, 0)
       end
     end
   end
+  println("calculating 2 center 2 electron integrals")
+  for s1 in 1:auxillary_basis_shells_count
+    for s2 in 1:s1
+      JERI.compute_two_center_eri_block(engine, s1, s2)
+    end 
+  end 
+  exit()
 end
+
+
+
 #=
 """
 	 run_rfh_fock_build_kernel(F::Array{Float64}, D::Array{Float64}, tei::Array{Float64}, H::Array{Float64})
