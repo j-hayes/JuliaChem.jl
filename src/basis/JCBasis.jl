@@ -128,8 +128,11 @@ function run(molecule, model; output="none")
       pos, basis_set_norb, shell_id = add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbol, basis, 
       shell_am_mapping, atom_idx, atomic_number, pos, atom_center, basis_set_norb, shell_id, output)
 
-      auxillary_pos, auxillary_basis_set_norb, auxillary_shell_id = add_shells!(bsed, auxillary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxillary_basis, 
-      shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxillary_basis_set_norb, auxillary_shell_id, output)
+      if build_auxillary 
+        auxillary_pos, auxillary_basis_set_norb, auxillary_shell_id = add_shells!(bsed, auxillary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxillary_basis, 
+        shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxillary_basis_set_norb, auxillary_shell_id, output)  
+        auxillary_shells_cxx_added[atomic_number+1] = true 
+      end
       
       shells_cxx_added[atomic_number+1] = true 
       #display(shells_cxx)
@@ -148,7 +151,10 @@ function run(molecule, model; output="none")
     println("Basis set: $basis")
     println("Auxillary Basis set: $auxillary_basis")
     println("Number of basis functions: $basis_set_norb")
-    println("Number of auxillary basis functions: $auxillary_basis_set_norb")
+    if build_auxillary
+      println("Number of auxillary basis functions: $auxillary_basis_set_norb")
+    end 
+
     println("Number of electrons: $basis_set_nels")
   end
   
@@ -158,7 +164,7 @@ function run(molecule, model; output="none")
   basis_set_cxx = JERI.BasisSet(mol.mol_cxx, shells_cxx)
   basis_set::Basis = Basis(basis_set_shells, basis_set_cxx, 
     StdVector{JERI.ShellPair}(), basis, 
-    basis_set_norb, auxillary_basis_set_nels)                                       
+    basis_set_norb, basis_set_nels)                                       
 
   precompute_shell_pair_data(basis_set.shpdata_cxx, basis_set.basis_cxx)
   return_val = mol, basis_set

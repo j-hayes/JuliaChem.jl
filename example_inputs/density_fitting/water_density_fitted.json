@@ -9,8 +9,7 @@
     "molecular_charge":0
   },
   "driver": "energy",
-  "model": {
-   
+  "model": {   
     "basis": "6-31G",
     "auxillary_basis": "3-21G"
   },

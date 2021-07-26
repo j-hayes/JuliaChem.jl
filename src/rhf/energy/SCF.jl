@@ -21,7 +21,7 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
   method::String = haskey(scf_flags, "method") ? scf_flags["method"] : Methods.RHF
-
+  println("Jackson -- $method")
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
     niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
     fdiff=fdiff, method=method)

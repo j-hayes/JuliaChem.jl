@@ -17,6 +17,12 @@ using JSON
 using MPI
 using Printf
 
+#allow new CalculationBasisSets to be passed, primary basis will be selected
+function run(mol::Molecule, basis_sets::CalculationBasisSets, rhf_energy, 
+  keywords; output=0)
+  return run(mol, basis_sets.primary, rhf_energy, keywords)
+end
+
 function run(mol::Molecule, basis::Basis, rhf_energy, 
   keywords; output=0)
   
