@@ -12,7 +12,7 @@ module JERI
   export initialize, finalize 
   export Atom, create_atom 
   export Shell, create_shell 
-  export BasisSet 
+  export BasisSet, nbf
   export ShellPair, precompute_shell_pair_data
   
   export OEIEngine 
@@ -24,5 +24,5 @@ module JERI
   
   export TEIEngine, compute_eri_block
   export RHFTEIEngine, compute_eri_block
-  export DFRHFTEIEngine, compute_eri_block, compute_two_center_eri_block
+  export DFRHFTEIEngine, compute_eri_block_df, compute_two_center_eri_block
 end

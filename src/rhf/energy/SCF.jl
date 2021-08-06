@@ -4,6 +4,7 @@ using HDF5
 using PrettyTables
 using Printf
 using JuliaChem.JCRHF.Constants
+using TensorOperations
 
 const do_continue_print = false 
 const print_eri = false 
@@ -412,7 +413,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jeri_engine_thread, iter,
       cutoff, debug, load, fdiff, ΔF, F_cumul)
     elseif method == Methods.DFRHF
-      df_rfh_fock_build(engine, basis_sets, eri_quartet_batch_thread[1])
+      df_rfh_fock_build(engine, basis_sets)
     else
       throw(exit("Selected RHF method, ($method), not supported"))
     end
@@ -546,27 +547,46 @@ function rfh_fock_build(workspace_a, workspace_b, F,
   return F
 end
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rfh_fock_build(engine::DFRHFTEIEngine, basis_sets::CalculationBasisSets, eri_block::Vector{Float64}) 
+function df_rfh_fock_build(engine::DFRHFTEIEngine,
+  basis_sets::CalculationBasisSets) 
   auxillary_basis_shells_count = length(basis_sets.auxillary)
   basis_shells_count = length(basis_sets.primary)
+  n_df = JERI.nbf(basis_sets.auxillary.basis_cxx)
+  n = JERI.nbf(basis_sets.primary.basis_cxx)
+  Zxy = Vector{Float64}(undef, n_df*n*n)
   s123 = 1
+  i = 0
+  j= 1 
   for s1 in 1:auxillary_basis_shells_count
     n1 = basis_sets.auxillary.shells[s1].nbas
     for s2 in 1:basis_shells_count
+      n2 = basis_sets.primary.shells[s2].nbas
+      n12 = n1 * n2
       for s3 in 1:basis_shells_count
-        JERI.compute_eri_block(engine,
-                                s1, -1, s2, s3,
-                                0, 0,
-                                0, 0)
+        n3 = basis_sets.primary.shells[s3].nbas
+        n123 = n12 * n3
+        JERI.compute_eri_block_df(engine, Zxy, s1, s2, s3, n123, i)
+        println("s1 = $s1 s2 = $s2 s3 = $s3 n123 = $n123")
+        i += n123
       end
     end
   end
-  println("calculating 2 center 2 electron integrals")
+  display(Zxy)
+  exit()
+
+  eri_block_2_center = Array{Float64}(undef, auxillary_basis_shells_count, auxillary_basis_shells_count)
   for s1 in 1:auxillary_basis_shells_count
     for s2 in 1:s1
-      JERI.compute_two_center_eri_block(engine, s1, s2)
+      integral_value = JERI.compute_two_center_eri_block(engine, s1, s2)
+      println("$integral_value")
+      eri_block_2_center[s1, s2] = integral_value
+      if s1 != s2 
+        eri_block_2_center[s2, s1] = integral_value
+      end
     end 
   end 
+  
+
   exit()
 end
 

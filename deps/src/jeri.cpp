@@ -20,9 +20,10 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
 
   //-- basis set information --//
   mod.add_type<libint2::BasisSet>("BasisSet")
-    .constructor<const std::vector<libint2::Atom>&, 
-      const std::vector<std::vector<libint2::Shell> >& >();
-   
+      .constructor<const std::vector<libint2::Atom> &,
+                   const std::vector<std::vector<libint2::Shell>> &>()
+                   .method("nbf", &libint2::BasisSet::nbf);
+
   //-- shell pair information --//
   mod.add_type<libint2::ShellPair>("ShellPair");
   jlcxx::stl::apply_stl<libint2::ShellPair>(mod);
@@ -53,8 +54,7 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
   mod.add_type<TEIEngine>("TEIEngine")
       .constructor<const libint2::BasisSet &,
                    const std::vector<libint2::ShellPair>,
-                   const int, const int &>()
-      .method("compute_eri_block", &TEIEngine::compute_eri_block);
+                   const int, const int &>();
 
   mod.add_type<RHFTEIEngine>("RHFTEIEngine")
       .constructor<const libint2::BasisSet &,
@@ -66,7 +66,7 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
                    const libint2::BasisSet &,
                    const std::vector<libint2::ShellPair>,
                    const std::vector<libint2::ShellPair> &>()
-      .method("compute_eri_block", &DFRHFTEIEngine::compute_eri_block)
+      .method("compute_eri_block_df", &DFRHFTEIEngine::compute_eri_block_df)
       .method("compute_two_center_eri_block", &DFRHFTEIEngine::compute_two_center_eri_block);
 } 
 
