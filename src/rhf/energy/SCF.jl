@@ -566,26 +566,37 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
         n3 = basis_sets.primary.shells[s3].nbas
         n123 = n12 * n3
         JERI.compute_eri_block_df(engine, Zxy, s1, s2, s3, n123, i)
-        println("s1 = $s1 s2 = $s2 s3 = $s3 n123 = $n123")
         i += n123
       end
     end
   end
   display(Zxy)
-  exit()
-
-  eri_block_2_center = Array{Float64}(undef, auxillary_basis_shells_count, auxillary_basis_shells_count)
-  for s1 in 1:auxillary_basis_shells_count
-    for s2 in 1:s1
-      integral_value = JERI.compute_two_center_eri_block(engine, s1, s2)
-      println("$integral_value")
-      eri_block_2_center[s1, s2] = integral_value
-      if s1 != s2 
-        eri_block_2_center[s2, s1] = integral_value
-      end
+  println()
+  eri_block_2_center = zeros(n_df*n_df)
+  eri_block_2_center_matrix = zeros((n_df,n_df))
+  shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
+  for shell_1_index in 1:auxillary_basis_shells_count
+    shell_1_basis_count = basis_sets.auxillary.shells[shell_1_index].nbas
+    for shell_2_index in 1:shell_1_index
+      shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
+      println("shell_1_index: $shell_1_index shell_2_index $shell_2_index shell_1_basis_count $shell_1_basis_count shell_2_basis_count $shell_2_basis_count ")
+      vector = JERI.compute_two_center_eri_block(engine, eri_block_2_center, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
+      display(reshape(vector, (shell_1_basis_count,shell_2_basis_count)))
+      println()
+      value_index = 1
+      index1_start = Int64(shell2bf[shell_1_index]) + 1
+      index2_start = Int64(shell2bf[shell_2_index]) + 1 
+      eri_block_2_center_matrix[index1_start:index1_start+shell_1_basis_count-1, index2_start:index2_start+shell_2_basis_count-1] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
+      # for i in shell_1_index:shell_1_index+shell_1_basis_count
+      #   for j in shell_2_index:shell_2_index+shell_2_basis_count         
+      #     eri_block_2_center_matrix[i,j] = abs(vector[value_index]) > .001 ? vector[value_index] : 0
+      #     value_index += 1
+      #   end 
+      # end
+      display(eri_block_2_center_matrix)
+      println()
     end 
-  end 
-  
+  end  
 
   exit()
 end

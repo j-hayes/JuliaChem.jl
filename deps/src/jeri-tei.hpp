@@ -128,7 +128,7 @@ public:
                                                       (*m_basis_set)[csh - 1], (*m_basis_set)[dsh - 1]);
     if (m_coulomb_eng.results()[0] != nullptr)
     {     
-      std::copy(m_coulomb_eng.results()[0], m_coulomb_eng.results()[0] + copy_size, eri_block.data() + memory_skip);     
+      std::copy(m_coulomb_eng.results()[0], m_coulomb_eng.results()[0] + copy_size, eri_block.data() + memory_skip);    
       return false;
     }
     else
@@ -137,18 +137,46 @@ public:
     }
   }
 
-  inline double compute_two_center_eri_block(julia_int ash, julia_int bsh)
-  {
-    m_two_center_engine.compute((*m_auxillary_basis_set)[ash - 1], (*m_auxillary_basis_set)[bsh - 1]);
+  inline std::vector<double> compute_two_center_eri_block(jlcxx::ArrayRef<double> eri_block, 
+  julia_int shell_1_index,
+  julia_int shell_2_index,
+  julia_int shell_1_basis_count,
+  julia_int shell_2_basis_count)
+  {    
+    auto shell2bf = (*m_auxillary_basis_set).shell2bf();
+    int n_basis_functions  =(*m_auxillary_basis_set).nbf();
+    m_two_center_engine.compute((*m_auxillary_basis_set)[shell_1_index], (*m_auxillary_basis_set)[shell_2_index]);
+    std::vector<double> v1(shell_1_basis_count* shell_2_basis_count);
     if (m_two_center_engine.results()[0] != nullptr)
     { 
-      return *m_two_center_engine.results()[0];
+      auto basis_1_index = shell2bf[shell_1_index];  //index of first basis function in shell
+      auto basis_2_index = shell2bf[shell_2_index];
+      int result_buffer_index = 0;
+      
+      
+      for(int i = 0; i < shell_1_basis_count* shell_2_basis_count; i++)
+      {
+          v1[i] = *(m_two_center_engine.results()[0] + i);
+      }
+
+      // for(int i = basis_1_index; i < basis_1_index + shell_1_basis_count; i++){
+      //   for(int j = basis_2_index; j < basis_2_index + shell_2_basis_count; j++){
+      //     int data_index = j*n_basis_functions + i;
+      //     eri_block.data()[data_index] = *(m_two_center_engine.results()[0] + result_buffer_index++);
+      //     if(i!=j){
+      //       data_index = i*n_basis_functions + j;
+      //       eri_block.data()[data_index] = 15;
+      //       result_buffer_index++;
+      //     }
+
+      //   }
+      //}
+
     }
     else
     {
-      //memset(eri_block.data(), 0.0, absize*cdsize*sizeof(double));
-      return nan(""); 
     }
+    return v1;
   }
 };
 

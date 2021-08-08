@@ -22,7 +22,8 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
   mod.add_type<libint2::BasisSet>("BasisSet")
       .constructor<const std::vector<libint2::Atom> &,
                    const std::vector<std::vector<libint2::Shell>> &>()
-                   .method("nbf", &libint2::BasisSet::nbf);
+                   .method("nbf", &libint2::BasisSet::nbf)
+                   .method("shell2bf", &libint2::BasisSet::shell2bf);
 
   //-- shell pair information --//
   mod.add_type<libint2::ShellPair>("ShellPair");
