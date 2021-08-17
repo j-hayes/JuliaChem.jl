@@ -151,27 +151,12 @@ public:
     { 
       auto basis_1_index = shell2bf[shell_1_index];  //index of first basis function in shell
       auto basis_2_index = shell2bf[shell_2_index];
-      int result_buffer_index = 0;
-      
+      int result_buffer_index = 0;      
       
       for(int i = 0; i < shell_1_basis_count* shell_2_basis_count; i++)
       {
           v1[i] = *(m_two_center_engine.results()[0] + i);
       }
-
-      // for(int i = basis_1_index; i < basis_1_index + shell_1_basis_count; i++){
-      //   for(int j = basis_2_index; j < basis_2_index + shell_2_basis_count; j++){
-      //     int data_index = j*n_basis_functions + i;
-      //     eri_block.data()[data_index] = *(m_two_center_engine.results()[0] + result_buffer_index++);
-      //     if(i!=j){
-      //       data_index = i*n_basis_functions + j;
-      //       eri_block.data()[data_index] = 15;
-      //       result_buffer_index++;
-      //     }
-
-      //   }
-      //}
-
     }
     else
     {

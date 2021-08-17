@@ -579,24 +579,31 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
     shell_1_basis_count = basis_sets.auxillary.shells[shell_1_index].nbas
     for shell_2_index in 1:shell_1_index
       shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
-      println("shell_1_index: $shell_1_index shell_2_index $shell_2_index shell_1_basis_count $shell_1_basis_count shell_2_basis_count $shell_2_basis_count ")
       vector = JERI.compute_two_center_eri_block(engine, eri_block_2_center, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
-      display(reshape(vector, (shell_1_basis_count,shell_2_basis_count)))
-      println()
       value_index = 1
       index1_start = Int64(shell2bf[shell_1_index]) + 1
       index2_start = Int64(shell2bf[shell_2_index]) + 1 
       eri_block_2_center_matrix[index1_start:index1_start+shell_1_basis_count-1, index2_start:index2_start+shell_2_basis_count-1] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
-      # for i in shell_1_index:shell_1_index+shell_1_basis_count
-      #   for j in shell_2_index:shell_2_index+shell_2_basis_count         
-      #     eri_block_2_center_matrix[i,j] = abs(vector[value_index]) > .001 ? vector[value_index] : 0
-      #     value_index += 1
-      #   end 
-      # end
-      display(eri_block_2_center_matrix)
-      println()
     end 
   end  
+  eri_block_2_center_matrix = Symmetric(eri_block_2_center_matrix, :L)
+  println()
+  LLT_2_center = cholesky(eri_block_2_center_matrix)
+  println("LLT_2_center")
+  display(LLT_2_center)
+  two_center_cholesky_lower = LLT_2_center.L
+  println("two_center_cholesky_lower")
+  display(two_center_cholesky_lower)
+
+  Linv_t = transpose(two_center_cholesky_lower \I)
+  println("LLT_2_center")
+  display(Linv_t)
+  println()
+  # println("3-center integrals")
+  # display(Zxy)
+  # println("2-center integrals")
+  # display(eri_block_2_center_matrix)
+
 
   exit()
 end

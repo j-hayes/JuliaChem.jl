@@ -44,7 +44,7 @@ function full_rhf(input_file)
     if driver == "energy"
         #== perform scf calculation ==#
         if haskey(keywords, "scf")
-          method = keywords["scf"]["method"]
+          method = "RHF"
           if !(method == "RHF" || method == "DFRHF")
             throw("Exception: Methods other than RHF and DFRFH are not supported yet!")
           end
