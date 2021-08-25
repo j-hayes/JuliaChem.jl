@@ -342,7 +342,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   #=================================#
   iter = 1
   iter_converged = false
-
   nthreads = Threads.nthreads()
   
   max_am = max_ang_mom(basis) 
@@ -413,7 +412,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jeri_engine_thread, iter,
       cutoff, debug, load, fdiff, ΔF, F_cumul)
     elseif method == Methods.DFRHF
-      df_rfh_fock_build(engine, basis_sets)
+      electrons_count = Int64(basis_sets.primary.nels)
+      F = H + df_rfh_fock_build(engine, basis_sets, C[:,1:electrons_count÷2])
     else
       throw(exit("Selected RHF method, ($method), not supported"))
     end
@@ -548,7 +548,7 @@ function rfh_fock_build(workspace_a, workspace_b, F,
 end
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 function df_rfh_fock_build(engine::DFRHFTEIEngine,
-  basis_sets::CalculationBasisSets) 
+  basis_sets::CalculationBasisSets, Cocc) 
   auxillary_basis_shells_count = length(basis_sets.auxillary)
   basis_shells_count = length(basis_sets.primary)
   n_df = JERI.nbf(basis_sets.auxillary.basis_cxx)
@@ -570,8 +570,9 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
       end
     end
   end
-  display(Zxy)
-  println()
+  # display(Zxy)
+  three_center_tensor = reshape(Zxy, (n_df,n,n))
+  # println()
   eri_block_2_center = zeros(n_df*n_df)
   eri_block_2_center_matrix = zeros((n_df,n_df))
   shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
@@ -587,25 +588,40 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
     end 
   end  
   eri_block_2_center_matrix = Symmetric(eri_block_2_center_matrix, :L)
-  println()
+  # println()
   LLT_2_center = cholesky(eri_block_2_center_matrix)
-  println("LLT_2_center")
-  display(LLT_2_center)
+  # println("LLT_2_center")
+  # display(LLT_2_center)
   two_center_cholesky_lower = LLT_2_center.L
-  println("two_center_cholesky_lower")
-  display(two_center_cholesky_lower)
+  # println("two_center_cholesky_lower")
+  # display(two_center_cholesky_lower)
 
-  Linv_t = transpose(two_center_cholesky_lower \I)
-  println("LLT_2_center")
-  display(Linv_t)
-  println()
-  # println("3-center integrals")
-  # display(Zxy)
-  # println("2-center integrals")
-  # display(eri_block_2_center_matrix)
+  Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
+  # typeof(Linv_t)
+  # println("LLT_2_center")
+  # display(Linv_t)
+  # println()
+  nocc = size(Cocc, 2)
+  xyK = zeros(n, n, n_df);
 
+  TensorOperations.tensorcontract!(1.0, three_center_tensor, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5));
 
-  exit()
+  # println("xyK[1,1,1] = $(xyK[1,1,1])")
+  # A = reshape(xyK, (n*n*n_df,1))
+  # for val in A 
+  #   println("$(val)")
+  # end
+  
+  xiK = zeros(n, nocc, n_df)
+  TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  Cocc, (2,4), 'N', 0.0, xiK, (1,4,3))
+
+  G = zeros(n,n)
+  TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, G, (1, 4))
+
+  Jtmp = zeros(n_df)
+  TensorOperations.tensorcontract!(1.0, xiK, (1, 2, 3), 'N', Cocc, (1, 2),  'N',  0.0, Jtmp, (3))
+  TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, G, (1, 2))
+  return G
 end
 
 
