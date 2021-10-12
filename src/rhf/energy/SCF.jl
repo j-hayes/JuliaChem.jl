@@ -553,25 +553,51 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
   basis_shells_count = length(basis_sets.primary)
   n_df = JERI.nbf(basis_sets.auxillary.basis_cxx)
   n = JERI.nbf(basis_sets.primary.basis_cxx)
-  Zxy = Vector{Float64}(undef, n_df*n*n)
+  Zxy_Matrix = Array{Float64}(undef, (n_df,n,n))
   s123 = 1
-  i = 0
-  j= 1 
+  
+  j= 1   
   for s1 in 1:auxillary_basis_shells_count
     n1 = basis_sets.auxillary.shells[s1].nbas
+    bf_1_pos = basis_sets.auxillary.shells[s1].pos
     for s2 in 1:basis_shells_count
       n2 = basis_sets.primary.shells[s2].nbas
+      bf_2_pos = basis_sets.auxillary.shells[s2].pos
       n12 = n1 * n2
       for s3 in 1:basis_shells_count
         n3 = basis_sets.primary.shells[s3].nbas
+        bf_3_pos = basis_sets.primary.shells[s3].pos
         n123 = n12 * n3
-        JERI.compute_eri_block_df(engine, Zxy, s1, s2, s3, n123, i)
-        i += n123
+        temp = Vector{Float64}(undef, n123)
+        Zxy_view = view(Zxy_Matrix, 
+          bf_1_pos:bf_1_pos+n1-1, 
+          bf_2_pos:bf_2_pos+n2-1, 
+          bf_3_pos:bf_3_pos+n3-1 
+          )
+        JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
+        for ii in 1:n123
+          Zxy_view[ii] = temp[ii]
+        end        
       end
     end
   end
   # display(Zxy)
-  three_center_tensor = reshape(Zxy, (n_df,n,n))
+  #three_center_tensor = reshape(Zxy, (n_df,n,n))
+
+  # for ii in 1:n*n*n_df 
+  #   #index = (k-1) + n*((j-1)+ n*(i-1))
+  #   println("$ii $(Zxy[ii])")
+  # end 
+
+  # for i in 1:n_df 
+  #   for j in 1:n 
+  #     for k in 1:n 
+  #       #index = (k-1) + n*((j-1)+ n*(i-1))
+  #       println("$i,$j,$k $(Zxy_Matrix[i,j,k])")
+  #     end 
+  #   end 
+  # end 
+  
   # println()
   eri_block_2_center = zeros(n_df*n_df)
   eri_block_2_center_matrix = zeros((n_df,n_df))
@@ -604,7 +630,7 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
   nocc = size(Cocc, 2)
   xyK = zeros(n, n, n_df);
 
-  TensorOperations.tensorcontract!(1.0, three_center_tensor, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5));
+  TensorOperations.tensorcontract!(1.0, Zxy_Matrix, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5));
 
   # println("xyK[1,1,1] = $(xyK[1,1,1])")
   # A = reshape(xyK, (n*n*n_df,1))
