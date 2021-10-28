@@ -413,7 +413,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       cutoff, debug, load, fdiff, ΔF, F_cumul)
     elseif method == Methods.DFRHF
       electrons_count = Int64(basis_sets.primary.nels)
-      F = H + df_rfh_fock_build(engine, basis_sets, C[:,1:electrons_count÷2])
+      F = H + df_rhf_fock_build(engine, basis_sets, C[:,1:electrons_count÷2])
     else
       throw(exit("Selected RHF method, ($method), not supported"))
     end
@@ -547,22 +547,23 @@ function rfh_fock_build(workspace_a, workspace_b, F,
   return F
 end
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rfh_fock_build(engine::DFRHFTEIEngine,
+function df_rhf_fock_build(engine::DFRHFTEIEngine,
   basis_sets::CalculationBasisSets, Cocc) 
   auxillary_basis_shells_count = length(basis_sets.auxillary)
   basis_shells_count = length(basis_sets.primary)
   n_df = JERI.nbf(basis_sets.auxillary.basis_cxx)
   n = JERI.nbf(basis_sets.primary.basis_cxx)
+
   Zxy_Matrix = Array{Float64}(undef, (n_df,n,n))
   s123 = 1
   
-  j= 1   
+  println("check for isnan")   
   for s1 in 1:auxillary_basis_shells_count
     n1 = basis_sets.auxillary.shells[s1].nbas
     bf_1_pos = basis_sets.auxillary.shells[s1].pos
     for s2 in 1:basis_shells_count
       n2 = basis_sets.primary.shells[s2].nbas
-      bf_2_pos = basis_sets.auxillary.shells[s2].pos
+      bf_2_pos = basis_sets.primary.shells[s2].pos
       n12 = n1 * n2
       for s3 in 1:basis_shells_count
         n3 = basis_sets.primary.shells[s3].nbas
@@ -577,6 +578,9 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
         JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
         for ii in 1:n123
           Zxy_view[ii] = temp[ii]
+          if isnan(temp[ii])
+            println("$s1 $s2 $s3 $ii = $(temp[ii])")
+          end
         end        
       end
     end
@@ -613,7 +617,7 @@ function df_rfh_fock_build(engine::DFRHFTEIEngine,
       eri_block_2_center_matrix[index1_start:index1_start+shell_1_basis_count-1, index2_start:index2_start+shell_2_basis_count-1] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
     end 
   end  
-  eri_block_2_center_matrix = Symmetric(eri_block_2_center_matrix, :L)
+  eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
   # println()
   LLT_2_center = cholesky(eri_block_2_center_matrix)
   # println("LLT_2_center")
