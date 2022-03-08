@@ -11,11 +11,11 @@
   "driver": "energy",
   "model": {   
     "basis": "6-31G",
-    "auxillary_basis": "3-21G"
+    "auxillary_basis": "6-31G*"
   },
   "keywords": {
     "scf":{
-      "guess":"sad",
+      "guess":"hcore",
       "method": "DFRHF"
     },
     "prop":{
