@@ -348,6 +348,55 @@ end
   end
 end
 
+
+@inline function axial_normalization_factor(eri_quartet_batch::Array{Float64},
+  μsh::JCModules.Shell, νsh::JCModules.Shell, 
+  λsh::JCModules.Shell,
+  nμ::Int, nν::Int, nλ::Int, μ::Int,ν::Int,λ::Int) 
+
+  amμ = μsh.am
+  amν = νsh.am
+  amλ = λsh.am
+
+  
+  if amμ < 3 && amν < 3 && amλ < 3 
+    return
+  end
+  for μsize::Int64 in 1:(nμ), νsize::Int64 in 1:(nν)
+    
+    
+    μnorm = axial_norm_fact[μsize,amμ]
+    νnorm = axial_norm_fact[νsize,amν]
+    μνnorm = μnorm*νnorm
+    for λsize::Int64 in 1:(nλ)
+      λnorm = axial_norm_fact[λsize,amλ]
+      eri_quartet_batch[μ,ν,λ] *= μνnorm*λnorm
+    end
+  end 
+end
+
+
+@inline function axial_normalization_factor(eri_quartet_batch::Array{Float64}, μsh::JCModules.Shell, νsh::JCModules.Shell, nμ::Int, nν::Int, μ::Int, ν::Int)
+  amμ = μsh.am
+  amν = νsh.am
+
+  if amμ < 3 && amν < 3
+    return
+  end
+  μν = 0 
+  for μsize::Int64 in 1:(nμ), νsize::Int64 in 1:(nν)
+    μν += 1 # will be used when switching to flattened vector representation of 2d array
+
+    μnorm = axial_norm_fact[μsize,amμ]
+    νnorm = axial_norm_fact[νsize,amν]
+
+    μνnorm = μnorm*νnorm 
+  
+    eri_quartet_batch[μ,ν] *= μνnorm
+  end
+end
+
+
 function eri_quartet_batch_size(max_am)
   return am_to_nbas_cart(max_am)^4
 end

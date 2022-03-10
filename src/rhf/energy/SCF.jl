@@ -556,92 +556,70 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
 
   Zxy_Matrix = Array{Float64}(undef, (n_df,n,n))
   s123 = 1
-  
-  println("check for isnan")   
   for s1 in 1:auxillary_basis_shells_count
-    n1 = basis_sets.auxillary.shells[s1].nbas
+    shell_1 = basis_sets.auxillary.shells[s1]
+    shell_1_nbasis = basis_sets.auxillary.shells[s1].nbas
     bf_1_pos = basis_sets.auxillary.shells[s1].pos
+
     for s2 in 1:basis_shells_count
-      n2 = basis_sets.primary.shells[s2].nbas
+      shell_2 = basis_sets.primary.shells[s2]
+      shell_2_nbasis = basis_sets.primary.shells[s2].nbas
       bf_2_pos = basis_sets.primary.shells[s2].pos
-      n12 = n1 * n2
+      n12 = shell_1_nbasis * shell_2_nbasis
+
       for s3 in 1:basis_shells_count
-        n3 = basis_sets.primary.shells[s3].nbas
+        shell_3 = basis_sets.primary.shells[s3]
+        shell_3_nbasis = basis_sets.primary.shells[s3].nbas
         bf_3_pos = basis_sets.primary.shells[s3].pos
-        n123 = n12 * n3
+        n123 = n12 * shell_3_nbasis
+
         temp = Vector{Float64}(undef, n123)
+
         Zxy_view = view(Zxy_Matrix, 
-          bf_1_pos:bf_1_pos+n1-1, 
-          bf_2_pos:bf_2_pos+n2-1, 
-          bf_3_pos:bf_3_pos+n3-1 
-          )
+          bf_1_pos:bf_1_pos+shell_1_nbasis-1, 
+          bf_2_pos:bf_2_pos+shell_2_nbasis-1, 
+          bf_3_pos:bf_3_pos+shell_3_nbasis-1)
+
         JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
+        
         for ii in 1:n123
           Zxy_view[ii] = temp[ii]
-          if isnan(temp[ii])
-            println("$s1 $s2 $s3 $ii = $(temp[ii])")
-          end
         end        
+        axial_normalization_factor(Zxy_Matrix, 
+        shell_1, shell_2, shell_3, 
+        shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
+        s1, s2, s3)
       end
     end
   end
-  # display(Zxy)
-  #three_center_tensor = reshape(Zxy, (n_df,n,n))
 
-  # for ii in 1:n*n*n_df 
-  #   #index = (k-1) + n*((j-1)+ n*(i-1))
-  #   println("$ii $(Zxy[ii])")
-  # end 
-
-  # for i in 1:n_df 
-  #   for j in 1:n 
-  #     for k in 1:n 
-  #       #index = (k-1) + n*((j-1)+ n*(i-1))
-  #       println("$i,$j,$k $(Zxy_Matrix[i,j,k])")
-  #     end 
-  #   end 
-  # end 
-  
-  # println()
   eri_block_2_center = zeros(n_df*n_df)
   eri_block_2_center_matrix = zeros((n_df,n_df))
   shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
   for shell_1_index in 1:auxillary_basis_shells_count
+    shell_1 = basis_sets.auxillary.shells[shell_1_index]
+
     shell_1_basis_count = basis_sets.auxillary.shells[shell_1_index].nbas
     for shell_2_index in 1:shell_1_index
+      shell_2 = basis_sets.auxillary.shells[shell_2_index]
       shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
       vector = JERI.compute_two_center_eri_block(engine, eri_block_2_center, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
-      value_index = 1
       index1_start = Int64(shell2bf[shell_1_index]) + 1
       index2_start = Int64(shell2bf[shell_2_index]) + 1 
       eri_block_2_center_matrix[index1_start:index1_start+shell_1_basis_count-1, index2_start:index2_start+shell_2_basis_count-1] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
+     
+      axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, shell_1_index, shell_2_index)
+    
     end 
   end  
   eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
-  # println()
   LLT_2_center = cholesky(eri_block_2_center_matrix)
-  # println("LLT_2_center")
-  # display(LLT_2_center)
   two_center_cholesky_lower = LLT_2_center.L
-  # println("two_center_cholesky_lower")
-  # display(two_center_cholesky_lower)
-
   Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-  # typeof(Linv_t)
-  # println("LLT_2_center")
-  # display(Linv_t)
-  # println()
   nocc = size(Cocc, 2)
   xyK = zeros(n, n, n_df);
-
   TensorOperations.tensorcontract!(1.0, Zxy_Matrix, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5));
 
-  # println("xyK[1,1,1] = $(xyK[1,1,1])")
-  # A = reshape(xyK, (n*n*n_df,1))
-  # for val in A 
-  #   println("$(val)")
-  # end
-  
   xiK = zeros(n, nocc, n_df)
   TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  Cocc, (2,4), 'N', 0.0, xiK, (1,4,3))
 
@@ -1080,7 +1058,7 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
   #== obtain new orbital coefficients ==#
   BLAS.symm!('L', 'U', 1.0, workspace_b, F_μν, 0.0, workspace_a)
   BLAS.gemm!('N', 'N', 1.0, workspace_a, ortho, 0.0, workspace_b)
- 
+
   F_eval[:], F_evec[:,:] = eigen!(LinearAlgebra.Hermitian(workspace_b)) 
   
   #@views F_evec .= F_evec[:,sortperm(F_eval)] #sort evecs according to sorted evals
