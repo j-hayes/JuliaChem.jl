@@ -350,9 +350,9 @@ end
 
 
 @inline function axial_normalization_factor(eri_quartet_batch::Array{Float64},
-  μsh::JCModules.Shell, νsh::JCModules.Shell, 
-  λsh::JCModules.Shell,
-  nμ::Int, nν::Int, nλ::Int, μ::Int,ν::Int,λ::Int) 
+  μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
+  nμ::Int, nν::Int, nλ::Int,
+  μ::Int,ν::Int,λ::Int) 
 
   amμ = μsh.am
   amν = νsh.am
@@ -363,7 +363,6 @@ end
     return
   end
   for μsize::Int64 in 1:(nμ), νsize::Int64 in 1:(nν)
-    
     
     μnorm = axial_norm_fact[μsize,amμ]
     νnorm = axial_norm_fact[νsize,amν]
@@ -376,7 +375,9 @@ end
 end
 
 
-@inline function axial_normalization_factor(eri_quartet_batch::Array{Float64}, μsh::JCModules.Shell, νsh::JCModules.Shell, nμ::Int, nν::Int, μ::Int, ν::Int)
+@inline function axial_normalization_factor(eri_quartet_batch::Array{Float64},
+  μsh::JCModules.Shell, νsh::JCModules.Shell,
+  nμ::Int, nν::Int, μ::Int, ν::Int)
   amμ = μsh.am
   amν = νsh.am
 
