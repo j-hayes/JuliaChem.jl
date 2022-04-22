@@ -450,7 +450,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         catch
           println("Faulty DIIS!")
           B_dim = 2
-          DIIS(F, e_array, F_array, B_dim)
+          #DIIS(F, e_array, F_array, B_dim)
         end
       end
     end
