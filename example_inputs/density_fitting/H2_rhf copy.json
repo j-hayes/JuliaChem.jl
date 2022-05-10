@@ -1,0 +1,25 @@
+{
+  "molecule": {
+    "geometry": [
+      0.00000,        0.00000,        0.00000,
+      0.00000,        0.00000,        1.39839
+    ],
+    "symbols": [ "H", "H"],
+    "molecular_charge":0
+  },
+  "driver": "energy",
+  "model": {   
+    "basis": "6-31G"
+  },
+  "keywords": {
+    "scf":{
+      "guess":"sad",
+      "method": "RHF"
+    },
+    "prop":{
+      "mo energies":true,
+      "mulliken":true,
+      "multipole":"dipole"
+    }
+  }
+}

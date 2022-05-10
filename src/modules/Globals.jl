@@ -16,6 +16,38 @@ const axial_norm_fact = Matrix{Float64}(
                             0.0 0.0    0.0        1.0
                           ]
                         )
+
+const s_normalization_factors = [1.0]
+const p_normalization_factors = [1.0, 1.0, 1.0]
+const d_normalization_factors = [1.0, 1.7320508075688774, 1.7320508075688774, 1.0, 1.7320508075688774, 1.0]
+const f_normalization_factors = [1.0, 2.23606797749978981, 2.23606797749978981, 1.0, 
+                           2.23606797749978981, 3.87298334620741702, 2.23606797749978981, 
+                           2.23606797749978981, 2.23606797749978981, 1.0]
+
+const g_normalization_factors = [ 1.00000000000000000, 2.64575131106459072, 2.64575131106459072, 
+                            3.41565025531986599, 5.91607978309961613, 3.41565025531986599, 
+                            2.64575131106459072, 5.91607978309961613, 5.91607978309961613, 
+                            2.64575131106459072, 1.00000000000000000, 2.64575131106459072, 
+                            3.41565025531986599, 2.64575131106459072, 1.00000000000000000]
+
+function get_axial_normalization_factor(index,angular_momentum)
+  if angular_momentum == 1 
+    return s_normalization_factors[index]
+  elseif angular_momentum == 2
+    return p_normalization_factors[index]
+  elseif angular_momentum == 3
+    return d_normalization_factors[index]
+
+  elseif angular_momentum == 4
+    return f_normalization_factors[index]
+  elseif angular_momentum == 5
+    return g_normalization_factors[index]
+  end
+  error("no normalization factor found")
+end
+
+export s_normalization_factors, p_normalization_factors, d_normalization_factors, f_normalization_factors, g_normalization_factors
+export get_axial_normalization_factor
 export axial_norm_fact
 
 

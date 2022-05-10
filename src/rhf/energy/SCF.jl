@@ -555,7 +555,7 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
   n = JERI.nbf(basis_sets.primary.basis_cxx)
 
   Zxy_Matrix = Array{Float64}(undef, (n_df,n,n))
-  s123 = 1
+
   for s1 in 1:auxillary_basis_shells_count
     shell_1 = basis_sets.auxillary.shells[s1]
     shell_1_nbasis = basis_sets.auxillary.shells[s1].nbas
@@ -574,21 +574,19 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
         n123 = n12 * shell_3_nbasis
 
         temp = Vector{Float64}(undef, n123)
-
         Zxy_view = view(Zxy_Matrix, 
           bf_1_pos:bf_1_pos+shell_1_nbasis-1, 
           bf_2_pos:bf_2_pos+shell_2_nbasis-1, 
           bf_3_pos:bf_3_pos+shell_3_nbasis-1)
 
         JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
-        
         for ii in 1:n123
           Zxy_view[ii] = temp[ii]
-        end        
+        end    
         axial_normalization_factor(Zxy_Matrix, 
         shell_1, shell_2, shell_3, 
         shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
-        s1, s2, s3)
+        bf_1_pos, bf_2_pos, bf_3_pos)
       end
     end
   end
@@ -598,20 +596,23 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
   shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
   for shell_1_index in 1:auxillary_basis_shells_count
     shell_1 = basis_sets.auxillary.shells[shell_1_index]
-
     shell_1_basis_count = basis_sets.auxillary.shells[shell_1_index].nbas
+    bf_1_pos = basis_sets.auxillary.shells[shell_1_index].pos
+
     for shell_2_index in 1:shell_1_index
       shell_2 = basis_sets.auxillary.shells[shell_2_index]
       shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
+      bf_2_pos = basis_sets.auxillary.shells[shell_2_index].pos
       vector = JERI.compute_two_center_eri_block(engine, eri_block_2_center, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
       index1_start = Int64(shell2bf[shell_1_index]) + 1
       index2_start = Int64(shell2bf[shell_2_index]) + 1 
       eri_block_2_center_matrix[index1_start:index1_start+shell_1_basis_count-1, index2_start:index2_start+shell_2_basis_count-1] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
      
-      axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, shell_1_index, shell_2_index)
+      axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
     
     end 
   end  
+
   eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
   LLT_2_center = cholesky(eri_block_2_center_matrix)
   two_center_cholesky_lower = LLT_2_center.L
@@ -631,7 +632,6 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
   TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, G, (1, 2))
   return G
 end
-
 
 
 #=

@@ -93,7 +93,7 @@ function run(molecule, model; output="none")
     auxillary_basis_set_norb = 0
     auxillary_pos = 1
     auxillary_shell_id = 1
-  end
+  end #todo Clean up this Jackson
   
   #== relocate center of mass of system to origin ==# 
   center_of_mass = Vector{Float64}([0.0, 0.0, 0.0])
@@ -249,6 +249,7 @@ function add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbo
       new_shell = JCModules.Shell(shell_id, atom_idx, atomic_number,
         new_shell_exp, new_shell_coeff[(nprim+1):ncoeff],
         atom_center, 2, nprim, pos, true)
+
       push!(basis_set_shells,new_shell)
       #display(new_shell_coeff[:,2])
       if !shells_cxx_added[atomic_number+1]

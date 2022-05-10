@@ -329,16 +329,16 @@ end
     for μsize::Int64 in 0:(nμ-1), νsize::Int64 in 0:(nν-1)
       μνλσ = nσ*nλ*νsize + nσ*nλ*nν*μsize
       
-      μnorm = axial_norm_fact[μsize+1,amμ]
-      νnorm = axial_norm_fact[νsize+1,amν]
+      μnorm = get_axial_normalization_factor(μsize+1,amμ)
+      νnorm = get_axial_normalization_factor(νsize+1,amν)
 
       μνnorm = μnorm*νnorm
 
       for λsize::Int64 in 0:(nλ-1), σsize::Int64 in 0:(nσ-1)
         μνλσ += 1 
    
-        λnorm = axial_norm_fact[λsize+1,amλ]
-        σnorm = axial_norm_fact[σsize+1,amσ]
+        λnorm = get_axial_normalization_factor(λsize+1,amλ)
+        σnorm = get_axial_normalization_factor(σsize+1,amσ)
     
         λσnorm = λnorm*σnorm 
       
@@ -362,39 +362,39 @@ end
   if amμ < 3 && amν < 3 && amλ < 3 
     return
   end
-  for μsize::Int64 in 1:(nμ), νsize::Int64 in 1:(nν)
-    
-    μnorm = axial_norm_fact[μsize,amμ]
-    νnorm = axial_norm_fact[νsize,amν]
-    μνnorm = μnorm*νnorm
-    for λsize::Int64 in 1:(nλ)
-      λnorm = axial_norm_fact[λsize,amλ]
-      eri_quartet_batch[μ,ν,λ] *= μνnorm*λnorm
+  for μsize::Int64 in 0:(nμ-1) 
+    for νsize::Int64 in 0:(nν-1)
+      μnorm = get_axial_normalization_factor(μsize+1,amμ)
+      νnorm = get_axial_normalization_factor(νsize+1,amν)
+      μνnorm = μnorm*νnorm
+      for λsize::Int64 in 0:(nλ-1)
+        λnorm = get_axial_normalization_factor(λsize+1,amλ)
+        normalization_factor = μνnorm*λnorm        
+        eri_quartet_batch[μ+μsize,ν+νsize,λ+λsize] *= normalization_factor
+      end 
     end
   end 
 end
 
-
 @inline function axial_normalization_factor(eri_quartet_batch::Array{Float64},
   μsh::JCModules.Shell, νsh::JCModules.Shell,
-  nμ::Int, nν::Int, μ::Int, ν::Int)
+  nμ::Int, nν::Int,
+  μ::Int,ν::Int) 
+
   amμ = μsh.am
   amν = νsh.am
-
+  
   if amμ < 3 && amν < 3
     return
   end
-  μν = 0 
-  for μsize::Int64 in 1:(nμ), νsize::Int64 in 1:(nν)
-    μν += 1 # will be used when switching to flattened vector representation of 2d array
-
-    μnorm = axial_norm_fact[μsize,amμ]
-    νnorm = axial_norm_fact[νsize,amν]
-
-    μνnorm = μnorm*νnorm 
-  
-    eri_quartet_batch[μ,ν] *= μνnorm
-  end
+  for μsize::Int64 in 0:(nμ-1) 
+    for νsize::Int64 in 0:(nν-1)
+      μnorm = get_axial_normalization_factor(μsize+1,amμ)
+      νnorm = get_axial_normalization_factor(νsize+1,amν)
+      μνnorm = μnorm*νnorm       
+      eri_quartet_batch[μ+μsize,ν+νsize] *= μνnorm      
+    end
+  end 
 end
 
 
