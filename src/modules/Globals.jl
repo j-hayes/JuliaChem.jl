@@ -16,19 +16,16 @@ const axial_norm_fact = Matrix{Float64}(
                             0.0 0.0    0.0        1.0
                           ]
                         )
-
+#                                s
 const s_normalization_factors = [1.0]
-const p_normalization_factors = [1.0, 1.0, 1.0]
-const d_normalization_factors = [1.0, 1.7320508075688774, 1.7320508075688774, 1.0, 1.7320508075688774, 1.0]
-const f_normalization_factors = [1.0, 2.23606797749978981, 2.23606797749978981, 1.0, 
-                           2.23606797749978981, 3.87298334620741702, 2.23606797749978981, 
-                           2.23606797749978981, 2.23606797749978981, 1.0]
-
-const g_normalization_factors = [ 1.00000000000000000, 2.64575131106459072, 2.64575131106459072, 
-                            3.41565025531986599, 5.91607978309961613, 3.41565025531986599, 
-                            2.64575131106459072, 5.91607978309961613, 5.91607978309961613, 
-                            2.64575131106459072, 1.00000000000000000, 2.64575131106459072, 
-                            3.41565025531986599, 2.64575131106459072, 1.00000000000000000]
+#                                x   y   z
+const p_normalization_factors = [1.0 1.0 1.0]
+#                                xx, xy,                xz,                yy, yz,                zz
+const d_normalization_factors = [1.0 1.7320508075688774 1.7320508075688774 1.0 1.7320508075688774 1.0]
+#                                xxx  xxy                 xxz                  xyy                 xyz                 xzz                 yyy  yyz                 yzz                  zzz
+const f_normalization_factors = [1.0  2.23606797749978981 2.23606797749978981  2.23606797749978981 3.87298334620741702 2.23606797749978981 1.0  2.23606797749978981 2.23606797749978981  1.0 ]
+#                                xxxx                 xxxy                 xxxz                 xxyy                 xxyz                 xxzz                 xyyy                 xyyz                 xyzz                 xzzz                 yyyy                 yyyz                 yyzz                 yzzz                 zzzz)
+const g_normalization_factors = [1.00000000000000000  2.64575131106459072  2.64575131106459072  3.41565025531986599  5.91607978309961613  3.41565025531986599  2.64575131106459072  5.91607978309961613  5.91607978309961613  2.64575131106459072  1.00000000000000000  2.64575131106459072  3.41565025531986599  2.64575131106459072  1.00000000000000000]
 
 function get_axial_normalization_factor(index,angular_momentum)
   if angular_momentum == 1 
@@ -37,11 +34,11 @@ function get_axial_normalization_factor(index,angular_momentum)
     return p_normalization_factors[index]
   elseif angular_momentum == 3
     return d_normalization_factors[index]
-
   elseif angular_momentum == 4
     return f_normalization_factors[index]
   elseif angular_momentum == 5
-    return g_normalization_factors[index]
+    a = g_normalization_factors[index]
+    return a
   end
   error("no normalization factor found")
 end
@@ -51,18 +48,7 @@ export get_axial_normalization_factor
 export axial_norm_fact
 
 
-
 #==
-constexpr double h_corr_norm_fact[20] = {1.0, // s
-     1.0, 1.0, 1.0, // p
-     //1.0, 1.0, 1.0, 0.57735026918962576, 0.57735026918962576, 0.57735026918962576, // d( xx,yy,zz,xy,zz,yz)
-     1.0, 1.0, 1.0, 1.7320508075688774, 1.7320508075688774, 1.7320508075688774, // d( xx,yy,zz,xy,xz,yz) 1/norm gamess ordering
-     1.0, 1.0, 1.0, 2.23606797749978970,2.23606797749978970,2.23606797749978970,2.23606797749978970,
-     2.23606797749978970,2.23606797749978970,3.87298334620741689 // f(xxx, xxy, xyy, yyy, xxz, xyz, yyz, xzz, yzz, zzz)
-     // gamess f(xxx, yyy, zzz, xxy, xxz, xyy, xxz,xyy, yyz, xzz, yzz, xyz
-     //  g, h shells next
-    };
-
  constexpr double h_corr_norm_fact[84] = {
      // s 
      1.0,
@@ -70,9 +56,11 @@ constexpr double h_corr_norm_fact[20] = {1.0, // s
      1.0, 1.0, 1.0, 
      // d( xx, xy, xz, yy, yz, zz)
      1.0, 1.7320508075688774, 1.7320508075688774, 1.0, 1.7320508075688774, 1.0, 
+     
      // f(xxx, xxy, xyy, yyy, xxz, xyz, yyz, xzz, yzz, zzz)
      1.0, 2.23606797749978981, 2.23606797749978981, 1.0, 2.23606797749978981, 3.87298334620741702,
      2.23606797749978981, 2.23606797749978981, 2.23606797749978981, 1.0, 
+     
      // g(xxxx, xxxy, xxxz, xxyy, xxyz, xxzz, xyyy, xyyz, xyzz, xzzz, yyyy, yyyz, yyzz, yzzz, zzzz)
      1.00000000000000000, 2.64575131106459072, 2.64575131106459072, 
      3.41565025531986599, 5.91607978309961613, 3.41565025531986599, 
@@ -106,6 +94,80 @@ constexpr double h_corr_norm_fact[20] = {1.0, // s
      // j shells next ????
     };
 
-
-==#
-
+correct order
+{  0, {
+        {   0,   0,   0}, s 
+      }
+},
+{  1, {
+        {   1,   0,   0}, x
+        {   0,   1,   0}, y
+        {   0,   0,   1}, z
+      }
+},
+{  2, {
+        {   2,   0,   0}, xx
+        {   1,   1,   0}, xy
+        {   1,   0,   1}, xz
+        {   0,   2,   0}, yy
+        {   0,   1,   1}, yz 
+        {   0,   0,   2}, zz
+      }
+},
+{  3, {
+        {   3,   0,   0}, xxx
+        {   2,   1,   0}, xxy
+        {   2,   0,   1}, xxz
+        {   1,   2,   0}, xyy
+        {   1,   1,   1}, xyz
+        {   1,   0,   2}, xzz
+        {   0,   3,   0}, yyy
+        {   0,   2,   1}, yyz
+        {   0,   1,   2}, yzz
+        {   0,   0,   3}, zzz
+      }
+},
+{  4, {
+        {   4,   0,   0}, xxxx
+        {   3,   1,   0}, xxxy
+        {   3,   0,   1}, xxxz
+        {   2,   2,   0}, xxyy
+        {   2,   1,   1}, xxyz
+        {   2,   0,   2}, xxzz
+        {   1,   3,   0}, xyyy
+        {   1,   2,   1}, xyyz
+        {   1,   1,   2}, xyzz
+        {   1,   0,   3}, xzzz
+        {   0,   4,   0}, yyyy
+        {   0,   3,   1}, yyyz
+        {   0,   2,   2}, yyzz
+        {   0,   1,   3}, yzzz
+        {   0,   0,   4}, zzzz
+      }
+},
+{  5, {
+        {   5,   0,   0}, xxxxx
+        {   4,   1,   0}, xxxxy
+        {   4,   0,   1}, xxxxz
+        {   3,   2,   0}, xxxyy
+        {   3,   1,   1}, xxxyz
+        {   3,   0,   2}, xxxzz
+        {   2,   3,   0}, xxyyy
+        {   2,   2,   1}, xxyyz
+        {   2,   1,   2}, xxyzz
+        {   2,   0,   3}, xxzzz
+        {   1,   4,   0}, xyyyy
+        {   1,   3,   1}, xyyyz
+        {   1,   2,   2}, xyyzz
+        {   1,   1,   3}, xyzzz
+        {   1,   0,   4}, xzzzz
+        {   0,   5,   0}, yyyyy
+        {   0,   4,   1}, yyyyz
+        {   0,   3,   2}, yyyzz
+        {   0,   2,   3}, yyzzz
+        {   0,   1,   4}, yzzzz 
+        {   0,   0,   5}, zzzzz
+      }
+      based on https://github.com/simint-chem/simint-generator/blob/master/generator/Ordering_Psi4.cpp
+      see this file for higher angular momenta 
+=#

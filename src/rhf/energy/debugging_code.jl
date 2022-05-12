@@ -72,3 +72,16 @@ function check_differentValues(Zxy_Matrix, ZxyCopy)
       end
     end
   end
+
+function adsafd()
+    
+  open("/home/jackson/source/JuliaChem.jl/Zxy_from_libint.txt", "r") do io
+    for i in 1:n_df
+      for j in 1:n
+        for k in 1:n
+          Zxy_Matrix[i,j,k] = parse(Float64, readline(io))
+        end 
+      end 
+    end 
+  end
+end

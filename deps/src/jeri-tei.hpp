@@ -117,7 +117,7 @@ public:
   //-- member functions --//
 
   //-- compute_eri_block --//
-  //-- ash, bsh, csh, dsh, are shell indicies --//
+  //-- ash, csh, dsh, are shell indicies --//
   inline bool compute_eri_block_df(jlcxx::ArrayRef<double> eri_block, julia_int ash, 
                                 julia_int csh, julia_int dsh,
                                 julia_int copy_size, julia_int memory_skip)

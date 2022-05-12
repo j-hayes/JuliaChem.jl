@@ -558,38 +558,63 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
 
   for s1 in 1:auxillary_basis_shells_count
     shell_1 = basis_sets.auxillary.shells[s1]
-    shell_1_nbasis = basis_sets.auxillary.shells[s1].nbas
-    bf_1_pos = basis_sets.auxillary.shells[s1].pos
+    shell_1_nbasis = shell_1.nbas
+    bf_1_pos = shell_1.pos
+
+    
 
     for s2 in 1:basis_shells_count
       shell_2 = basis_sets.primary.shells[s2]
-      shell_2_nbasis = basis_sets.primary.shells[s2].nbas
-      bf_2_pos = basis_sets.primary.shells[s2].pos
+      shell_2_nbasis = shell_2.nbas
+      bf_2_pos = shell_2.pos
       n12 = shell_1_nbasis * shell_2_nbasis
 
       for s3 in 1:basis_shells_count
         shell_3 = basis_sets.primary.shells[s3]
-        shell_3_nbasis = basis_sets.primary.shells[s3].nbas
-        bf_3_pos = basis_sets.primary.shells[s3].pos
+        shell_3_nbasis = shell_3.nbas
+        bf_3_pos = shell_3.pos
+
+  
         n123 = n12 * shell_3_nbasis
-
         temp = Vector{Float64}(undef, n123)
-        Zxy_view = view(Zxy_Matrix, 
-          bf_1_pos:bf_1_pos+shell_1_nbasis-1, 
-          bf_2_pos:bf_2_pos+shell_2_nbasis-1, 
-          bf_3_pos:bf_3_pos+shell_3_nbasis-1)
-
         JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
-        for ii in 1:n123
-          Zxy_view[ii] = temp[ii]
-        end    
-        axial_normalization_factor(Zxy_Matrix, 
-        shell_1, shell_2, shell_3, 
-        shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
-        bf_1_pos, bf_2_pos, bf_3_pos)
+
+        basis_range_1 = bf_1_pos:bf_1_pos+shell_1_nbasis-1
+        basis_range_2 = bf_2_pos:bf_2_pos+shell_2_nbasis-1
+        basis_range_3 = bf_3_pos:bf_3_pos+shell_3_nbasis-1
+        
+        temp_index = 1
+        for i in basis_range_1
+          for j in basis_range_2
+            for k in basis_range_3
+              Zxy_Matrix[i,j,k] = temp[temp_index]
+              temp_index += 1
+            end
+          end
+        end
+
+        # if issubset(10, basis_range_1) && issubset(4, basis_range_2) && issubset(4, basis_range_3)
+        #   println("we are here")
+        # end
+        # Zxy_Matrix[basis_range_1,basis_range_2,basis_range_3] = 
+        #   reshape(temp, (shell_1_nbasis,shell_2_nbasis,shell_3_nbasis))
+        # axial_normalization_factor(Zxy_Matrix, 
+        # shell_1, shell_2, shell_3, 
+        # shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
+        # bf_1_pos, bf_2_pos, bf_3_pos)
       end
     end
   end
+
+  # for i in 1:n_df
+  #   for j in 1:n
+  #     for k in 1:n
+  #       println("Zxy[$(i-1),$(j-1),$(k-1)]:$(Zxy_Matrix[i,j,k])")
+  #     end 
+  #   end 
+  # end 
+
+  # exit()
 
   eri_block_2_center = zeros(n_df*n_df)
   eri_block_2_center_matrix = zeros((n_df,n_df))
@@ -603,30 +628,44 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
       shell_2 = basis_sets.auxillary.shells[shell_2_index]
       shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
       bf_2_pos = basis_sets.auxillary.shells[shell_2_index].pos
+
       vector = JERI.compute_two_center_eri_block(engine, eri_block_2_center, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
       index1_start = Int64(shell2bf[shell_1_index]) + 1
-      index2_start = Int64(shell2bf[shell_2_index]) + 1 
-      eri_block_2_center_matrix[index1_start:index1_start+shell_1_basis_count-1, index2_start:index2_start+shell_2_basis_count-1] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
+      index2_start = Int64(shell2bf[shell_2_index]) + 1            
+      eri_i_range = index1_start:index1_start+shell_1_basis_count-1
+      eri_j_range = index2_start:index2_start+shell_2_basis_count-1
+      eri_block_2_center_matrix[eri_i_range, eri_j_range] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
      
-      axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
-    
+      # axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
+      # display(eri_block_2_center_matrix)
+      # println("")
     end 
-  end  
+  end
+  
+  
 
-  eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
-  LLT_2_center = cholesky(eri_block_2_center_matrix)
+
+
+  for iii in 1:n_df
+    for jjj in 1:n_df 
+      if jjj > iii
+        eri_block_2_center_matrix[iii,jjj] = 0.0
+      end
+    end
+  end
+
+  hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
+  LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
   two_center_cholesky_lower = LLT_2_center.L
   Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
   nocc = size(Cocc, 2)
+
   xyK = zeros(n, n, n_df);
   TensorOperations.tensorcontract!(1.0, Zxy_Matrix, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5));
-
   xiK = zeros(n, nocc, n_df)
   TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  Cocc, (2,4), 'N', 0.0, xiK, (1,4,3))
-
   G = zeros(n,n)
   TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, G, (1, 4))
-
   Jtmp = zeros(n_df)
   TensorOperations.tensorcontract!(1.0, xiK, (1, 2, 3), 'N', Cocc, (1, 2),  'N',  0.0, Jtmp, (3))
   TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, G, (1, 2))
