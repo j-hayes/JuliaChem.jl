@@ -68,6 +68,9 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
                    const std::vector<libint2::ShellPair>,
                    const std::vector<libint2::ShellPair> &>()
       .method("compute_eri_block_df", &DFRHFTEIEngine::compute_eri_block_df)
+      // .method("compute_eri_block_two_center_df", &DFRHFTEIEngine::compute_eri_block_two_center_df)
       .method("compute_two_center_eri_block", &DFRHFTEIEngine::compute_two_center_eri_block);
+
+    
 } 
 

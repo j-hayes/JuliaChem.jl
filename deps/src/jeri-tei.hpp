@@ -137,7 +137,29 @@ public:
     }
   }
 
-  inline std::vector<double> compute_two_center_eri_block(jlcxx::ArrayRef<double> eri_block, 
+//-- compute_eri_block --//
+  //-- ash, csh, dsh, are shell indicies --//
+  inline bool compute_eri_block_two_center_df(jlcxx::ArrayRef<double> eri_block,
+                                julia_int shell_1_index, 
+                                julia_int shell_2_index,
+                                julia_int copy_size, 
+                                julia_int memory_skip)
+  {
+    m_two_center_engine.compute((*m_auxillary_basis_set)[shell_1_index], (*m_auxillary_basis_set)[shell_2_index]);
+
+    if (m_coulomb_eng.results()[0] != nullptr)
+    {     
+      std::copy(m_coulomb_eng.results()[0], m_coulomb_eng.results()[0] + copy_size, eri_block.data() + memory_skip);    
+      return false;
+    }
+    else
+    {
+      return true;
+    }
+  }
+
+
+  inline bool compute_two_center_eri_block(jlcxx::ArrayRef<double> eri_block, 
   julia_int shell_1_index,
   julia_int shell_2_index,
   julia_int shell_1_basis_count,
@@ -146,22 +168,18 @@ public:
     auto shell2bf = (*m_auxillary_basis_set).shell2bf();
     int n_basis_functions  =(*m_auxillary_basis_set).nbf();
     m_two_center_engine.compute((*m_auxillary_basis_set)[shell_1_index], (*m_auxillary_basis_set)[shell_2_index]);
-    std::vector<double> v1(shell_1_basis_count* shell_2_basis_count);
     if (m_two_center_engine.results()[0] != nullptr)
     { 
-      auto basis_1_index = shell2bf[shell_1_index];  //index of first basis function in shell
-      auto basis_2_index = shell2bf[shell_2_index];
-      int result_buffer_index = 0;      
-      
       for(int i = 0; i < shell_1_basis_count* shell_2_basis_count; i++)
       {
-          v1[i] = *(m_two_center_engine.results()[0] + i);
+          eri_block.data()[i] = *(m_two_center_engine.results()[0] + i);
       }
+      return false;
     }
     else
     {
+      return true;
     }
-    return v1;
   }
 };
 

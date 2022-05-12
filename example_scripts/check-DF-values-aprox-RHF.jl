@@ -15,10 +15,9 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
   try 
     JuliaChem.initialize() 
 
-    density_fitted_energy, density_fitted_properties = full_rhf(denity_fitted_input_file)
     # energy, properties = full_rhf(input_file)      
-    
-    
+    density_fitted_energy, density_fitted_properties = full_rhf(denity_fitted_input_file)
+
 
     # Test.@test round(energy["Energy"], digits=0) == round(density_fitted_energy["Energy"], digits=0)
     println("Test run successfully!")

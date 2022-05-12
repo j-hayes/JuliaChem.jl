@@ -10,8 +10,8 @@
   },
   "driver": "energy",
   "model": {   
-    "basis": "6-31G",
-    "auxillary_basis": "6-31G*"
+    "basis": "STO-3G",
+    "auxillary_basis": "def2-universal-JKFIT"
   },
   "keywords": {
     "scf":{

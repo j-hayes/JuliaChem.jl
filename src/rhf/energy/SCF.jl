@@ -629,22 +629,27 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
       shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
       bf_2_pos = basis_sets.auxillary.shells[shell_2_index].pos
 
-      vector = JERI.compute_two_center_eri_block(engine, eri_block_2_center, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
+      temp = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
+      JERI.compute_two_center_eri_block(engine, temp, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
+
       index1_start = Int64(shell2bf[shell_1_index]) + 1
       index2_start = Int64(shell2bf[shell_2_index]) + 1            
       eri_i_range = index1_start:index1_start+shell_1_basis_count-1
       eri_j_range = index2_start:index2_start+shell_2_basis_count-1
-      eri_block_2_center_matrix[eri_i_range, eri_j_range] = reshape(vector, (shell_1_basis_count,shell_2_basis_count))
-     
+      # eri_block_2_center_matrix[eri_i_range, eri_j_range] = reshape(temp, (shell_1_basis_count,shell_2_basis_count))
+      temp_index = 1
+      for i in eri_i_range
+        for j in eri_j_range         
+          eri_block_2_center_matrix[i,j] = temp[temp_index]
+          temp_index += 1
+        end 
+      end
+
       # axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
       # display(eri_block_2_center_matrix)
       # println("")
     end 
   end
-  
-  
-
-
 
   for iii in 1:n_df
     for jjj in 1:n_df 
@@ -653,6 +658,8 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
       end
     end
   end
+
+  # display(eri_block_2_center_matrix)
 
   hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
   LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
