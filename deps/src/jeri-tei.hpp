@@ -112,7 +112,9 @@ public:
     m_auxillary_shellpair_data = t_auxillary_shellpair_data.data();
   }
 
-  ~DFRHFTEIEngine(){};
+  ~DFRHFTEIEngine(){
+    std::cout << "destroying DFRHFTEIEngine" << std::endl;
+  };
 
   //-- member functions --//
 
@@ -165,21 +167,18 @@ public:
   julia_int shell_1_basis_count,
   julia_int shell_2_basis_count)
   {    
-    auto shell2bf = (*m_auxillary_basis_set).shell2bf();
-    int n_basis_functions  =(*m_auxillary_basis_set).nbf();
+    // auto shell2bf = (*m_auxillary_basis_set).shell2bf();
+    // int n_basis_functions  =(*m_auxillary_basis_set).nbf();
     m_two_center_engine.compute((*m_auxillary_basis_set)[shell_1_index], (*m_auxillary_basis_set)[shell_2_index]);
-    if (m_two_center_engine.results()[0] != nullptr)
-    { 
-      for(int i = 0; i < shell_1_basis_count* shell_2_basis_count; i++)
-      {
-          eri_block.data()[i] = *(m_two_center_engine.results()[0] + i);
-      }
-      return false;
-    }
-    else
-    {
-      return true;
-    }
+    // if (m_two_center_engine.results()[0] != nullptr)
+    // { 
+    //   for(int i = 0; i < shell_1_basis_count* shell_2_basis_count; i++)
+    //   {
+    //   eri_block.data()[0] = *(m_two_center_engine.results()[0]);
+    //   }
+    //   return false;
+    // }
+    return false;    
   }
 };
 
