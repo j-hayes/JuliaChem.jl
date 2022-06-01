@@ -10,7 +10,7 @@
   },
   "driver": "energy",
   "model": {   
-    "basis": "STO-3G"
+    "basis": "6-311G"
   },
   "keywords": {
     "scf":{
