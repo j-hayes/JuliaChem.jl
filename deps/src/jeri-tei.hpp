@@ -107,7 +107,7 @@ public:
                   (int)std::max(t_basis_set.max_l(), t_auxillary_basis_set.max_l()))
   {
     m_two_center_engine = libint2::Engine(libint2::Operator::coulomb,
-                                          t_basis_set.max_nprim(), t_basis_set.max_l(), 0);
+                                          t_auxillary_basis_set.max_nprim(), t_auxillary_basis_set.max_l(), 0);
     m_auxillary_basis_set = &t_auxillary_basis_set;
     m_auxillary_shellpair_data = t_auxillary_shellpair_data.data();
   }

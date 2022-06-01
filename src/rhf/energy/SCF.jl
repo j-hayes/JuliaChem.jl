@@ -606,32 +606,24 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
     end
   end
 
-  # for i in 1:n_df
-  #   for j in 1:n
-  #     for k in 1:n
-  #       println("Zxy[$(i-1),$(j-1),$(k-1)]:$(Zxy_Matrix[i,j,k])")
-  #     end 
-  #   end 
-  # end 
-
-  # exit()
 
   eri_block_2_center = zeros(n_df*n_df)
   eri_block_2_center_matrix = zeros((n_df,n_df))
   shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
   for shell_1_index in 1:auxillary_basis_shells_count
     shell_1 = basis_sets.auxillary.shells[shell_1_index]
-    shell_1_basis_count = basis_sets.auxillary.shells[shell_1_index].nbas
-    bf_1_pos = basis_sets.auxillary.shells[shell_1_index].pos
+    shell_1_basis_count = shell_1.nbas
+    bf_1_pos = shell_1.pos
 
     for shell_2_index in 1:shell_1_index
       shell_2 = basis_sets.auxillary.shells[shell_2_index]
-      shell_2_basis_count = basis_sets.auxillary.shells[shell_2_index].nbas
-      bf_2_pos = basis_sets.auxillary.shells[shell_2_index].pos
+      shell_2_basis_count = shell_2.nbas
+      bf_2_pos = shell_2.pos
 
       temp = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
+      
       JERI.compute_two_center_eri_block(engine, temp, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
-
+      
       index1_start = Int64(shell2bf[shell_1_index]) + 1
       index2_start = Int64(shell2bf[shell_2_index]) + 1            
       eri_i_range = index1_start:index1_start+shell_1_basis_count-1
@@ -644,7 +636,6 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
           temp_index += 1
         end 
       end
-
       # axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
       # display(eri_block_2_center_matrix)
       # println("")
@@ -658,7 +649,7 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
       end
     end
   end
-
+  
   # display(eri_block_2_center_matrix)
 
   hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
