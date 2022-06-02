@@ -10,13 +10,14 @@
   },
   "driver": "energy",
   "model": {   
+    "method": "rhf",
     "basis": "6-311G(2df,2pd)",
     "auxillary_basis": "cc-pVTZ-JKFIT"
   },
   "keywords": {
     "scf":{
-      "guess":"hcore",
-      "method": "DFRHF"
+      "scf_type":"df",
+      "guess":"hcore"
     },
     "prop":{
       "mo energies":true,

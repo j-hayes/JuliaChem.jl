@@ -38,7 +38,8 @@
   },
   "keywords": {
     "scf":{
-      "guess":"sad"
+      "guess":"sad",
+      "scf_type": "df"
     },
     "prop":{
       "mo energies":true,

@@ -10,12 +10,12 @@
   },
   "driver": "energy",
   "model": {   
+    "method": "RHF",
     "basis": "6-311G(2df,2pd)"
   },
   "keywords": {
     "scf":{
-      "guess":"hcore",
-      "method": "RHF"
+      "guess":"hcore"
     },
     "prop":{
       "mo energies":true,

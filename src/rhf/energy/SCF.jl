@@ -21,10 +21,10 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   rmsd::Float64 = haskey(scf_flags, "rmsd") ? scf_flags["rmsd"] : 1E-6
   load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
-  method::String = haskey(scf_flags, "method") ? scf_flags["method"] : Methods.RHF
+  do_density_fitting::Bool = haskey(scf_flags, SCF_Keywords.SCF_TYPE) ? lowercase(scf_flags[SCF_Keywords.SCF_TYPE]) == SCF.DensityFitting : false
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
     niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
-    fdiff=fdiff, method=method)
+    fdiff=fdiff, do_density_fitting=do_density_fitting)
 end
 
 
@@ -50,7 +50,7 @@ method = the method to calculate the SCF E.G. RHF (Restricted Hatree Fock) or DF
 function rhf_kernel(mol::Molecule, 
   basis_sets::CalculationBasisSets; 
   output::Int64, debug::Bool, niter::Int, guess::String, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, method::String)
+  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, do_density_fitting::Bool)
   
   basis = basis_sets.primary
   comm=MPI.COMM_WORLD
@@ -167,7 +167,7 @@ function rhf_kernel(mol::Molecule,
     F_eval, F_evec, F_old, workspace_a, workspace_b, workspace_c,
     E_nuc, E_elec, E_old, basis_sets; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele,
-    rmsd=rmsd, load=load, fdiff=fdiff, method=method)
+    rmsd=rmsd, load=load, fdiff=fdiff, do_density_fitting=do_density_fitting)
 
   if !converged
     if MPI.Comm_rank(comm) == 0 && output >= 1
@@ -238,7 +238,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
   workspace_c::Vector{Matrix{Float64}}, E_nuc::Float64, E_elec::Float64, 
   E_old::Float64, basis_sets::CalculationBasisSets;
   output::Int64, debug::Bool, niter::Int, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, method)
+  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, do_density_fitting)
   basis = basis_sets.primary
   #== read in some more variables from scf flags input ==#
   nsh = length(basis)
@@ -295,7 +295,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
     D_old, ΔD, D_input, scf_converged, FDS, 
     schwarz_bounds, Dsh; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele, 
-    rmsd=rmsd, load=load, fdiff=fdiff, method)
+    rmsd=rmsd, load=load, fdiff=fdiff, do_density_fitting)
   #== we are done! ==#
   if debug
     h5write("debug.h5","RHF/Iteration-Final/F", F)
@@ -323,7 +323,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   ΔD::Matrix{Float64}, D_input::Matrix{Float64}, scf_converged::Bool,  
   FDS::Matrix{Float64}, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64}; 
-  output, debug, niter, ndiis, dele, rmsd, load, fdiff, method)
+  output, debug, niter, ndiis, dele, rmsd, load, fdiff, do_density_fitting)
   basis = basis_sets.primary
   auxillary_basis = basis_sets.auxillary
   #== initialize a few more variables ==#
@@ -349,9 +349,10 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     for thread in 1:nthreads ]
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
-  engine = method != Methods.DFRHF ? 
-  JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) : 
-  JERI.DFRHFTEIEngine(basis.basis_cxx, auxillary_basis.basis_cxx, basis.shpdata_cxx, auxillary_basis.shpdata_cxx)
+  engine = do_density_fitting ?  
+  JERI.DFRHFTEIEngine(basis.basis_cxx, auxillary_basis.basis_cxx, basis.shpdata_cxx, auxillary_basis.shpdata_cxx) :
+  JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
+  
   jeri_engine_thread = [ engine for thread in 1:nthreads ]
   
   while !iter_converged
@@ -402,7 +403,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   
     #== build new Fock matrix ==#
-    if method == Methods.RHF
+    if !do_density_fitting
       rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
@@ -410,11 +411,9 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       eri_quartet_batch_thread, 
       jeri_engine_thread, iter,
       cutoff, debug, load, fdiff, ΔF, F_cumul)
-    elseif method == Methods.DFRHF
+    else
       electrons_count = Int64(basis_sets.primary.nels)
       F = H + df_rhf_fock_build(engine, basis_sets, C[:,1:electrons_count÷2])
-    else
-      throw(exit("Selected RHF method, ($method), not supported"))
     end
 
     if debug && MPI.Comm_rank(comm) == 0

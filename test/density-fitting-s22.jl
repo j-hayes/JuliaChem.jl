@@ -3,7 +3,7 @@
 #=============================#
 import JuliaChem
 import Test
-include("full-rhf-repl.jl")
+include("../example_scripts/full-rhf-repl.jl")
 
 
 #==================================================================
@@ -31,5 +31,5 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
   
 end
 # check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
-# check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/water_density_fitted.json", "./example_inputs/density_fitting/water_rhf.json")
-check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/H2_density_fitted.json", "./example_inputs/density_fitting/H2_rhf.json")
+check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/water_density_fitted.json", "./example_inputs/density_fitting/water_rhf.json")
+# check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/H2_density_fitted.json", "./example_inputs/density_fitting/H2_rhf.json")

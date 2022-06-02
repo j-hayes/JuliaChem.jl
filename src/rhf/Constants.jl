@@ -1,10 +1,14 @@
 module Constants
     
-module Methods
-    const RHF = "RHF" # Restricted Hartree Fock
-    const DFRHF = "DFRHF" # Density Fitted Restricted Hartree Fock
+module SCF
+    const RHF = "rhf" # Restricted Hartree Fock
+    const DensityFitting = "df" # Density Fitted Restricted Hartree Fock
 end 
 
-export Methods 
+module SCF_Keywords
+    SCF_TYPE = "scf_type"
+end 
+
+export SCF, SCF_Keywords
 
 end
