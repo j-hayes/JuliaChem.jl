@@ -23,7 +23,7 @@ Base.include(@__MODULE__,"SCF.jl")
 function run(mol::Molecule, basis::Basis,
   scf_flags = Dict(); output=0)
   basis_sets = CalculationBasisSets(basis, nothing)
-  return run(mol, basis_sets; output=output)
+  return run(mol, basis_sets, scf_flags; output=output)
 end 
 
 
@@ -45,8 +45,7 @@ Thus, proper use of the RHF.run() function would look like this:
 scf = RHF.run(input_info, basis)
 ```
 """
-function run(mol::Molecule, basis_sets::CalculationBasisSets, 
-  scf_flags = Dict(); output=0, method=Methods.RHF)
+function run(mol::Molecule, basis_sets::CalculationBasisSets, scf_flags = Dict(); output=0)
   
   comm=MPI.COMM_WORLD
 

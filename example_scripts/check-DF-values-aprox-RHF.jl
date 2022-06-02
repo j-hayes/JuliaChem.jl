@@ -15,11 +15,13 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
   try 
     JuliaChem.initialize() 
 
-    # energy, properties = full_rhf(input_file)      
+    energy, properties = full_rhf(input_file)      
     density_fitted_energy, density_fitted_properties = full_rhf(denity_fitted_input_file)
 
+    println("RHF energy   : $(energy["Energy"])")
+    println("DF-RHF energy: $(density_fitted_energy["Energy"])")
 
-    # Test.@test round(energy["Energy"], digits=0) == round(density_fitted_energy["Energy"], digits=0)
+    Test.@test energy["Energy"] ≈ density_fitted_energy["Energy"] atol=.000015 #15 micro hartree tolerance
     println("Test run successfully!")
   catch e
     println("check_density_fitted_method_matches_RHF Failed with exception:") 
@@ -29,4 +31,5 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
   
 end
 # check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
-check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/water_density_fitted.json", "./example_inputs/density_fitting/water_rhf.json")
+# check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/water_density_fitted.json", "./example_inputs/density_fitting/water_rhf.json")
+check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/H2_density_fitted.json", "./example_inputs/density_fitting/H2_rhf.json")

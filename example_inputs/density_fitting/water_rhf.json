@@ -10,11 +10,11 @@
   },
   "driver": "energy",
   "model": {   
-    "basis": "6-311G"
+    "basis": "6-311G(2df,2pd)"
   },
   "keywords": {
     "scf":{
-      "guess":"sad",
+      "guess":"hcore",
       "method": "RHF"
     },
     "prop":{
