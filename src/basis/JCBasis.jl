@@ -51,8 +51,8 @@ function run(molecule, model; output="none")
   geometry_array::Vector{Float64} = molecule["geometry"]
   symbols::Vector{String} = molecule["symbols"]
   basis::String = model["basis"]
-  build_auxillary = haskey(model, "auxillary_basis")
-  auxillary_basis::String =  build_auxillary ? model["auxillary_basis"] : ""  
+  build_auxillary = haskey(model, "auxiliary_basis")
+  auxiliary_basis::String =  build_auxillary ? model["auxiliary_basis"] : ""  
   charge::Int64 = molecule["molecular_charge"]
 
   num_atoms::Int64 = length(geometry_array)/3
@@ -85,12 +85,12 @@ function run(molecule, model; output="none")
 
   #initialize variables and structs for auxillary basis set build if building auxillary basis set 
   if build_auxillary    
-    auxillary_basis_set_shells = Vector{JCModules.Shell}([])
+    auxiliary_basis_set_shells = Vector{JCModules.Shell}([])
     auxillary_shells_cxx = StdVector([ StdVector{JERI.Shell}() for i in 1:55 ]) 
     auxillary_shells_cxx_added = [ false for i in 1:55 ]
 
-    auxillary_basis_set_nels = -charge 
-    auxillary_basis_set_norb = 0
+    auxiliary_basis_set_nels = -charge 
+    auxiliary_basis_set_norb = 0
     auxillary_pos = 1
     auxillary_shell_id = 1
   end #todo Clean up this Jackson
@@ -127,18 +127,30 @@ function run(molecule, model; output="none")
 
       pos, basis_set_norb, shell_id = add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbol, basis, 
       shell_am_mapping, atom_idx, atomic_number, pos, atom_center, basis_set_norb, shell_id, output)
-
-      if build_auxillary 
-        auxillary_pos, auxillary_basis_set_norb, auxillary_shell_id = add_shells!(bsed, auxillary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxillary_basis, 
-        shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxillary_basis_set_norb, auxillary_shell_id, output)  
-        auxillary_shells_cxx_added[atomic_number+1] = true 
-      end
-      
+ 
       shells_cxx_added[atomic_number+1] = true 
       #display(shells_cxx)
 
       if MPI.Comm_rank(comm) == 0 && output >= 2
         println(" ")
+      end
+    end
+  end
+
+  if build_auxillary 
+    h5open(joinpath(@__DIR__, "../../records/auxilliary_bsed.h5"),"r") do aux_bsed
+      for (atom_idx, symbol) in enumerate(symbols)
+        #== initialize variables needed for shell ==#
+        atom_center = atom_centers[atom_idx] 
+        atomic_number = atomic_number_mapping[symbol]
+        a = keys(aux_bsed)
+        auxillary_pos, auxiliary_basis_set_norb, auxillary_shell_id = add_shells!(aux_bsed, auxiliary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxiliary_basis, 
+        shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxiliary_basis_set_norb, auxillary_shell_id, output)  
+        auxillary_shells_cxx_added[atomic_number+1] = true 
+      
+        if MPI.Comm_rank(comm) == 0 && output >= 2
+          println(" ")
+        end
       end
     end
   end
@@ -149,10 +161,10 @@ function run(molecule, model; output="none")
     println("----------------------------------------          ")
     println()
     println("Basis set: $basis")
-    println("Auxillary Basis set: $auxillary_basis")
+    println("Auxillary Basis set: $auxiliary_basis")
     println("Number of basis functions: $basis_set_norb")
     if build_auxillary
-      println("Number of auxillary basis functions: $auxillary_basis_set_norb")
+      println("Number of auxillary basis functions: $auxiliary_basis_set_norb")
     end 
 
     println("Number of electrons: $basis_set_nels")
@@ -169,14 +181,14 @@ function run(molecule, model; output="none")
   precompute_shell_pair_data(basis_set.shpdata_cxx, basis_set.basis_cxx)
   return_val = mol, basis_set
   if build_auxillary   
-    auxillary_basis_set_cxx = JERI.BasisSet(mol.mol_cxx, auxillary_shells_cxx)
-    auxillary_basis_set::Basis = Basis(auxillary_basis_set_shells, auxillary_basis_set_cxx, 
-    StdVector{JERI.ShellPair}(), auxillary_basis, 
-    auxillary_basis_set_norb, basis_set_nels)   
+    auxiliary_basis_set_cxx = JERI.BasisSet(mol.mol_cxx, auxillary_shells_cxx)
+    auxiliary_basis_set::Basis = Basis(auxiliary_basis_set_shells, auxiliary_basis_set_cxx, 
+    StdVector{JERI.ShellPair}(), auxiliary_basis, 
+    auxiliary_basis_set_norb, basis_set_nels)   
     
-    precompute_shell_pair_data(auxillary_basis_set.shpdata_cxx, auxillary_basis_set.basis_cxx)
+    precompute_shell_pair_data(auxiliary_basis_set.shpdata_cxx, auxiliary_basis_set.basis_cxx)
 
-    return_val = mol, CalculationBasisSets(basis_set, auxillary_basis_set)
+    return_val = mol, CalculationBasisSets(basis_set, auxiliary_basis_set)
   end
 
   if MPI.Comm_rank(comm) == 0 && output >= 2
