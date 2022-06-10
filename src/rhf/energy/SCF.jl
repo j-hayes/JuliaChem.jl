@@ -325,7 +325,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64}; 
   output, debug, niter, ndiis, dele, rmsd, load, fdiff, do_density_fitting)
   basis = basis_sets.primary
-  auxillary_basis = basis_sets.auxillary
+  auxiliary_basis = basis_sets.auxillary
   #== initialize a few more variables ==#
   comm=MPI.COMM_WORLD
 
@@ -350,7 +350,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
   engine = do_density_fitting ?  
-  JERI.DFRHFTEIEngine(basis.basis_cxx, auxillary_basis.basis_cxx, basis.shpdata_cxx, auxillary_basis.shpdata_cxx) :
+  JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) :
   JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
   
   jeri_engine_thread = [ engine for thread in 1:nthreads ]
@@ -547,19 +547,16 @@ end
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 function df_rhf_fock_build(engine::DFRHFTEIEngine,
   basis_sets::CalculationBasisSets, Cocc) 
-  auxillary_basis_shells_count = length(basis_sets.auxillary)
+  auxiliary_basis_shells_count = length(basis_sets.auxillary)
   basis_shells_count = length(basis_sets.primary)
   n_df = JERI.nbf(basis_sets.auxillary.basis_cxx)
   n = JERI.nbf(basis_sets.primary.basis_cxx)
 
   Zxy_Matrix = Array{Float64}(undef, (n_df,n,n))
-
-  for s1 in 1:auxillary_basis_shells_count
+  for s1 in 1:auxiliary_basis_shells_count
     shell_1 = basis_sets.auxillary.shells[s1]
     shell_1_nbasis = shell_1.nbas
     bf_1_pos = shell_1.pos
-
-    
 
     for s2 in 1:basis_shells_count
       shell_2 = basis_sets.primary.shells[s2]
@@ -572,7 +569,6 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
         shell_3_nbasis = shell_3.nbas
         bf_3_pos = shell_3.pos
 
-  
         n123 = n12 * shell_3_nbasis
         temp = Vector{Float64}(undef, n123)
         JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
@@ -590,17 +586,14 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
             end
           end
         end
-        axial_normalization_factor(Zxy_Matrix, 
-        shell_1, shell_2, shell_3, 
-        shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
-        bf_1_pos, bf_2_pos, bf_3_pos)
+        axial_normalization_factor(Zxy_Matrix, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
       end
     end
   end
 
   eri_block_2_center_matrix = zeros((n_df,n_df))
   shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
-  for shell_1_index in 1:auxillary_basis_shells_count
+  for shell_1_index in 1:auxiliary_basis_shells_count
     shell_1 = basis_sets.auxillary.shells[shell_1_index]
     shell_1_basis_count = shell_1.nbas
     bf_1_pos = shell_1.pos
@@ -636,15 +629,26 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
       end
     end
   end
-  
+
+  for val in eri_block_2_center_matrix
+    if isnan(val) 
+      println("has NAN eri_block_2_center_matrix")
+      break
+    end
+    if isinf(val) 
+      println("has INF eri_block_2_center_matrix")
+      break
+    end
+  end
+
   hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
   LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
   two_center_cholesky_lower = LLT_2_center.L
+  
   Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
   nocc = size(Cocc, 2)
-
-  xyK = zeros(n, n, n_df);
-  TensorOperations.tensorcontract!(1.0, Zxy_Matrix, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5));
+  xyK = zeros(n, n, n_df)
+  TensorOperations.tensorcontract!(1.0, Zxy_Matrix, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
   xiK = zeros(n, nocc, n_df)
   TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  Cocc, (2,4), 'N', 0.0, xiK, (1,4,3))
   G = zeros(n,n)

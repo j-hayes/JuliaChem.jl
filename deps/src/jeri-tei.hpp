@@ -93,22 +93,22 @@ class DFRHFTEIEngine : public TEIEngine
 {
 
 public:
-  const libint2::BasisSet *m_auxillary_basis_set;
+  const libint2::BasisSet *m_auxiliary_basis_set;
   const libint2::ShellPair *m_auxillary_shellpair_data;
   libint2::Engine m_two_center_engine;
 
   //-- ctors and dtors --//
   DFRHFTEIEngine(
       const libint2::BasisSet &t_basis_set,
-      const libint2::BasisSet &t_auxillary_basis_set,
+      const libint2::BasisSet &t_auxiliary_basis_set,
       const std::vector<libint2::ShellPair> &t_shellpair_data,
       const std::vector<libint2::ShellPair> &t_auxillary_shellpair_data)
-      : TEIEngine(t_basis_set, t_shellpair_data, (int)std::max(t_basis_set.max_nprim(), t_auxillary_basis_set.max_nprim()),
-                  (int)std::max(t_basis_set.max_l(), t_auxillary_basis_set.max_l()))
+      : TEIEngine(t_basis_set, t_shellpair_data, (int)std::max(t_basis_set.max_nprim(), t_auxiliary_basis_set.max_nprim()),
+                  (int)std::max(t_basis_set.max_l(), t_auxiliary_basis_set.max_l()))
   {
     m_two_center_engine = libint2::Engine(libint2::Operator::coulomb,
-                                          t_auxillary_basis_set.max_nprim(), t_auxillary_basis_set.max_l(), 0);
-    m_auxillary_basis_set = &t_auxillary_basis_set;
+                                          t_auxiliary_basis_set.max_nprim(), t_auxiliary_basis_set.max_l(), 0);
+    m_auxiliary_basis_set = &t_auxiliary_basis_set;
     m_auxillary_shellpair_data = t_auxillary_shellpair_data.data();
   }
 
@@ -124,7 +124,7 @@ public:
   {
     auto unitShell = libint2::Shell::unit();
     m_coulomb_eng.compute2<libint2::Operator::coulomb,
-                           libint2::BraKet::xs_xx, 0>((*m_auxillary_basis_set)[ash - 1], unitShell,
+                           libint2::BraKet::xs_xx, 0>((*m_auxiliary_basis_set)[ash - 1], unitShell,
                                                       (*m_basis_set)[csh - 1], (*m_basis_set)[dsh - 1]);
     if (m_coulomb_eng.results()[0] != nullptr)
     {     
@@ -145,7 +145,7 @@ public:
                                 julia_int copy_size, 
                                 julia_int memory_skip)
   {
-    m_two_center_engine.compute((*m_auxillary_basis_set)[shell_1_index], (*m_auxillary_basis_set)[shell_2_index]);
+    m_two_center_engine.compute((*m_auxiliary_basis_set)[shell_1_index], (*m_auxiliary_basis_set)[shell_2_index]);
 
     if (m_coulomb_eng.results()[0] != nullptr)
     {     
@@ -165,9 +165,9 @@ public:
   julia_int shell_1_basis_count,
   julia_int shell_2_basis_count)
   {    
-    auto shell2bf = (*m_auxillary_basis_set).shell2bf();
-    int n_basis_functions  =(*m_auxillary_basis_set).nbf();
-    m_two_center_engine.compute((*m_auxillary_basis_set)[shell_1_index], (*m_auxillary_basis_set)[shell_2_index]);
+    auto shell2bf = (*m_auxiliary_basis_set).shell2bf();
+    int n_basis_functions  =(*m_auxiliary_basis_set).nbf();
+    m_two_center_engine.compute((*m_auxiliary_basis_set)[shell_1_index], (*m_auxiliary_basis_set)[shell_2_index]);
     if (m_two_center_engine.results()[0] != nullptr)
     { 
       for(int i = 0; i < shell_1_basis_count* shell_2_basis_count; i++)
