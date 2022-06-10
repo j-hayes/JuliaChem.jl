@@ -630,17 +630,6 @@ function df_rhf_fock_build(engine::DFRHFTEIEngine,
     end
   end
 
-  for val in eri_block_2_center_matrix
-    if isnan(val) 
-      println("has NAN eri_block_2_center_matrix")
-      break
-    end
-    if isinf(val) 
-      println("has INF eri_block_2_center_matrix")
-      break
-    end
-  end
-
   hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
   LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
   two_center_cholesky_lower = LLT_2_center.L
