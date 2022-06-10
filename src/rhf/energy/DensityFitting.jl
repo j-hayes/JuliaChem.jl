@@ -4,7 +4,7 @@ using TensorOperations
 
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rhf_fock_build(engine::DFRHFTEIEngine,  basis_sets::CalculationBasisSets, occupied_orbital_coefficients) 
+function df_rhf_fock_build(engine::DFRHFTEIEngine, basis_sets::CalculationBasisSets, occupied_orbital_coefficients) 
     
   three_center_integrals = calculate_three_center_integrals(engine, basis_sets)
   two_center_integrals = calculate_two_center_intgrals(engine, basis_sets)
@@ -17,8 +17,8 @@ end
   
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   basis_shell_count = length(basis_sets.primary)
-  auxillary_basis_function_count = JERI.nbf(basis_sets.auxillary.basis_cxx)
-  basis_function_count = JERI.nbf(basis_sets.primary.basis_cxx)
+  auxillary_basis_function_count =  basis_sets.auxillary.norb
+  basis_function_count =  basis_sets.primary.norb
   three_center_integrals = Array{Float64}(undef, (auxillary_basis_function_count,basis_function_count,basis_function_count))
   
   for s1 in 1:auxilliary_basis_shell_count
@@ -63,7 +63,7 @@ end
 end
 
 @inline function calculate_two_center_intgrals(engine::DFRHFTEIEngine, basis_sets) :: Matrix{Float64}
-  auxiliary_basis_function_count = JERI.nbf(basis_sets.auxillary.basis_cxx)
+  auxiliary_basis_function_count = basis_sets.auxillary.norb
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   two_center_integrals = zeros((auxiliary_basis_function_count, auxiliary_basis_function_count))
 
@@ -107,8 +107,8 @@ end
 
 @inline function contract_two_electron_integrals(Zxy_Matrix, eri_block_2_center_matrix, occupied_orbital_coefficients, basis_sets)
 
-  aux_basis_function_count = JERI.nbf(basis_sets.auxillary.basis_cxx)
-  basis_function_count = JERI.nbf(basis_sets.primary.basis_cxx)
+  aux_basis_function_count = basis_sets.auxillary.norb
+  basis_function_count = basis_sets.primary.norb
 
   hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
   LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
