@@ -38,17 +38,10 @@ end
         bf_3_pos = shell_3.pos
 
         n123 = n12 * shell_3_nbasis
-        temp = Vector{Float64}(undef, n123)
-        JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)        
-        temp_index = 1
-        for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1
-          for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
-            for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
-              three_center_integrals[i,j,k] = temp[temp_index]
-              temp_index += 1
-            end
-          end
-        end
+        integral_values = Vector{Float64}(undef, n123)
+        JERI.compute_eri_block_df(engine, integral_values, s1, s2, s3, n123, 0)      
+
+        copy_values_to_output!(three_center_integrals, integral_values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
         axial_normalization_factor(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
       end
     end
@@ -57,12 +50,22 @@ end
   return three_center_integrals
 end
 
-@inline function calculate_two_center_intgrals(engine::DFRHFTEIEngine, basis_sets) :: Matrix{Float64}
+@inline function copy_values_to_output!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)        
+  temp_index = 1
+  for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1
+    for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
+      for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
+        three_center_integrals[i,j,k] = values[temp_index]
+        temp_index += 1
+      end
+    end
+  end
+end
 
+@inline function calculate_two_center_intgrals(engine::DFRHFTEIEngine, basis_sets) :: Matrix{Float64}
   auxiliary_basis_function_count = JERI.nbf(basis_sets.auxillary.basis_cxx)
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   two_center_integrals = zeros((auxiliary_basis_function_count, auxiliary_basis_function_count))
-  shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx))
 
   for shell_1_index in 1:auxilliary_basis_shell_count
     shell_1 = basis_sets.auxillary.shells[shell_1_index]
@@ -74,26 +77,24 @@ end
       shell_2_basis_count = shell_2.nbas
       bf_2_pos = shell_2.pos
 
-      temp = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
-
-      JERI.compute_two_center_eri_block(engine, temp, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
-      
-      index1_start = Int64(shell2bf[shell_1_index]) + 1
-      index2_start = Int64(shell2bf[shell_2_index]) + 1            
-      eri_i_range = index1_start:index1_start+shell_1_basis_count-1
-      eri_j_range = index2_start:index2_start+shell_2_basis_count-1
-      temp_index = 1
-      for i in eri_i_range
-        for j in eri_j_range         
-          two_center_integrals[i,j] = temp[temp_index]
-          temp_index += 1
-        end 
-      end
+      integral_values = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
+      JERI.compute_two_center_eri_block(engine, integral_values, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
+      copy_values_to_output!(two_center_integrals, integral_values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
       axial_normalization_factor(two_center_integrals, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
     end 
   end
   clear_matrix_upper_triangle!(two_center_integrals, auxiliary_basis_function_count)
   return two_center_integrals
+end
+
+@inline function copy_values_to_output!(two_center_integrals, values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
+  temp_index = 1
+  for i in  shell_1.pos:shell_1.pos+shell_1_basis_count-1
+      for j in shell_2.pos:shell_2.pos+shell_2_basis_count-1         
+        two_center_integrals[i,j] = values[temp_index]
+        temp_index += 1
+      end 
+  end
 end
 
 @inline function clear_matrix_upper_triangle!(two_center_integrals, auxiliary_basis_function_count)
