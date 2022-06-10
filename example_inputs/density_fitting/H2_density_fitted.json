@@ -11,7 +11,7 @@
   "model": {   
     "method": "DFRHF",
     "basis": "6-311G(2df,2pd)",
-    "auxillary_basis": "cc-pVTZ-JKFIT"
+    "auxiliary_basis": "cc-pVTZ-JKFIT"
   },
   "keywords": {
     "scf":{
