@@ -16,6 +16,7 @@ using JSON
 
 Base.include(@__MODULE__,"EnergyHelpers.jl")
 Base.include(@__MODULE__,"SCF.jl")
+Base.include(@__MODULE__,"DensityFitting.jl")
 
 """
   overload to allow old mehtods that don't use auxillary basis sets to not need to be changed

@@ -4,7 +4,6 @@ using HDF5
 using PrettyTables
 using Printf
 using JuliaChem.JCRHF.Constants
-using TensorOperations
 
 const do_continue_print = false 
 const print_eri = false 
@@ -544,109 +543,7 @@ function rfh_fock_build(workspace_a, workspace_b, F,
   end
   return F
 end
-#== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rhf_fock_build(engine::DFRHFTEIEngine,
-  basis_sets::CalculationBasisSets, Cocc) 
-  auxiliary_basis_shells_count = length(basis_sets.auxillary)
-  basis_shells_count = length(basis_sets.primary)
-  n_df = JERI.nbf(basis_sets.auxillary.basis_cxx)
-  n = JERI.nbf(basis_sets.primary.basis_cxx)
 
-  Zxy_Matrix = Array{Float64}(undef, (n_df,n,n))
-  for s1 in 1:auxiliary_basis_shells_count
-    shell_1 = basis_sets.auxillary.shells[s1]
-    shell_1_nbasis = shell_1.nbas
-    bf_1_pos = shell_1.pos
-
-    for s2 in 1:basis_shells_count
-      shell_2 = basis_sets.primary.shells[s2]
-      shell_2_nbasis = shell_2.nbas
-      bf_2_pos = shell_2.pos
-      n12 = shell_1_nbasis * shell_2_nbasis
-
-      for s3 in 1:basis_shells_count
-        shell_3 = basis_sets.primary.shells[s3]
-        shell_3_nbasis = shell_3.nbas
-        bf_3_pos = shell_3.pos
-
-        n123 = n12 * shell_3_nbasis
-        temp = Vector{Float64}(undef, n123)
-        JERI.compute_eri_block_df(engine, temp, s1, s2, s3, n123, 0)
-
-        basis_range_1 = bf_1_pos:bf_1_pos+shell_1_nbasis-1
-        basis_range_2 = bf_2_pos:bf_2_pos+shell_2_nbasis-1
-        basis_range_3 = bf_3_pos:bf_3_pos+shell_3_nbasis-1
-        
-        temp_index = 1
-        for i in basis_range_1
-          for j in basis_range_2
-            for k in basis_range_3
-              Zxy_Matrix[i,j,k] = temp[temp_index]
-              temp_index += 1
-            end
-          end
-        end
-        axial_normalization_factor(Zxy_Matrix, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
-      end
-    end
-  end
-
-  eri_block_2_center_matrix = zeros((n_df,n_df))
-  shell2bf = copy.(JERI.shell2bf(basis_sets.auxillary.basis_cxx));
-  for shell_1_index in 1:auxiliary_basis_shells_count
-    shell_1 = basis_sets.auxillary.shells[shell_1_index]
-    shell_1_basis_count = shell_1.nbas
-    bf_1_pos = shell_1.pos
-
-    for shell_2_index in 1:shell_1_index
-      shell_2 = basis_sets.auxillary.shells[shell_2_index]
-      shell_2_basis_count = shell_2.nbas
-      bf_2_pos = shell_2.pos
-
-      temp = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
-
-      JERI.compute_two_center_eri_block(engine, temp, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
-      
-      index1_start = Int64(shell2bf[shell_1_index]) + 1
-      index2_start = Int64(shell2bf[shell_2_index]) + 1            
-      eri_i_range = index1_start:index1_start+shell_1_basis_count-1
-      eri_j_range = index2_start:index2_start+shell_2_basis_count-1
-      temp_index = 1
-      for i in eri_i_range
-        for j in eri_j_range         
-          eri_block_2_center_matrix[i,j] = temp[temp_index]
-          temp_index += 1
-        end 
-      end
-      axial_normalization_factor(eri_block_2_center_matrix, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
-    end 
-  end
-
-  for iii in 1:n_df
-    for jjj in 1:n_df 
-      if jjj > iii
-        eri_block_2_center_matrix[iii,jjj] = 0.0
-      end
-    end
-  end
-
-  hermitian_eri_block_2_center_matrix = Hermitian(eri_block_2_center_matrix, :L)
-  LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
-  two_center_cholesky_lower = LLT_2_center.L
-  
-  Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-  nocc = size(Cocc, 2)
-  xyK = zeros(n, n, n_df)
-  TensorOperations.tensorcontract!(1.0, Zxy_Matrix, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
-  xiK = zeros(n, nocc, n_df)
-  TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  Cocc, (2,4), 'N', 0.0, xiK, (1,4,3))
-  G = zeros(n,n)
-  TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, G, (1, 4))
-  Jtmp = zeros(n_df)
-  TensorOperations.tensorcontract!(1.0, xiK, (1, 2, 3), 'N', Cocc, (1, 2),  'N',  0.0, Jtmp, (3))
-  TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, G, (1, 2))
-  return G
-end
 
 
 #=
