@@ -46,7 +46,7 @@ Test.@testset "S22 Tests" begin
     for imol in molecules 
       println("SCF Energies RHF,DFRHF $(s22_test_results[imol][:Energy]["Energy"]) $(s22_test_results_densityfitting[imol][:Energy]["Energy"])")
       Test.@test s22_test_results[imol][:Energy]["Energy"] ≈ S22_GAMESS["$imol"]["Energy"]
-      Test.@test s22_test_results[imol][:Energy]["Energy"] ≈ s22_test_results_densityfitting[imol][:Energy]["Energy"]
+      Test.@test s22_test_results[imol][:Energy]["Energy"] ≈ s22_test_results_densityfitting[imol][:Energy]["Energy"] atol=.0015
     end
   end
 
