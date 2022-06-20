@@ -82,18 +82,6 @@ function run(molecule, model; output="none")
   basis_set_norb = 0
   pos = 1
   shell_id = 1
-
-  #initialize variables and structs for auxillary basis set build if building auxillary basis set 
-  if build_auxillary    
-    auxiliary_basis_set_shells = Vector{JCModules.Shell}([])
-    auxillary_shells_cxx = StdVector([ StdVector{JERI.Shell}() for i in 1:55 ]) 
-    auxillary_shells_cxx_added = [ false for i in 1:55 ]
-
-    auxiliary_basis_set_nels = -charge 
-    auxiliary_basis_set_norb = 0
-    auxillary_pos = 1
-    auxillary_shell_id = 1
-  end #todo Clean up this Jackson
   
   #== relocate center of mass of system to origin ==# 
   center_of_mass = Vector{Float64}([0.0, 0.0, 0.0])
@@ -137,22 +125,8 @@ function run(molecule, model; output="none")
     end
   end
 
-  if build_auxillary 
-    h5open(joinpath(@__DIR__, "../../records/auxilliary_bsed.h5"),"r") do aux_bsed
-      for (atom_idx, symbol) in enumerate(symbols)
-        #== initialize variables needed for shell ==#
-        atom_center = atom_centers[atom_idx] 
-        atomic_number = atomic_number_mapping[symbol]
-        a = keys(aux_bsed)
-        auxillary_pos, auxiliary_basis_set_norb, auxillary_shell_id = add_shells!(aux_bsed, auxiliary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxiliary_basis, 
-        shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxiliary_basis_set_norb, auxillary_shell_id, output)  
-        auxillary_shells_cxx_added[atomic_number+1] = true 
-      
-        if MPI.Comm_rank(comm) == 0 && output >= 2
-          println(" ")
-        end
-      end
-    end
+  if build_auxillary
+    auxiliary_basis_set_shells, auxillary_shells_cxx, auxiliary_basis_set_norb = build_auxillary_basis(auxiliary_basis, symbols, atom_centers, atomic_number_mapping, shell_am_mapping, output, comm)
   end
 
   if MPI.Comm_rank(comm) == 0 && output >= 2
@@ -161,9 +135,9 @@ function run(molecule, model; output="none")
     println("----------------------------------------          ")
     println()
     println("Basis set: $basis")
-    println("Auxillary Basis set: $auxiliary_basis")
     println("Number of basis functions: $basis_set_norb")
     if build_auxillary
+      println("Auxillary Basis set: $auxiliary_basis")
       println("Number of auxillary basis functions: $auxiliary_basis_set_norb")
     end 
 
@@ -200,6 +174,48 @@ function run(molecule, model; output="none")
   end
 
   return return_val
+end
+
+"""
+Builds the auxillary basis set
+returns 
+  1) auxiliary_basis_set_shells: the auxillary basis set shells
+  2) auxillary_shells_cxx: the auxillary basis set to pass to libint (c++)
+  3) auxiliary_basis_set_norb: the count auxiliary basis set orbitals
+"""
+function build_auxillary_basis(auxiliary_basis, symbols, atom_centers, atomic_number_mapping, shell_am_mapping, output, comm)
+  #initialize variables and structs for auxillary basis set build if building auxillary basis set 
+  auxiliary_basis_set_shells = Vector{JCModules.Shell}([])
+  auxillary_shells_cxx = StdVector([ StdVector{JERI.Shell}() for i in 1:55 ]) 
+  auxillary_shells_cxx_added = [ false for i in 1:55 ]
+
+  auxiliary_basis_set_norb = 0
+  auxillary_pos = 1
+  auxillary_shell_id = 1
+
+  if MPI.Comm_rank(comm) == 0 && output >= 2
+    println("----------------------------------------          ")
+    println("       Printing Auxillary basis set...            ")
+    println("----------------------------------------          ")
+    println()
+  end
+
+  h5open(joinpath(@__DIR__, "../../records/auxilliary_bsed.h5"),"r") do aux_bsed
+    for (atom_idx, symbol) in enumerate(symbols)
+      #== initialize variables needed for shell ==#
+      atom_center = atom_centers[atom_idx] 
+      atomic_number = atomic_number_mapping[symbol]
+      auxillary_pos, auxiliary_basis_set_norb, auxillary_shell_id = add_shells!(aux_bsed, auxiliary_basis_set_shells, auxillary_shells_cxx, auxillary_shells_cxx_added, symbol, auxiliary_basis, 
+      shell_am_mapping, atom_idx, atomic_number, auxillary_pos, atom_center, auxiliary_basis_set_norb, auxillary_shell_id, output)  
+      auxillary_shells_cxx_added[atomic_number+1] = true 
+    
+      if MPI.Comm_rank(comm) == 0 && output >= 2
+        println(" ")
+      end
+    end
+  end
+
+  return auxiliary_basis_set_shells, auxillary_shells_cxx, auxiliary_basis_set_norb
 end
 
 function add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbol, basis, 
