@@ -21,6 +21,9 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
   do_density_fitting::Bool = haskey(scf_flags, SCF_Keywords.SCF_TYPE) ? lowercase(scf_flags[SCF_Keywords.SCF_TYPE]) == SCF.DensityFitting : false
+
+  check_auxillary_basis_is_provided(do_density_fitting, basis_sets)
+
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
     niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
     fdiff=fdiff, do_density_fitting=do_density_fitting)
@@ -1010,4 +1013,10 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
   end
 
   return E_elec, F_eval
+end
+
+function check_auxillary_basis_is_provided(do_density_fitting, basis_sets)
+  if do_density_fitting && isnothing(basis_sets.auxillary)
+    error("Density Fitting scf_type selected but no auxillary basis set was found. Check your input: model.auxiliary_basis value")
+  end
 end
