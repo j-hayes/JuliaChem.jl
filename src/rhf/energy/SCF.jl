@@ -351,11 +351,10 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     for thread in 1:nthreads ]
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
-  engine = do_density_fitting ?  
-  JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) :
-  JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
-  
-  jeri_engine_thread = [ engine for thread in 1:nthreads ]
+
+  jeri_engine_thread = do_density_fitting ? 
+    [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] :
+    [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
   
   while !iter_converged
     #== reset eri arrays ==#
