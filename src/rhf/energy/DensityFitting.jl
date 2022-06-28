@@ -22,13 +22,13 @@ function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_s
   three_center_integrals = Array{Float64}(undef, (auxillary_basis_function_count,basis_function_count,basis_function_count))
   # batches_per_thread = auxilliary_basis_shell_count
   
-  indecies = eachindex(view(three_center_integrals, 1:auxilliary_basis_shell_count, 1:basis_shell_count, 1:basis_shell_count))
-  number_of_indecies = length(indecies)   
+  cartesian_indecies = eachindex(view(three_center_integrals, 1:auxilliary_basis_shell_count, 1:basis_shell_count, 1:basis_shell_count))
+  number_of_indecies = length(cartesian_indecies)   
   n_threads = Threads.nthreads()
   batch_size = ceil(Int,number_of_indecies/n_threads)
   load = "static"
   if load == "sequential"
-    for cartesian_index in indecies
+    for cartesian_index in cartesian_indecies
       engine =  jeri_engine_thread[1]    
       calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets)   
     end
@@ -37,7 +37,7 @@ function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_s
       Threads.@spawn begin
         thread_id = Threads.threadid()                                             
         for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
-          cartesian_index = indecies[view_index]
+          cartesian_index = cartesian_indecies[view_index]
           engine =  jeri_engine_thread[thread_id]    
           calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets)        
         end 
@@ -95,20 +95,28 @@ end
   two_center_integrals = zeros((auxiliary_basis_function_count, auxiliary_basis_function_count))
 
   cartesian_indicies = [index for index in eachindex(view(two_center_integrals, 1:auxilliary_basis_shell_count,1:auxilliary_basis_shell_count))]
-  number_of_indecies = auxilliary_basis_shell_count*auxilliary_basis_shell_count
-  number_of_indecies = length(indecies)   
+  number_of_indecies = length(cartesian_indicies)   
   n_threads = Threads.nthreads()
   batch_size = ceil(Int,number_of_indecies/n_threads)  
 
   # for index in 1:batchsize:number_of_indecies
-  load = "sequential"
+  load = "static"
   if load == "sequential"
     engine = jeri_engine_thread[1]
     for cartesian_index in cartesian_indicies
       calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets)
     end  
   elseif load  == "static"  
-    
+    @sync for batch_index in 1:batch_size:number_of_indecies
+      Threads.@spawn begin
+        thread_id = Threads.threadid()                                             
+        for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
+          cartesian_index = cartesian_indicies[view_index]
+          engine =  jeri_engine_thread[thread_id]    
+          calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets)
+        end 
+      end 
+    end 
   else
     error("integral threading load type: $(load) not supported")
   end

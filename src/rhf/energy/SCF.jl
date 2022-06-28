@@ -357,6 +357,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
   
   while !iter_converged
+    flush(stdout)
     #== reset eri arrays ==#
     #if quartet_batch_num_old != 1 && iter != 1
     #  resize!(eri_sizes,length_eri_sizes)
