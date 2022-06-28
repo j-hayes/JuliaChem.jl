@@ -7,7 +7,7 @@ using TensorOperations
 function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, occupied_orbital_coefficients::Matrix{Float64}) where T <: DFRHFTEIEngine
     
   three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets)
-  two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread[1], basis_sets)
+  two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets)
   two_electron_fock_component = contract_two_electron_integrals(three_center_integrals, two_center_integrals, occupied_orbital_coefficients, basis_sets)
 
   return two_electron_fock_component
@@ -26,7 +26,7 @@ function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_s
   number_of_indecies = length(indecies)   
   n_threads = Threads.nthreads()
   batch_size = ceil(Int,number_of_indecies/n_threads)
-  load = "sequential"
+  load = "static"
   if load == "sequential"
     for cartesian_index in indecies
       engine =  jeri_engine_thread[1]    
@@ -89,47 +89,68 @@ end
     end
   end
 end
-
-@inline function calculate_two_center_intgrals(engine::DFRHFTEIEngine, basis_sets) :: Matrix{Float64}
+@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets) :: Matrix{Float64}  where T <: DFRHFTEIEngine
   auxiliary_basis_function_count = basis_sets.auxillary.norb
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   two_center_integrals = zeros((auxiliary_basis_function_count, auxiliary_basis_function_count))
 
-  for shell_1_index in 1:auxilliary_basis_shell_count
-    shell_1 = basis_sets.auxillary.shells[shell_1_index]
-    shell_1_basis_count = shell_1.nbas
-    bf_1_pos = shell_1.pos
+  cartesian_indicies = [index for index in eachindex(view(two_center_integrals, 1:auxilliary_basis_shell_count,1:auxilliary_basis_shell_count))]
+  number_of_indecies = auxilliary_basis_shell_count*auxilliary_basis_shell_count
+  number_of_indecies = length(indecies)   
+  n_threads = Threads.nthreads()
+  batch_size = ceil(Int,number_of_indecies/n_threads)  
 
-    for shell_2_index in 1:shell_1_index
-      shell_2 = basis_sets.auxillary.shells[shell_2_index]
-      shell_2_basis_count = shell_2.nbas
-      bf_2_pos = shell_2.pos
-
-      integral_values = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
-      JERI.compute_two_center_eri_block(engine, integral_values, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
-      copy_values_to_output!(two_center_integrals, integral_values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
-      axial_normalization_factor(two_center_integrals, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
-    end 
+  # for index in 1:batchsize:number_of_indecies
+  load = "sequential"
+  if load == "sequential"
+    engine = jeri_engine_thread[1]
+    for cartesian_index in cartesian_indicies
+      calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets)
+    end  
+  elseif load  == "static"  
+    
+  else
+    error("integral threading load type: $(load) not supported")
   end
-  clear_matrix_upper_triangle!(two_center_integrals, auxiliary_basis_function_count)
-  return two_center_integrals
+  
+return two_center_integrals
 end
+
+
+@inline function calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets)
+  shell_1_index = cartesian_index[1]
+  shell_2_index = cartesian_index[2]
+
+  if shell_2_index > shell_1_index #the top triangle of the symmetric matrix does not need to be calculated
+    return
+  end
+
+  shell_1 = basis_sets.auxillary.shells[shell_1_index]
+  shell_1_basis_count = shell_1.nbas
+  bf_1_pos = shell_1.pos
+
+  shell_2 = basis_sets.auxillary.shells[shell_2_index]
+  shell_2_basis_count = shell_2.nbas
+  bf_2_pos = shell_2.pos
+
+  integral_values = Vector{Float64}(undef, shell_1_basis_count*shell_2_basis_count)
+  JERI.compute_two_center_eri_block(engine, integral_values, shell_1_index-1, shell_2_index-1, shell_1_basis_count, shell_2_basis_count)     
+  copy_values_to_output!(two_center_integrals, integral_values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
+  axial_normalization_factor(two_center_integrals, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
+end
+
 
 @inline function copy_values_to_output!(two_center_integrals, values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
   temp_index = 1
   for i in  shell_1.pos:shell_1.pos+shell_1_basis_count-1
-      for j in shell_2.pos:shell_2.pos+shell_2_basis_count-1         
-        two_center_integrals[i,j] = values[temp_index]
-        temp_index += 1
+      for j in shell_2.pos:shell_2.pos+shell_2_basis_count-1  
+        if i >= j # makes sure we don't put any values onto the top triangle which happens for some reason sometimes 
+          two_center_integrals[i,j] = values[temp_index]
+        else        
+          two_center_integrals[i,j] = 0.0
+        end
+        temp_index += 1       
       end 
-  end
-end
-
-@inline function clear_matrix_upper_triangle!(two_center_integrals, auxiliary_basis_function_count)
-  for i in 1:auxiliary_basis_function_count
-    for j in i+1:auxiliary_basis_function_count 
-        two_center_integrals[i,j] = 0.0
-    end
   end
 end
 
