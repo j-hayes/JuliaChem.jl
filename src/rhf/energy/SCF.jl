@@ -414,7 +414,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       cutoff, debug, load, fdiff, ΔF, F_cumul)
     else
       electrons_count = Int64(basis_sets.primary.nels)
-      F = H + df_rhf_fock_build(engine, basis_sets, C[:,1:electrons_count÷2])
+      F = H + df_rhf_fock_build(jeri_engine_thread, basis_sets, C[:,1:electrons_count÷2])
     end
 
     if debug && MPI.Comm_rank(comm) == 0

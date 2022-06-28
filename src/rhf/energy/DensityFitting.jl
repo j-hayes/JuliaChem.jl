@@ -4,50 +4,78 @@ using TensorOperations
 
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rhf_fock_build(engine::DFRHFTEIEngine, basis_sets::CalculationBasisSets, occupied_orbital_coefficients) 
+function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, occupied_orbital_coefficients::Matrix{Float64}) where T <: DFRHFTEIEngine
     
-  three_center_integrals = calculate_three_center_integrals(engine, basis_sets)
-  two_center_integrals = calculate_two_center_intgrals(engine, basis_sets)
+  three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets)
+  two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread[1], basis_sets)
   two_electron_fock_component = contract_two_electron_integrals(three_center_integrals, two_center_integrals, occupied_orbital_coefficients, basis_sets)
 
   return two_electron_fock_component
 end
 
-@inline function calculate_three_center_integrals(engine::DFRHFTEIEngine, basis_sets) :: Array{Float64}
+function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets) :: Array{Float64} where T <: DFRHFTEIEngine
   
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   basis_shell_count = length(basis_sets.primary)
   auxillary_basis_function_count =  basis_sets.auxillary.norb
   basis_function_count =  basis_sets.primary.norb
   three_center_integrals = Array{Float64}(undef, (auxillary_basis_function_count,basis_function_count,basis_function_count))
+  # batches_per_thread = auxilliary_basis_shell_count
   
-  for s1 in 1:auxilliary_basis_shell_count
-    shell_1 = basis_sets.auxillary.shells[s1]
-    shell_1_nbasis = shell_1.nbas
-    bf_1_pos = shell_1.pos
-
-    for s2 in 1:basis_shell_count
-      shell_2 = basis_sets.primary.shells[s2]
-      shell_2_nbasis = shell_2.nbas
-      bf_2_pos = shell_2.pos
-      n12 = shell_1_nbasis * shell_2_nbasis
-
-      for s3 in 1:basis_shell_count
-        shell_3 = basis_sets.primary.shells[s3]
-        shell_3_nbasis = shell_3.nbas
-        bf_3_pos = shell_3.pos
-
-        n123 = n12 * shell_3_nbasis
-        integral_values = Vector{Float64}(undef, n123)
-        JERI.compute_eri_block_df(engine, integral_values, s1, s2, s3, n123, 0)      
-
-        copy_values_to_output!(three_center_integrals, integral_values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
-        axial_normalization_factor(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
-      end
+  indecies = eachindex(view(three_center_integrals, 1:auxilliary_basis_shell_count, 1:basis_shell_count, 1:basis_shell_count))
+  number_of_indecies = length(indecies)   
+  n_threads = Threads.nthreads()
+  batch_size = ceil(Int,number_of_indecies/n_threads)
+  load = "sequential"
+  if load == "sequential"
+    for cartesian_index in indecies
+      engine =  jeri_engine_thread[1]    
+      calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets)   
     end
-  end 
+  elseif load  == "static"  
+    @sync for batch_index in 1:batch_size:number_of_indecies
+      Threads.@spawn begin
+        thread_id = Threads.threadid()                                             
+        for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
+          cartesian_index = indecies[view_index]
+          engine =  jeri_engine_thread[thread_id]    
+          calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets)        
+        end 
+      end 
+    end 
+  else
+    error("integral threading load type: $(load) not supported")
+  end
+
+  
 
   return three_center_integrals
+end
+
+@inline function calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets)
+  s1 = cartesian_index[1]
+  s2 = cartesian_index[2]
+  s3 = cartesian_index[3]
+
+  shell_1 = basis_sets.auxillary.shells[s1]
+  shell_1_nbasis = shell_1.nbas
+  bf_1_pos = shell_1.pos 
+
+  shell_2 = basis_sets.primary.shells[s2]
+  shell_2_nbasis = shell_2.nbas
+  bf_2_pos = shell_2.pos
+  n12 = shell_1_nbasis * shell_2_nbasis
+    
+  shell_3 = basis_sets.primary.shells[s3]
+  shell_3_nbasis = shell_3.nbas
+  bf_3_pos = shell_3.pos
+
+  n123 = n12 * shell_3_nbasis
+  integral_values = Vector{Float64}(undef, n123)
+  JERI.compute_eri_block_df(engine, integral_values, s1, s2, s3, n123, 0)      
+
+  copy_values_to_output!(three_center_integrals, integral_values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
+  axial_normalization_factor(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
 end
 
 @inline function copy_values_to_output!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)        
