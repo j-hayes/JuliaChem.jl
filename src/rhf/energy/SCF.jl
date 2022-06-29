@@ -4,6 +4,7 @@ using HDF5
 using PrettyTables
 using Printf
 using JuliaChem.JCRHF.Constants
+using TensorOperations
 
 const do_continue_print = false 
 const print_eri = false 
@@ -357,6 +358,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
 
   if do_density_fitting
+    # enable_blas() 
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     electrons_count = Int64(basis_sets.primary.nels)
@@ -370,9 +372,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     two_center_integrals = zeros((aux_basis_function_count, aux_basis_function_count))
     two_electron_fock_component = zeros(basis_function_count,basis_function_count)
   end
-  iteration_index = 0
   while !iter_converged
-    iteration_index = iteration_index + 1
     flush(stdout)
     #== reset eri arrays ==#
     #if quartet_batch_num_old != 1 && iter != 1
@@ -431,7 +431,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       cutoff, debug, load, fdiff, ΔF, F_cumul)      
     else
       df_rhf_fock_build(jeri_engine_thread, basis_sets, C[:,1:electrons_count÷2], 
-        xyK, xiK, two_electron_fock_component, three_center_integrals, two_center_integrals, iteration_index) 
+        xyK, xiK, two_electron_fock_component, three_center_integrals, two_center_integrals, iter) 
       F .= H .+ two_electron_fock_component
     end
     

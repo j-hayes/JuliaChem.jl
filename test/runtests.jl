@@ -33,10 +33,24 @@ molecules = collect(test_index_start:test_index_end)
 s22_test_results = Dict([]) 
 s22_test_results_densityfitting = Dict([]) 
 
+
+travis_rhf_density_fitting(inputs[1], "cc-pVTZ-JKFIT") #get everything initialized before doing timings
+
 for imol in molecules 
   println("S$(imol) starting") 
-  s22_test_results_densityfitting[imol] = travis_rhf_density_fitting(inputs[imol], "cc-pVTZ-JKFIT")
-  s22_test_results[imol] = travis_rhf(inputs[imol])
+ 
+ 
+  @time begin
+    s22_test_results_densityfitting[imol] = travis_rhf_density_fitting(inputs[imol], "cc-pVTZ-JKFIT")
+  end
+  println("S$(imol) DF-RHF time ^") 
+
+  @time begin
+    s22_test_results[imol] = travis_rhf(inputs[imol])
+  end
+  println("S$(imol) RHF time ^") 
+
+  
 end
 
 #== check energies ==#

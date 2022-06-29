@@ -172,16 +172,11 @@ end
     LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
     two_center_cholesky_lower = LLT_2_center.L
     Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-
-  
-      TensorOperations.tensorcontract!(1.0, three_center_integrals, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
- 
-
+    TensorOperations.tensorcontract!(1.0, three_center_integrals, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
   end
-  #end #memory fine fast
-  @time begin ##SLOW
+  # @time begin ##uses a lot of memory
   TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  occupied_orbital_coefficients, (2,4), 'N', 0.0, xiK, (1,4,3))
-  end ##SLOW
+  # end  ##uses a lot of memory
   
   #quick
   TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, two_electron_fock_component, (1, 4))
