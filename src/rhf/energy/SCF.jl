@@ -355,8 +355,24 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   jeri_engine_thread = do_density_fitting ? 
     [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] :
     [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
-  
+
+  if do_density_fitting
+    aux_basis_function_count = basis_sets.auxillary.norb
+    basis_function_count = basis_sets.primary.norb
+    electrons_count = Int64(basis_sets.primary.nels)
+    occupied_orbital_coefficients = C[:,1:electrons_count÷2]
+    number_off_occ_orbitals = size(occupied_orbital_coefficients, 2)
+    xyK = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
+    xiK = zeros(basis_function_count, number_off_occ_orbitals, aux_basis_function_count)
+    auxillary_basis_function_count =  basis_sets.auxillary.norb
+    basis_function_count =  basis_sets.primary.norb
+    three_center_integrals = Array{Float64}(undef, (auxillary_basis_function_count,basis_function_count,basis_function_count))
+    two_center_integrals = zeros((aux_basis_function_count, aux_basis_function_count))
+    two_electron_fock_component = zeros(basis_function_count,basis_function_count)
+  end
+  iteration_index = 0
   while !iter_converged
+    iteration_index = iteration_index + 1
     flush(stdout)
     #== reset eri arrays ==#
     #if quartet_batch_num_old != 1 && iter != 1
@@ -412,12 +428,13 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       schwarz_bounds, Dsh,
       eri_quartet_batch_thread, 
       jeri_engine_thread, iter,
-      cutoff, debug, load, fdiff, ΔF, F_cumul)
+      cutoff, debug, load, fdiff, ΔF, F_cumul)      
     else
-      electrons_count = Int64(basis_sets.primary.nels)
-      F = H + df_rhf_fock_build(jeri_engine_thread, basis_sets, C[:,1:electrons_count÷2])
+      df_rhf_fock_build(jeri_engine_thread, basis_sets, C[:,1:electrons_count÷2], 
+        xyK, xiK, two_electron_fock_component, three_center_integrals, two_center_integrals, iteration_index) 
+      F .= H .+ two_electron_fock_component
     end
-
+    
     if debug && MPI.Comm_rank(comm) == 0
       h5write("debug.h5","RHF/Iteration-$iter/F/Total", F)
     end

@@ -193,7 +193,17 @@ function max_ang_mom(basis_set::Basis)
   end
   return max_am
 end
-export max_ang_mom
+
+
+function max_number_of_basis_functions(basis_set::Basis)
+  max_nbas = 0
+  for shell in basis_set.shells
+    max_nbas = shell.nbas > max_nbas ? shell.nbas : max_nbas
+  end
+  return max_nbas
+end
+
+export max_ang_mom, max_number_of_basis_functions
 
 function Base.getindex(basis_set::Basis, index)
   return basis_set.shells[index]
