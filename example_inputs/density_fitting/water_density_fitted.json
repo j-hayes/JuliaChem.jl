@@ -10,7 +10,7 @@
   },
   "driver": "energy",
   "model": {   
-    "method": "rhf",
+    "method": "RHF",
     "basis": "6-311G(2df,2pd)",
     "auxiliary_basis": "cc-pVTZ-JKFIT"
   },

@@ -4,17 +4,38 @@ using TensorOperations
 
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
-function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, 
-  occupied_orbital_coefficients::Matrix{Float64}, xyK, xiK, two_electron_fock_component,
-  three_center_integrals, two_center_integrals, iteration) where T <: DFRHFTEIEngine
-  if iteration == 1 
-    calculate_three_center_integrals(jeri_engine_thread, basis_sets, three_center_integrals)
-    calculate_two_center_intgrals(jeri_engine_thread, basis_sets, two_center_integrals)
+@inline function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, 
+  occupied_orbital_coefficients, xyK, xiK, two_electron_fock_component,
+  iteration, load) where T <: DFRHFTEIEngine
+
+  aux_basis_function_count = basis_sets.auxillary.norb
+  basis_function_count = basis_sets.primary.norb
+  if iteration == 1
+    three_center_integrals = Array{Float64}(undef, (aux_basis_function_count,basis_function_count,basis_function_count))
+    two_center_integrals = zeros((aux_basis_function_count, aux_basis_function_count))
+    calculate_three_center_integrals(jeri_engine_thread, basis_sets, three_center_integrals, load)
+    calculate_two_center_intgrals(jeri_engine_thread, basis_sets, two_center_integrals, load)
+
+    hermitian_eri_block_2_center_matrix = Hermitian(two_center_integrals, :L)
+    LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
+    two_center_cholesky_lower = LLT_2_center.L
+    Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
+    TensorOperations.tensorcontract!(1.0, three_center_integrals, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
   end
-  contract_two_electron_integrals(three_center_integrals, two_center_integrals, occupied_orbital_coefficients, basis_sets, xyK, xiK ,two_electron_fock_component,iteration)
+  # @time begin ##allocates a lot of memory
+  TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  occupied_orbital_coefficients, (2,4), 'N', 0.0, xiK, (1,4,3))
+  # end  ##allocates a lot of memory
+  
+  TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, two_electron_fock_component, (1, 4))
+  Jtmp = zeros(aux_basis_function_count)
+  TensorOperations.tensorcontract!(1.0, xiK, (1, 2, 3), 'N', occupied_orbital_coefficients, (1, 2),  'N',  0.0, Jtmp, (3))
+  TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, two_electron_fock_component, (1, 2))
+
+return two_electron_fock_component
 end
 
-function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, three_center_integrals) :: Array{Float64} where T <: DFRHFTEIEngine
+
+@inline function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, three_center_integrals, load) :: Array{Float64} where T <: DFRHFTEIEngine
   
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   basis_shell_count = length(basis_sets.primary)
@@ -26,7 +47,6 @@ function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_s
 
   max_nbas = max(max_number_of_basis_functions(basis_sets.primary), max_number_of_basis_functions(basis_sets.auxillary))
   thead_integral_buffer = [Vector{Float64}(undef, max_nbas^3) for i in 1:n_threads]
-  load = "static"
   if load == "sequential"
     for cartesian_index in cartesian_indecies
       engine =  jeri_engine_thread[1]   
@@ -88,7 +108,7 @@ end
     end
   end
 end
-@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals) :: Matrix{Float64}  where T <: DFRHFTEIEngine
+@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals, load) :: Matrix{Float64}  where T <: DFRHFTEIEngine
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   cartesian_indicies = eachindex(view(two_center_integrals, 1:auxilliary_basis_shell_count,1:auxilliary_basis_shell_count))
   number_of_indecies = length(cartesian_indicies)   
@@ -98,9 +118,6 @@ end
 
   max_nbas =  max_number_of_basis_functions(basis_sets.auxillary)
   thead_integral_buffer = [Vector{Float64}(undef, max_nbas^2) for i in 1:n_threads]
-
-  # for index in 1:batchsize:number_of_indecies
-  load = "static"
   if load == "sequential"
     engine = jeri_engine_thread[1]
     for cartesian_index in cartesian_indicies
@@ -163,28 +180,3 @@ end
   end
 end
 
-@inline function contract_two_electron_integrals(three_center_integrals, two_center_integrals, occupied_orbital_coefficients, basis_sets, xyK, xiK, two_electron_fock_component, iteration)
-  # @time begin #memory fine fast
-  aux_basis_function_count = basis_sets.auxillary.norb
-  basis_function_count = basis_sets.primary.norb
-  if iteration == 1
-    hermitian_eri_block_2_center_matrix = Hermitian(two_center_integrals, :L)
-    LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
-    two_center_cholesky_lower = LLT_2_center.L
-    Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-    TensorOperations.tensorcontract!(1.0, three_center_integrals, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
-  end
-  # @time begin ##uses a lot of memory
-  TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  occupied_orbital_coefficients, (2,4), 'N', 0.0, xiK, (1,4,3))
-  # end  ##uses a lot of memory
-  
-  #quick
-  TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, two_electron_fock_component, (1, 4))
-  Jtmp = zeros(aux_basis_function_count)
-  TensorOperations.tensorcontract!(1.0, xiK, (1, 2, 3), 'N', occupied_orbital_coefficients, (1, 2),  'N',  0.0, Jtmp, (3))
-  TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, two_electron_fock_component, (1, 2))
-  #quick  
-  
-  
-  return two_electron_fock_component
-end
