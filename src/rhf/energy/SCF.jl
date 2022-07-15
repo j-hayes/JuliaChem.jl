@@ -101,15 +101,15 @@ function rhf_kernel(mol::Molecule,
   F = guess == "hcore" ? guess_matrix : zeros(size(H)) 
  
   F_eval = Vector{Float64}(undef,basis.norb)
-  F_evec = similar(F)
+  F_evec = zeros(size(F))
 
-  W = similar(F)
+  W = zeros(size(F))
   
-  C = similar(F)
+  C = zeros(size(F))
 
   #== allocate workspace matrices ==#
-  workspace_a = similar(F)
-  workspace_b = similar(F)
+  workspace_a = zeros(size(F))
+  workspace_b = zeros(size(F))
   workspace_c = [ similar(F) ]
 
   #== check for linear dependencies ==#
