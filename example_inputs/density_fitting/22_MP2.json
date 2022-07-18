@@ -38,7 +38,9 @@
   },
   "keywords": {
     "scf":{
-      "guess":"sad"
+      "guess":"sad",
+      "dele":1E-7,
+      "rmsd":1E-7
     },
     "prop":{
       "mo energies":true,

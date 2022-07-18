@@ -366,9 +366,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     number_off_occ_orbitals = size(occupied_orbital_coefficients, 2)
     xyK = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
     xiK = zeros(basis_function_count, number_off_occ_orbitals, aux_basis_function_count)
-    basis_function_count =  basis_sets.primary.norb
     two_electron_fock_component = zeros(basis_function_count,basis_function_count)
   end
+
+  density_fitting_converged = false
+  
   while !iter_converged
     flush(stdout)
     #== reset eri arrays ==#
@@ -418,7 +420,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   
     #== build new Fock matrix ==#
-    if !do_density_fitting
+    if !do_density_fitting || density_fitting_converged
       rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
@@ -499,7 +501,19 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       @printf("%d      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms)
     end
 
-    iter_converged = Base.abs_float(ΔE) <= dele && D_rms <= rmsd
+    if do_density_fitting && !density_fitting_converged 
+      density_fitting_converged = Base.abs_float(ΔE) <= 10^(-3) && D_rms <= 10^(-3)
+      if density_fitting_converged || iter > 20
+        xyK = nothing
+        xiK = nothing
+        two_electron_fock_component = nothing        
+        density_fitting_converged = true
+        jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
+        println("------------ done with density fitted iterations --------------")
+      end
+    else
+      iter_converged = Base.abs_float(ΔE) <= dele && D_rms <= rmsd
+    end
     iter += 1
     if iter > niter
       scf_converged = false

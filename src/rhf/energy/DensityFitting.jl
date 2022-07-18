@@ -4,6 +4,14 @@ using TensorOperations
 
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
+#== 
+Indecies for all tensor contractions 
+  duplicated letters: (e.g.) dd dummy variables that will be summed Overlap
+  A = Auxillary Basis orbital
+  μ,ν = Primary Basis orbital
+  i = occupied orbitals
+
+==#
 @inline function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, 
   occupied_orbital_coefficients, xyK, xiK, two_electron_fock_component,
   iteration, load) where T <: DFRHFTEIEngine
@@ -20,17 +28,14 @@ using TensorOperations
     LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
     two_center_cholesky_lower = LLT_2_center.L
     Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-    TensorOperations.tensorcontract!(1.0, three_center_integrals, (2, 3, 4), 'N',  Linv_t, (2, 5), 'N', 0.0, xyK, (3, 4, 5))
+    @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
   end
-  # @time begin ##allocates a lot of memory
-  TensorOperations.tensorcontract!(1.0, xyK, (1,2,3), 'N',  occupied_orbital_coefficients, (2,4), 'N', 0.0, xiK, (1,4,3))
-  # end  ##allocates a lot of memory
   
-  TensorOperations.tensorcontract!(1.0, xiK, (1,2,3), 'N',  xiK, (4, 2, 3), 'N', 0.0, two_electron_fock_component, (1, 4))
-  Jtmp = zeros(aux_basis_function_count)
-  TensorOperations.tensorcontract!(1.0, xiK, (1, 2, 3), 'N', occupied_orbital_coefficients, (1, 2),  'N',  0.0, Jtmp, (3))
-  TensorOperations.tensorcontract!(2.0, xyK, (1, 2, 3), 'N',  Jtmp, (3), 'N', -1.0, two_electron_fock_component, (1, 2))
-
+  @tensor   xiK[μ,i,A] = xyK[μ,dd,A]*occupied_orbital_coefficients[dd,i]
+    #Coulomb
+  @tensoropt (μμ=>10,νν=>10) two_electron_fock_component[μ, ν] = 2.0*xyK[μ, ν, A]*xiK[μμ, νν, A]*occupied_orbital_coefficients[μμ, νν]
+    #Exchange
+  @tensor two_electron_fock_component[μ, ν] -=  xiK[μ,νν,AA]*xiK[ν,νν,AA]
 return two_electron_fock_component
 end
 

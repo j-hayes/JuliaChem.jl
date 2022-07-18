@@ -17,7 +17,8 @@
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "guess":"sad"
+      "guess":"sad",
+      "load":"static"
     },
     "prop":{
       "mo energies":true,
