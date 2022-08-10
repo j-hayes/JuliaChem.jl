@@ -43,7 +43,6 @@ Indecies for all tensor contractions
     @tensor two_electron_fock_component[μ, ν] -=  xiK[μ,νν,AA]*xiK[ν,νν,AA]
   end
   MPI.Barrier(comm)
-  return two_electron_fock_component
 end
 
 
@@ -70,9 +69,10 @@ end
     @sync for batch_index in 1:batch_size:number_of_indecies
       Threads.@spawn begin
         thread_index = Threads.threadid()        
-        engine =  jeri_engine_thread[thread_index]    
-        integral_buffer = thead_integral_buffer[thread_index]                                     
+                                         
         for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
+          engine =  jeri_engine_thread[thread_index]    
+          integral_buffer = thead_integral_buffer[thread_index]    
           calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_indecies[view_index], basis_sets, integral_buffer)        
         end 
       end 
@@ -201,6 +201,7 @@ end
   end
 end
 @inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals, load)  where T <: DFRHFTEIEngine
+  comm = MPI.COMM_WORLD
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   cartesian_indicies = eachindex(view(two_center_integrals, 1:auxilliary_basis_shell_count,1:auxilliary_basis_shell_count))
   number_of_indecies = length(cartesian_indicies)   
@@ -218,29 +219,30 @@ end
       integral_buffer = thead_integral_buffer[1]
       calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end  
-  elseif load  == "static"  || load == "dynamic"
-    comm = MPI.COMM_WORLD
-    if MPI.Comm_rank(comm) == 0 
+  elseif load  == "static" || load == "dynamic"
+    if MPI.Comm_rank(comm) == 0
       @sync for batch_index in 1:batch_size:number_of_indecies
         Threads.@spawn begin
           thread_index = Threads.threadid()               
           engine =  jeri_engine_thread[thread_index]    
           integral_buffer = thead_integral_buffer[thread_index]
           for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
-            calculate_two_center_intgrals_kernel!(two_center_integrals_thread[thread_index], engine, cartesian_indicies[view_index], basis_sets, integral_buffer)
+            calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_indicies[view_index], basis_sets, integral_buffer)
           end 
         end 
       end 
-      for integrals in two_center_integrals_thread
-        axpy!(1.0, integrals, two_center_integrals)
-      end   
     end
-    
-    MPI.Barrier(comm)    
+   
+  elseif load == "dynamicaaa"
+    # for integrals in two_center_integrals_thread
+    #   axpy!(1.0, integrals, two_center_integrals)
+    # end   
+    error("integral threading load type: $(load) not supported")
   else
     error("integral threading load type: $(load) not supported")
   end
-println("returning two center integrals")
+  MPI.Barrier(comm)    
+
 end
 
 

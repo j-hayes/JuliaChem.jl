@@ -11,11 +11,12 @@
   "driver": "energy",
   "model": {   
     "method": "RHF",
-    "basis": "6-311G(2df,2pd)"
+    "basis": "6-31G(2df,p)"
   },
   "keywords": {
     "scf":{
-      "guess":"sad"
+      "guess":"sad",
+      "load":"static"
     },
     "prop":{
       "mo energies":true,

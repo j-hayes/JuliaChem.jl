@@ -2,12 +2,16 @@
 #== put needed modules here ==#
 #=============================#
 import JuliaChem
+import MPI
 using JuliaChem.JCModules
 
 #================================#
 #== JuliaChem execution script ==#
 #================================#
 function full_rhf(input_file)
+
+  if MPI.Comm_rank(MPI.COMM_WORLD) == 0
+
   println("--------------------------------------------------------------------------------")
   println("                       ========================================                 ")
   println("                               WELCOME TO JULIACHEM.JL!                         ")
@@ -27,7 +31,8 @@ function full_rhf(input_file)
   println("       For questions on usage, email David Poole at davpoole@iastate.edu.       ")
   println("                             Jackson                                            ")
   println("--------------------------------------------------------------------------------")
- 
+  end 
+
   try
     #== read in input file ==#
     molecule, driver, model, keywords = JuliaChem.JCInput.run(input_file;       
@@ -65,7 +70,7 @@ function full_rhf(input_file)
     println(msg)          
     exit()                                                                                                                            
   end 
-
+  if MPI.Comm_rank(MPI.COMM_WORLD) == 0
   println("--------------------------------------------------------------------------------")
   println("                      Your calculation has run to completion!                   ")
   println("                                                                                ")
@@ -73,4 +78,5 @@ function full_rhf(input_file)
   println("                                   HAVE A NICE DAY!                             ")
   println("                       ========================================                 ")
   println("--------------------------------------------------------------------------------")
+  end
 end

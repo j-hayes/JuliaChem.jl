@@ -10,13 +10,14 @@
   "driver": "energy",
   "model": {   
     "method": "DFRHF",
-    "basis": "6-311G(2df,2pd)",
+    "basis": "6-31G(2df,p)",
     "auxiliary_basis": "cc-pVTZ-JKFIT"
   },
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "guess":"sad"
+      "guess":"sad",
+      "load":"dynamic"
     },
     "prop":{
       "mo energies":true,
