@@ -16,6 +16,7 @@ Indecies for all tensor contractions
   occupied_orbital_coefficients, xyK, xiK, two_electron_fock_component,
   iteration, load) where T <: DFRHFTEIEngine
 
+  comm = MPI.COMM_WORLD
   aux_basis_function_count = basis_sets.auxillary.norb
   basis_function_count = basis_sets.primary.norb
   if iteration == 1
@@ -24,24 +25,31 @@ Indecies for all tensor contractions
     calculate_three_center_integrals(jeri_engine_thread, basis_sets, three_center_integrals, load)
     calculate_two_center_intgrals(jeri_engine_thread, basis_sets, two_center_integrals, load)
 
-    hermitian_eri_block_2_center_matrix = Hermitian(two_center_integrals, :L)
-    LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
-    two_center_cholesky_lower = LLT_2_center.L
-    Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-    @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
+    if MPI.Comm_rank(comm) == 0 
+      hermitian_eri_block_2_center_matrix = Hermitian(two_center_integrals, :L)
+      LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
+      two_center_cholesky_lower = LLT_2_center.L
+      Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
+      @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
+    end
   end
-  
-  @tensor   xiK[μ,i,A] = xyK[μ,dd,A]*occupied_orbital_coefficients[dd,i]
+  if MPI.Comm_rank(comm) == 0 
+    @tensor   xiK[μ,i,A] = xyK[μ,dd,A]*occupied_orbital_coefficients[dd,i]
     #Coulomb
-  @tensoropt (μμ=>10,νν=>10) two_electron_fock_component[μ, ν] = 2.0*xyK[μ, ν, A]*xiK[μμ, νν, A]*occupied_orbital_coefficients[μμ, νν]
+
+    @tensoropt (μμ=>10,νν=>10) two_electron_fock_component[μ, ν] = 2.0*xyK[μ, ν, A]*xiK[μμ, νν, A]*occupied_orbital_coefficients[μμ, νν]
     #Exchange
-  @tensor two_electron_fock_component[μ, ν] -=  xiK[μ,νν,AA]*xiK[ν,νν,AA]
-return two_electron_fock_component
+
+    @tensor two_electron_fock_component[μ, ν] -=  xiK[μ,νν,AA]*xiK[ν,νν,AA]
+  end
+  MPI.Barrier(comm)
+  return two_electron_fock_component
 end
 
 
-@inline function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, three_center_integrals, load) :: Array{Float64} where T <: DFRHFTEIEngine
-  
+@inline function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, three_center_integrals, load) where T <: DFRHFTEIEngine
+  comm = MPI.COMM_WORLD
+
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   basis_shell_count = length(basis_sets.primary)
   
@@ -53,28 +61,107 @@ end
   max_nbas = max(max_number_of_basis_functions(basis_sets.primary), max_number_of_basis_functions(basis_sets.auxillary))
   thead_integral_buffer = [Vector{Float64}(undef, max_nbas^3) for i in 1:n_threads]
   if load == "sequential"
+    engine =  jeri_engine_thread[1]   
+    integral_buffer =thead_integral_buffer[1]
     for cartesian_index in cartesian_indecies
-      engine =  jeri_engine_thread[1]   
-      integral_buffer =thead_integral_buffer[1]
       calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)   
     end
-  elseif load  == "static"  
+  elseif load  == "static"  || MPI.Comm_size(comm) == 1   
     @sync for batch_index in 1:batch_size:number_of_indecies
       Threads.@spawn begin
-        thread_id = Threads.threadid()                                             
+        thread_index = Threads.threadid()        
+        engine =  jeri_engine_thread[thread_index]    
+        integral_buffer = thead_integral_buffer[thread_index]                                     
         for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
-          cartesian_index = cartesian_indecies[view_index]
-          engine =  jeri_engine_thread[thread_id]    
-          integral_buffer = thead_integral_buffer[thread_id]
-          calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)        
+          calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_indecies[view_index], basis_sets, integral_buffer)        
         end 
       end 
     end 
+  elseif load == "dynamic" &&  MPI.Comm_size(comm) > 1   
+    run_three_center_integrals_dynamic(cartesian_indecies, three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)  
   else
     error("integral threading load type: $(load) not supported")
   end
 
-  return three_center_integrals
+end
+
+@inline function run_three_center_integrals_dynamic(cartesian_indecies, three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)  
+
+  comm = MPI.COMM_WORLD
+  n_threads = Threads.nthreads()
+  comm = MPI.COMM_WORLD
+  batches_per_thread = 1
+  batch_size = 4
+  three_center_integrals_thread = [ zeros(size(three_center_integrals)) for thread in 1:n_threads ]
+  if MPI.Comm_rank(comm) == 0 
+      task_index = [length(cartesian_indecies)]
+      comm_index = 1
+      while comm_index < MPI.Comm_size(comm)
+          for thread in 1:n_threads
+              sreq = MPI.Isend(task_index, comm_index, thread, comm)
+              task_index[1] -= batch_size
+          end         
+          comm_index += 1
+      end
+
+      while task_index[1] > 0 
+          status = MPI.Probe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, 
+            comm) 
+          #rreq = MPI.Recv!(recv_mesg_master, status.source, status.tag, 
+          #  comm)  
+          #println("Sending task $task to rank ", status.source)
+          sreq = MPI.Isend(task_index, status.source, status.tag, comm)  
+          #println("Task $task sent to rank ", status.source)
+          task_index[1] -= batch_size 
+        end
+
+       for rank in 1:(MPI.Comm_size(comm)-1)
+          for thread in 1:Threads.nthreads()
+            sreq = MPI.Isend([ -1 ], rank, thread, comm)                           
+          end
+        end     
+  elseif MPI.Comm_rank(comm) > 0
+      mutex_mpi_worker = Base.Threads.ReentrantLock()
+      @sync for thread_index in 1:n_threads
+          Threads.@spawn begin 
+              engine =  jeri_engine_thread[thread_index]    
+              integral_buffer = thead_integral_buffer[thread_index]
+
+              recv_mesg = [ 0 ] 
+              send_mesg = [ MPI.Comm_rank(comm) ] 
+              lock(mutex_mpi_worker)
+              status = MPI.Sendrecv!(send_mesg, 0, $thread_index, recv_mesg, 0, 
+              $thread_index, comm)
+              top_index = recv_mesg[1]
+
+              unlock(mutex_mpi_worker)
+
+              for i in top_index:-1:(max(1,top_index-batch_size+1))
+                calculate_three_center_integrals_kernel!(three_center_integrals_thread[thread_index], engine, cartesian_indecies[i], basis_sets, integral_buffer)    
+              end
+              
+              
+              #== complete rest of tasks ==#
+              while top_index >= 1 
+                  lock(mutex_mpi_worker)
+                  status = MPI.Sendrecv!(send_mesg, 0, $thread_index, recv_mesg, 0, 
+                      $thread_index, comm)
+                  top_index = recv_mesg[1]
+                  unlock(mutex_mpi_worker)
+
+                  for i in top_index:-1:(max(1,top_index-batch_size+1))
+                    calculate_three_center_integrals_kernel!(three_center_integrals_thread[thread_index], engine, cartesian_indecies[i], basis_sets, integral_buffer)    
+                  end
+              end
+
+          end
+      end
+
+    for integrals in three_center_integrals_thread
+      axpy!(1.0, integrals, three_center_integrals)
+    end
+  end
+  MPI.Barrier(comm)
 end
 
 @inline function calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer:: Vector{Float64}) 
@@ -113,7 +200,7 @@ end
     end
   end
 end
-@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals, load) :: Matrix{Float64}  where T <: DFRHFTEIEngine
+@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals, load)  where T <: DFRHFTEIEngine
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   cartesian_indicies = eachindex(view(two_center_integrals, 1:auxilliary_basis_shell_count,1:auxilliary_basis_shell_count))
   number_of_indecies = length(cartesian_indicies)   
@@ -123,29 +210,37 @@ end
 
   max_nbas =  max_number_of_basis_functions(basis_sets.auxillary)
   thead_integral_buffer = [Vector{Float64}(undef, max_nbas^2) for i in 1:n_threads]
+  aux_basis_function_count = basis_sets.auxillary.norb
+  two_center_integrals_thread = [zeros((aux_basis_function_count, aux_basis_function_count)) for i in 1:n_threads]
   if load == "sequential"
     engine = jeri_engine_thread[1]
     for cartesian_index in cartesian_indicies
       integral_buffer = thead_integral_buffer[1]
       calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end  
-  elseif load  == "static"  
-    @sync for batch_index in 1:batch_size:number_of_indecies
-      Threads.@spawn begin
-        thread_id = Threads.threadid()                                             
-        for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
-          cartesian_index = cartesian_indicies[view_index]
-          engine =  jeri_engine_thread[thread_id]    
-          integral_buffer = thead_integral_buffer[thread_id]
-          calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+  elseif load  == "static"  || load == "dynamic"
+    comm = MPI.COMM_WORLD
+    if MPI.Comm_rank(comm) == 0 
+      @sync for batch_index in 1:batch_size:number_of_indecies
+        Threads.@spawn begin
+          thread_index = Threads.threadid()               
+          engine =  jeri_engine_thread[thread_index]    
+          integral_buffer = thead_integral_buffer[thread_index]
+          for view_index in batch_index:min(number_of_indecies, batch_index+batch_size)
+            calculate_two_center_intgrals_kernel!(two_center_integrals_thread[thread_index], engine, cartesian_indicies[view_index], basis_sets, integral_buffer)
+          end 
         end 
       end 
-    end 
+      for integrals in two_center_integrals_thread
+        axpy!(1.0, integrals, two_center_integrals)
+      end   
+    end
+    
+    MPI.Barrier(comm)    
   else
     error("integral threading load type: $(load) not supported")
   end
-  
-return two_center_integrals
+println("returning two center integrals")
 end
 
 
