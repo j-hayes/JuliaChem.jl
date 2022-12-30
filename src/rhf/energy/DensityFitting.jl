@@ -27,26 +27,7 @@ function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::Calculatio
     calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
 
   end
-  @tensor xiK[μ, i, A] = xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
-  # xiK_copy = zeros(size(xiK))
-  # # iterate over xyk second index
-  # for index in eachindex(xiK_copy)
-  #   μ = index[1]
-  #   i = index[2]
-  #   for AA in axes(xiK, 3)
-  #     for dd in axes(occupied_orbital_coefficients, 1)
-  #       xiK_copy[μ,i,AA] += xyK[μ,dd,AA]*occupied_orbital_coefficients[dd,i]
-  #     end
-  #   end
-  # end
-
-  # #subtract xiK_copy from xiK
-  # result = xiK_copy - xiK
-  # # round small values to zero
-  # result = round.(result, digits=3)
-  # println("result = ", result)
-
-
+  calculate_xiK(xyK, xiK, occupied_orbital_coefficients, load)
 
   #Coulomb
 
@@ -57,6 +38,58 @@ function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::Calculatio
   MPI.Barrier(comm)
 end
 
+
+@inline function calculate_xiK_kernel(xyK, occupied_orbital_coefficients, μ,  i, dd, AA)
+  return xyK[μ, dd, AA] * occupied_orbital_coefficients[dd, i]
+end
+
+# calculate xiK 
+# todo initalize xiK in this function instead of passing it in
+# original tensor operation
+# @tensor xiK[μ, i, A] = xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
+
+@inline function calculate_xiK(xyK, xiK, occupied_orbital_coefficients, load)
+  comm = MPI.COMM_WORLD
+  cartesian_indecies = CartesianIndices(xiK)
+  number_of_indecies = length(cartesian_indecies)
+  n_threads = Threads.nthreads()
+  batch_size = ceil(Int, number_of_indecies / n_threads)
+
+  if load != Nothing || load == "sequential" 
+    for index in cartesian_indecies
+      μ = index[1] 
+      i = index[2]
+      for AA in axes(xiK, 3)
+        xiK[μ,i,AA] = 0.0
+        for dd in axes(occupied_orbital_coefficients, 1)
+          xiK[μ,i,AA] += calculate_xiK_kernel(xyK, occupied_orbital_coefficients, μ,  i, dd, AA)
+        end
+      end
+    end
+  elseif load == "static" || MPI.Comm_size(comm) == 1
+    println("doing static load")
+    @sync for batch_index in 1:batch_size:number_of_indecies
+      Threads.@spawn begin
+        for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
+          index = cartesian_indecies[view_index]
+          μ = index[1]
+          i = index[2]
+          for AA in axes(xiK, 3)
+            xiK_value = 0.0
+            for dd in axes(occupied_orbital_coefficients, 1)
+              xiK_value += calculate_xiK_kernel(xyK, occupied_orbital_coefficients, μ,  i, dd, AA)
+            end
+            xiK[μ,i,AA] = xiK_value
+          end
+        end # end threads spawn
+      end  # end sync     
+    end # end batch for loop
+  end # end load if
+end
+
+
+#original tensor operation was:
+# @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
 @inline function calculate_xyK_kernel(three_center_integrals, Linv_t, μ, ν, A, dd)
   return three_center_integrals[dd, μ, ν] * Linv_t[dd, A]
 end
@@ -73,14 +106,13 @@ end
   number_of_indecies = length(cartesian_indecies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
-   
-
+  three_center_integrals_indicies =  axes(three_center_integrals, 1)
   if load == "sequential"
     for index in cartesian_indecies
       μ = index[1]
       ν = index[2]
       A = index[3]
-      for dd in axes(three_center_integrals, 1)
+      for dd in three_center_integrals_indicies
         xyK[μ, ν, A] += calculate_xyK_kernel(three_center_integrals, Linv_t, μ, ν, A, dd)
       end
     end
@@ -92,13 +124,18 @@ end
           μ = index[1]
           ν = index[2]
           A = index[3]
-          for dd in axes(three_center_integrals, 1)
-            xyK[μ, ν, A] += calculate_xyK_kernel(three_center_integrals, Linv_t, μ, ν, A, dd)
+          #its a bit goofy that I have to do this, for some reason incrementing the array directly ran into issues multithreading
+          xyK_value = 0.0 
+          for dd in three_center_integrals_indicies
+            xyK_value += calculate_xyK_kernel(three_center_integrals, Linv_t, μ, ν, A, dd)
           end
+          xyK[μ, ν, A] = xyK_value # end goofy 
         end # end threads spawn
       end  # end sync     
     end # end batch for loop
   end # end static
+  #compare xyK to xyK_old
+  MPI.Barrier(comm)
 end # end function calculate_xyK
 
 @inline function calculate_three_center_integrals(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets, three_center_integrals, load) where {T<:DFRHFTEIEngine}
