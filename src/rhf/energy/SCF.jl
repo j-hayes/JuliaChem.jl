@@ -362,10 +362,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     electrons_count = Int64(basis_sets.primary.nels)
-    occupied_orbital_coefficients = C[:,1:electrons_count÷2]
-    number_off_occ_orbitals = size(occupied_orbital_coefficients, 2)
     xyK = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
-    xiK = zeros(basis_function_count, number_off_occ_orbitals, aux_basis_function_count)
     two_electron_fock_component = zeros(basis_function_count,basis_function_count)
   end
 
@@ -430,7 +427,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       cutoff, debug, load, fdiff, ΔF, F_cumul)      
     else
       df_rhf_fock_build(jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), 
-        xyK, xiK, two_electron_fock_component, iter, load) 
+        xyK, two_electron_fock_component, iter, load) 
       F .= H .+ two_electron_fock_component
     end
     

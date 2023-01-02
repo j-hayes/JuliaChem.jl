@@ -13,7 +13,7 @@ Indecies for all tensor contractions
 
 ==#
 function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets,
-  occupied_orbital_coefficients, xyK, xiK, two_electron_fock_component,
+  occupied_orbital_coefficients, xyK, two_electron_fock_component,
   iteration, load) where {T<:DFRHFTEIEngine}
 
   comm = MPI.COMM_WORLD
@@ -27,7 +27,9 @@ function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::Calculatio
     calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
 
   end
-  calculate_xiK(xyK, xiK, occupied_orbital_coefficients, load)
+  # @tensor xiK[μ, i, A] = xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
+  xiK = calculate_xiK(xyK, occupied_orbital_coefficients,
+   basis_function_count, aux_basis_function_count, load)
 
   #Coulomb
 
@@ -39,52 +41,53 @@ function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::Calculatio
 end
 
 
-@inline function calculate_xiK_kernel(xyK, occupied_orbital_coefficients, μ,  i, dd, AA)
-  return xyK[μ, dd, AA] * occupied_orbital_coefficients[dd, i]
+@inline function calculate_xiK_kernel!(xiK, xyK, occupied_orbital_coefficients,occ_coef_indexes, index)
+  μ = index[1] 
+  i = index[2]
+  A = index[3]
+  xiK[μ,i,A] = 0.0
+  xiK_value = 0.0 
+  for dd in occ_coef_indexes
+    xiK_value += xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
+  end
+  xiK[μ,i,A] = xiK_value
 end
 
 # calculate xiK 
-# todo initalize xiK in this function instead of passing it in
 # original tensor operation
 # @tensor xiK[μ, i, A] = xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
 
-@inline function calculate_xiK(xyK, xiK, occupied_orbital_coefficients, load)
+@inline function calculate_xiK(xyK, occupied_orbital_coefficients,
+  basis_function_count, aux_basis_function_count, load)
   comm = MPI.COMM_WORLD
+  number_off_occ_orbitals = size(occupied_orbital_coefficients, 2)
+  xiK = zeros(basis_function_count, number_off_occ_orbitals, aux_basis_function_count)
+
   cartesian_indecies = CartesianIndices(xiK)
   number_of_indecies = length(cartesian_indecies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
 
-  if load != Nothing || load == "sequential" 
+  # this needs to be outside the threading loop because it was causing intermittent issues with the loop: https://stackoverflow.com/questions/57633477/multi-threading-julia-shows-error-with-enumerate-iterator
+  occ_coef_indexes =  collect(axes(occupied_orbital_coefficients, 1))
+
+
+  if load == "sequential"
     for index in cartesian_indecies
-      μ = index[1] 
-      i = index[2]
-      for AA in axes(xiK, 3)
-        xiK[μ,i,AA] = 0.0
-        for dd in axes(occupied_orbital_coefficients, 1)
-          xiK[μ,i,AA] += calculate_xiK_kernel(xyK, occupied_orbital_coefficients, μ,  i, dd, AA)
-        end
-      end
+      calculate_xiK_kernel!(xiK, xyK, occupied_orbital_coefficients, occ_coef_indexes, index)
     end
-  elseif load == "static" || MPI.Comm_size(comm) == 1
-    println("doing static load")
+  elseif load == "static"
     @sync for batch_index in 1:batch_size:number_of_indecies
       Threads.@spawn begin
         for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
           index = cartesian_indecies[view_index]
-          μ = index[1]
-          i = index[2]
-          for AA in axes(xiK, 3)
-            xiK_value = 0.0
-            for dd in axes(occupied_orbital_coefficients, 1)
-              xiK_value += calculate_xiK_kernel(xyK, occupied_orbital_coefficients, μ,  i, dd, AA)
-            end
-            xiK[μ,i,AA] = xiK_value
-          end
+          calculate_xiK_kernel!(xiK, xyK, occupied_orbital_coefficients, occ_coef_indexes, index)
         end # end threads spawn
       end  # end sync     
     end # end batch for loop
-  end # end load if
+  end # end load if 
+  MPI.Barrier(comm)
+  return xiK
 end
 
 
@@ -106,7 +109,9 @@ end
   number_of_indecies = length(cartesian_indecies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
+  # this needs to be outside the threading loop because it was causing intermittent issues with the loop: https://stackoverflow.com/questions/57633477/multi-threading-julia-shows-error-with-enumerate-iterator
   three_center_integrals_indicies =  axes(three_center_integrals, 1)
+
   if load == "sequential"
     for index in cartesian_indecies
       μ = index[1]
