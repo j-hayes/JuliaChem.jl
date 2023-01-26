@@ -57,8 +57,11 @@ public:
                            libint2::BraKet::xs_xx, 0>((*m_auxiliary_basis_set)[auxilary_shell_index - 1], unitShell,
                                                       (*m_basis_set)[shell_index_1 - 1], (*m_basis_set)[shell_index_2 - 1]);
     if (m_coulomb_eng.results()[0] != nullptr)
-    {     
-      std::copy(m_coulomb_eng.results()[0], m_coulomb_eng.results()[0] + copy_size, eri_block.data() + memory_skip);    
+    { 
+      for(int i = 0; i < copy_size; i++)
+      {
+          eri_block.data()[i] = *(m_coulomb_eng.results()[0] + i);
+      }
       return false;
     }
     else
