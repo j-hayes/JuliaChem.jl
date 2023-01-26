@@ -398,7 +398,7 @@ end
 
   max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
   thead_integral_buffer = [zeros(Float64, max_nbas^2) for i in 1:n_threads]
-  if load == "sequential" || MPI.Comm_size(comm) == 1 # TODO JH put this back when 3 center integral threading issue fixed
+  if load == "sequential"
     engine = jeri_engine_thread[1]
     for cartesian_index in cartesian_indicies
       integral_buffer = thead_integral_buffer[1]
