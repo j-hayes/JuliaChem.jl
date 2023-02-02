@@ -8,7 +8,7 @@ wave function for closed-shell systems.
 module Energy 
 
 using JuliaChem.JCModules
-using JuliaChem.JCRHF.Constants
+using JuliaChem.JCModules.Constants
 using JuliaChem.JERI
 
 using MPI
