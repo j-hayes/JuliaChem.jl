@@ -2,7 +2,6 @@ using Base.Threads
 using LinearAlgebra
 using TensorOperations
 
-
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 #== 
 Indecies for all tensor contractions 
@@ -18,35 +17,44 @@ Indecies for all tensor contractions
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
+
+  
   if iteration == 1
+   
+    println("two center integrals")
+    @time begin  
     two_center_integrals = zeros(Float64, (aux_basis_function_count, aux_basis_function_count))
+    flush(stdout)
     calculate_two_center_intgrals(jeri_engine_thread, basis_sets, two_center_integrals, load)
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, load)
-    calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
+    end
+    println("three center integrals")
+    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, load)
+
+    flush(stdout)
+    println("xyK")
+    @time calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
+
+    flush(stdout)
   end
-  xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, load)
+  println("xiK")
+  @time xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, load)
 
   #using separate arrays for coulomb and exchange to avoid threading issues but is more memory intensive, TODO find a better way to do this
   #Coulomb
-  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
+  println("calculate_coulomb!")
+  # @time begin 
+  # @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
+  # end 
+  @time  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
+  flush(stdout)
   #Exchange
-  calculate_exchange!(two_electron_fock, xiK, basis_function_count,load)
+  println("calculate_exchange!")
+  @time calculate_exchange!(two_electron_fock, xiK, basis_function_count,load)
   MPI.Barrier(comm)
   return two_electron_fock
 end
 
-# exchange kernel 
-function calculate_exchange_kernel(two_electron_fock, xiK, index)
-  μ = index[1]
-  ν = index[2]
-  exchange_val = 0.0
-  for A in axes(xiK, 3)
-    for νν in axes(xiK, 2)
-      exchange_val += xiK[μ, νν, A] * xiK[ν, νν, A]
-    end
-  end
-  return exchange_val
-end
+
 
 #original tensor operation  @tensor two_electron_fock_component[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
 function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
@@ -62,7 +70,7 @@ function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
       two_electron_fock[index] = calculate_exchange_kernel(two_electron_fock, xiK, index)
     end  
   elseif load == "static"    
-    @sync for batch_index in 1:batch_size:number_of_indecies
+    @sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
         for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
           index = cartesian_indicies[view_index]
@@ -77,38 +85,47 @@ function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
   # MPI.Barrier(comm)
 end
 
-@inline function calculate_coulomb_kernel(two_electron_fock_component, xyK, xiK, occupied_orbital_coefficients, index)
+# exchange kernel 
+@inline function calculate_exchange_kernel(two_electron_fock, xiK, index)
   μ = index[1]
   ν = index[2]
-  two_electron_fock_component[μ, ν] = 0.0
-  for A in axes(xyK, 3)
-    for μμ in axes(occupied_orbital_coefficients, 1)
-      for νν in axes(occupied_orbital_coefficients, 2)
-        two_electron_fock_component[μ, ν] += 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-      end
-    end
-  end
+  return dot(view(xiK, μ,:, :), view(xiK, ν,:, :))
 end
 
-#original tensor operation  @tensoropt (μμ => 10, νν => 10) two_electron_fock_component[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-@inline function calculate_coulomb!(two_electron_fock,xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
+#original tensor operation  
+#@tensoropt (μμ => 10, νν => 10) two_electron_fock_component[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
+@inline function calculate_coulomb_kernel(xyK, xiK, intermediate, index)
+  μ = index[1]
+  ν = index[2]
+  return dot(view(xyK, μ, ν, :) , intermediate)
+end
+
+@inline function calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
   comm = MPI.COMM_WORLD 
   cartesian_indecies = CartesianIndices(two_electron_fock)
   n_threads = Threads.nthreads()
   number_of_indecies = length(cartesian_indecies)
   batch_size = ceil(Int, number_of_indecies / n_threads)
+  thread_coulombs = [zeros(Float64, size(two_electron_fock)) for i in 1:n_threads]
+
+  intermediate = zeros(size(xiK,3)) 
+  for A in axes(xiK, 3)
+    intermediate[A] = dot(view(xiK,:, :, A), occupied_orbital_coefficients)
+  end
 
   if load == "sequential"
     for index in cartesian_indecies
-      calculate_coulomb_kernel(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, index)
+      two_electron_fock[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
     end
   elseif load == "static"    
-    @sync for batch_index in 1:batch_size:number_of_indecies
+    Threads.@sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
+        thread_coulomb = thread_coulombs[Threads.threadid()]
         for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
           index = cartesian_indecies[view_index]
-          calculate_coulomb_kernel(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, index)
+          thread_coulomb[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
         end
+        axpy!(2.0, thread_coulomb, two_electron_fock) 
       end
     end
   end
@@ -150,7 +167,7 @@ end
       xiK[index] = calculate_xiK_kernel!(xyK, occupied_orbital_coefficients, occ_coef_indexes, index)
     end
   elseif load == "static"
-    @sync for batch_index in 1:batch_size:number_of_indecies
+    @sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
         for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
           index = cartesian_indecies[view_index]
@@ -166,49 +183,40 @@ end
 
 #original tensor operation was:
 # @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
-@inline function calculate_xyK_kernel(three_center_integrals, Linv_t, index)
+@inline function calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, index)
   μ = index[1]
   ν = index[2]
   A = index[3]
-  three_center_integrals_indicies =  axes(three_center_integrals, 1)
-  xyK_val = 0.0
-  for dd in three_center_integrals_indicies
-    xyK_val += three_center_integrals[dd, μ, ν] * Linv_t[dd, A]
-  end
-  return xyK_val
+  xyK[index] = dot(view(three_center_integrals,:, μ, ν), view(Linv_t, :, A))
 end
 
 @inline function calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized
-  hermitian_eri_block_2_center_matrix = Hermitian(two_center_integrals, :L)
-  LLT_2_center = cholesky(hermitian_eri_block_2_center_matrix)
-  two_center_cholesky_lower = LLT_2_center.L
-  Linv_t = convert(Array, transpose(two_center_cholesky_lower \I))
-
-
-
+  Linv_t = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
   cartesian_indecies = CartesianIndices(xyK)
   number_of_indecies = length(cartesian_indecies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
   if load == "sequential"
     for index in cartesian_indecies
-      index = cartesian_indecies[view_index]
-      xyK[index] = calculate_xyK_kernel(three_center_integrals, Linv_t, index)
+      calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, index)
     end
   elseif load == "static" || MPI.Comm_size(comm) == 1
-    @sync for batch_index in 1:batch_size:number_of_indecies
+    @sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
-        for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-          index = cartesian_indecies[view_index]
-          xyK[index] = calculate_xyK_kernel(three_center_integrals, Linv_t, index)
-        end # end threads spawn
-      end  # end sync     
-    end # end batch for loop
-  end # end static
+        do_xyK_batch(xyK, three_center_integrals, Linv_t, cartesian_indecies, batch_index, batch_size, number_of_indecies)
+      end  
+    end
+  end # end if
   # MPI.Barrier(comm)
 end # end function calculate_xyK
+
+@inline function do_xyK_batch(xyK, three_center_integrals, Linv_t, cartesian_indecies, batch_index, batch_size, number_of_indecies)
+  for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
+    calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, cartesian_indecies[view_index])
+  end 
+end
 
 @inline function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, load)
   comm = MPI.COMM_WORLD
@@ -221,7 +229,6 @@ end # end function calculate_xyK
 
   cartesian_indecies = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
   number_of_indecies = length(cartesian_indecies)
-  println("# of indecies: ", number_of_indecies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
 
@@ -235,26 +242,40 @@ end # end function calculate_xyK
       calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
   elseif load == "static" || MPI.Comm_size(comm) == 1  # todo fix this multithreading issue
-    println("doing static load for three_center_integrals")
-    Threads.@sync for batch_index in 1:batch_size:number_of_indecies
+    Threads.@sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
-        thread_index = Threads.threadid()
-        for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-          calculate_three_center_integrals_kernel!(three_center_integrals, 
-            jeri_engine_thread[thread_index], 
-            cartesian_indecies[view_index],
-            basis_sets, 
-            thead_integral_buffer[thread_index])
-        end
+        do_three_center_integral_batch(batch_index,
+         batch_size, cartesian_indecies, 
+         three_center_integrals, jeri_engine_thread, 
+         basis_sets, thead_integral_buffer, number_of_indecies)
       end
     end
-  # elseif load == "dynamic" && MPI.Comm_size(comm) > 1
-  #   run_three_center_integrals_dynamic(cartesian_indecies, three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
   else
     error("integral threading load type: $(load) not supported")
   end
   return three_center_integrals
   MPI.Barrier(comm)
+end
+
+@inline function do_three_center_integral_batch(batch_index, 
+    batch_size, 
+    cartesian_indecies, 
+    three_center_integrals, 
+    jeri_engine_thread, 
+    basis_sets, 
+    thead_integral_buffer,
+    number_of_indecies)
+
+    thread_index = Threads.threadid()
+    engine = jeri_engine_thread[thread_index]
+    buffer = thead_integral_buffer[thread_index]
+    for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
+      calculate_three_center_integrals_kernel!(three_center_integrals, 
+        engine, 
+        cartesian_indecies[view_index],
+        basis_sets, 
+        buffer)
+    end
 end
 
 # @inline function run_three_center_integrals_dynamic(cartesian_indecies, three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
@@ -359,17 +380,18 @@ end
   number_of_integrals = n12 * shell_3_nbasis
 
   JERI.compute_eri_block_df(engine, integral_buffer, s1, s2, s3, number_of_integrals, 0)
+  
   copy_values_to_output!(three_center_integrals, integral_buffer, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
   axial_normalization_factor(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
 end
 
 @inline function copy_values_to_output!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
-  temp_index = 1
+  values_index = 1
   for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1
     for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
       for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
-        three_center_integrals[i, j, k] = values[temp_index]
-        temp_index += 1
+        three_center_integrals[i, j, k] = values[values_index]
+        values_index += 1
       end
     end
   end
@@ -378,7 +400,7 @@ end
 @inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals, load) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
-  cartesian_indicies = eachindex(view(two_center_integrals, 1:auxilliary_basis_shell_count, 1:auxilliary_basis_shell_count))
+  cartesian_indicies = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
   number_of_indecies = length(cartesian_indicies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
@@ -393,7 +415,7 @@ end
       calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
   elseif load == "static" || MPI.Comm_size(comm) == 1
-    @sync for batch_index in 1:batch_size:number_of_indecies
+    @sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
         thread_id = Threads.threadid()
         for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
@@ -412,7 +434,11 @@ end
 end
 
 
-@inline function calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer::Vector{Float64})
+@inline function calculate_two_center_intgrals_kernel!(two_center_integrals,
+   engine, 
+   cartesian_index, 
+   basis_sets, 
+   integral_buffer)
   shell_1_index = cartesian_index[1]
   shell_2_index = cartesian_index[2]
 
