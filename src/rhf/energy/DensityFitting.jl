@@ -36,8 +36,9 @@ end
 #original tensor operation  @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
 function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
   # two_electron_fock_copy = deepcopy(two_electron_fock)
-  # @tensor exchange[μ, ν] := xiK[μ, νν, AA] * xiK[ν, νν, AA]
-
+  # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
+  #   @tensor exchange[μ, ν] := xiK[μ, νν, AA] * xiK[ν, νν, AA]
+  # end
   μμ = size(xiK, 1) # number of basis functions 
   oo = size(xiK, 2) # number of occupied orbitals
   AA = size(xiK, 3) # number of aux basis functions
@@ -47,86 +48,31 @@ function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
   ν_vector =  reshape(xiK, (μμ, oo*AA))
   exchange_blas_vec = BLAS.gemm('N', 'T', 1.0, μ_vector, ν_vector)
   exchange_blas = reshape(exchange_blas_vec, (μμ, μμ))
-  axpy!(-1.0, exchange_blas, two_electron_fock)
-end
-
-# exchange kernel 
-@inline function calculate_exchange_kernel(two_electron_fock, xiK, index)
-  μ = index[1]
-  ν = index[2]
-  return dot(view(xiK, μ,:, :), view(xiK, ν,:, :))
-end
-
-
-#original tensor operation  
-#@tensoropt (μμ => 10, νν => 10) two_electron_fock_component[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-@inline function calculate_coulomb_kernel(xyK, xiK, intermediate, index)
-  μ = index[1]
-  ν = index[2]
-  return dot(view(xyK, μ, ν, :) , intermediate)
-  # μ = index[1]
-  # ν = index[2]
-  # two_electron_fock_component[μ, ν] = 0.0
-  # for A in axes(xyK, 3)
-  #   for μμ in axes(occupied_orbital_coefficients, 1)
-  #     for νν in axes(occupied_orbital_coefficients, 2)
-  #       two_electron_fock_component[μ, ν] += 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-  #     end
-  #   end
-  # end
+  BLAS.axpy!(-1.0, exchange_blas, two_electron_fock)
 end
 
 @inline function calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
   
-  io = open("coulomb.txt", "a")
-  write(io, "xyK\n")
-  write(io, "$(vec(xyK))\n")
-
-  write(io, "xiK\n")
-  write(io, "$(vec(xiK))\n")
-  write(io, "occupied_orbital_coefficients\n")
-
-  write(io, "$(vec(occupied_orbital_coefficients))\n")
-  @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-  write(io, "two_electron_fock\n")
-  write(io, "$(vec(two_electron_fock))\n")
-  close(io)
-  # μμ = size(xiK, 1) # number of basis functions
-  # νν = size(xiK, 2) # number of basis functions
-  # AA = size(xiK, 3) # number of AUX basis functions
-
-  # xiK_matrix = permutedims(reshape(xiK, (μμ*νν, AA)), (2,1))
-  # intermediate_matrix = BLAS.gemm('N', 'N', 1.0, xiK_matrix, occupied_orbital_coefficients)
-
-
-  # comm = MPI.COMM_WORLD 
-  # cartesian_indecies = CartesianIndices(two_electron_fock)
-  # n_threads = Threads.nthreads()
-  # number_of_indecies = length(cartesian_indecies)
-  # batch_size = ceil(Int, number_of_indecies / n_threads)
-  # thread_coulombs = [zeros(Float64, size(two_electron_fock)) for i in 1:n_threads]
-
-  # intermediate = zeros(size(xiK,3)) 
-  # for A in axes(xiK, 3)
-  #   intermediate[A] = dot(view(xiK,:, :, A), occupied_orbital_coefficients)
+  # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
+    # @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
   # end
+  μμ = size(xiK, 1)
+  ii = size(xiK, 2)
+  AA = size(xiK, 3)
+  
+  xiK_matrix_permuted = permutedims(xiK, (3,1,2))
+  xiK_matrix = reshape(xiK_matrix_permuted, (AA,μμ*ii))
 
-  # if load == "sequential"
-  #   for index in cartesian_indecies
-  #     two_electron_fock[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
-  #   end
-  # elseif load == "static"    
-  #   Threads.@sync for batch_index in 1:batch_size+1:number_of_indecies
-  #     Threads.@spawn begin
-  #       thread_coulomb = thread_coulombs[Threads.threadid()]
-  #       for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-  #         index = cartesian_indecies[view_index]
-  #         thread_coulomb[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
-  #       end
-  #       axpy!(2.0, thread_coulomb, two_electron_fock) 
-  #     end
-  #   end
-  # end
+  occupied_orbital_coefficients_vector = reshape(occupied_orbital_coefficients, (μμ*ii,1))
+  intermediate_blas = BLAS.gemm('N', 'N', 1.0, xiK_matrix, occupied_orbital_coefficients_vector)
+  intermediate_blas = reshape(intermediate_blas, (AA,1))
+  μμ = size(xyK, 1)
+  νν = size(xyK, 2)
+  AA = size(xyK, 3)
+  xyK_matrix = reshape(xyK, (μμ*νν, AA))
+  coulomb_blas = 2.0 * BLAS.gemm('N', 'N', 1.0, xyK_matrix, intermediate_blas)
+  two_electron_fock .= reshape(coulomb_blas, (μμ, νν))
+
   # MPI.Barrier(comm)
 end 
 
@@ -142,21 +88,11 @@ end
 end
 
 # calculate xiK 
-# original tensor operation
-# @tensor xiK[μ, i, A] = xyK[μ, νν, A] * occupied_orbital_coefficients[νν, i]
-
 @inline function calculate_xiK(xyK, occupied_orbital_coefficients,
   basis_function_count, aux_basis_function_count, load)
-  # io = open("xiK.txt", "a")
-  # write(io, "xyK\n")
-  # write(io, "$(vec(xyK))\n")
-  # write(io, "occupied_orbital_coefficients\n")
-  # write(io, "$(vec(occupied_orbital_coefficients))\n")
-  # xyK_copy = deepcopy(xyK)
-  # occupied_orbital_coefficients_copy = deepcopy(occupied_orbital_coefficients)
   # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
-  # @tensor xiK_tenop[ν, i, A] := xyK_copy[μμ, ν, A] * occupied_orbital_coefficients_copy[μμ, i]
-    # return xiK_tenop
+    # @tensor xiK_tenop[ν, i, A] := xyK[μμ, ν, A] * occupied_orbital_coefficients[μμ, i]
+  # return xiK_tenop
   #end 
   μμ = size(xyK, 1)
   νν = size(xyK, 2)
@@ -172,16 +108,6 @@ end
   return xiK_blas
 end
 
-
-#original tensor operation was:
-# @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
-@inline function calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, index)
-  μ = index[1]
-  ν = index[2]
-  A = index[3]
-  xyK[index] = dot(view(three_center_integrals,:, μ, ν), view(Linv_t, :, A))
-end
-
 @inline function calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized
@@ -189,9 +115,8 @@ end
   
   # # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
   # @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
-  # #   return
+  #   return
   # # end
-  println("doing xyK blas")
   μμ = size(three_center_integrals, 2)
   νν = size(three_center_integrals, 3)
   AA = size(three_center_integrals, 1)
@@ -200,31 +125,8 @@ end
   tci_vector =  reshape(permutedims(three_center_integrals, (2,3,1)) , (μμ*νν,AA))
   xyK_vec = BLAS.gemm('N', 'N', 1.0, tci_vector, Linv_t)
   xyK .= reshape(xyK_vec, (μμ, νν, AA))
-  
-  
-  # cartesian_indecies = CartesianIndices(xyK)
-  # number_of_indecies = length(cartesian_indecies)
-  # n_threads = Threads.nthreads()
-  # batch_size = ceil(Int, number_of_indecies / n_threads)
-  # if load == "sequential"
-  #   for index in cartesian_indecies
-  #     calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, index)
-  #   end
-  # elseif load == "static" || MPI.Comm_size(comm) == 1
-  #   @sync for batch_index in 1:batch_size+1:number_of_indecies
-  #     Threads.@spawn begin
-  #       do_xyK_batch(xyK, three_center_integrals, Linv_t, cartesian_indecies, batch_index, batch_size, number_of_indecies)
-  #     end  
-  #   end
-  # end # end if
   # MPI.Barrier(comm)
 end # end function calculate_xyK
-
-@inline function do_xyK_batch(xyK, three_center_integrals, Linv_t, cartesian_indecies, batch_index, batch_size, number_of_indecies)
-  for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-    calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, cartesian_indecies[view_index])
-  end 
-end
 
 @inline function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, load)
   comm = MPI.COMM_WORLD
