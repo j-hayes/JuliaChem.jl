@@ -18,71 +18,36 @@ Indecies for all tensor contractions
     basis_function_count = basis_sets.primary.norb
     two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
 
-  
   if iteration == 1
-   
-    println("two center integrals")
-    @time begin  
-    two_center_integrals = zeros(Float64, (aux_basis_function_count, aux_basis_function_count))
-    flush(stdout)
-    calculate_two_center_intgrals(jeri_engine_thread, basis_sets, two_center_integrals, load)
-    end
-    println("three center integrals")
-    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, load)
-
-    flush(stdout)
-    println("xyK")
-    @time calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
-
-    flush(stdout)
+    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, load)
+    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, load)
+    calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
   end
-  println("xiK")
-  @time xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, load)
-
-  #using separate arrays for coulomb and exchange to avoid threading issues but is more memory intensive, TODO find a better way to do this
+  xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, load)
   #Coulomb
-  println("calculate_coulomb!")
-  # @time begin 
-  # @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-  # end 
-  @time  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
-  flush(stdout)
+  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
   #Exchange
-  println("calculate_exchange!")
-  @time calculate_exchange!(two_electron_fock, xiK, basis_function_count,load)
+  calculate_exchange!(two_electron_fock, xiK, basis_function_count,load)
   MPI.Barrier(comm)
+
   return two_electron_fock
 end
 
-
-
-#original tensor operation  @tensor two_electron_fock_component[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
+#original tensor operation  @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
 function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
+  # two_electron_fock_copy = deepcopy(two_electron_fock)
+  # @tensor exchange[μ, ν] := xiK[μ, νν, AA] * xiK[ν, νν, AA]
 
-  # comm = MPI.COMM_WORLD
-  exchange = zeros(Float64, (basis_function_count, basis_function_count))
-  cartesian_indicies = CartesianIndices(exchange)
-  n_threads = Threads.nthreads()
-  number_of_indecies = length(cartesian_indicies)
-  batch_size = ceil(Int, number_of_indecies / n_threads)
-  if load == "sequential"
-    for index in cartesian_indicies
-      two_electron_fock[index] = calculate_exchange_kernel(two_electron_fock, xiK, index)
-    end  
-  elseif load == "static"    
-    @sync for batch_index in 1:batch_size+1:number_of_indecies
-      Threads.@spawn begin
-        for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-          index = cartesian_indicies[view_index]
-          exchange[index] = calculate_exchange_kernel(two_electron_fock, xiK, index)
-          # two_electron_fock[index] -= calculate_exchange_kernel(two_electron_fock, xiK, index)
-          # for some reason the above doesn't work in parallel so I'm using a seperate array for exchange
-        end
-      end
-    end
-    axpy!(-1.0, exchange, two_electron_fock)
-  end
-  # MPI.Barrier(comm)
+  μμ = size(xiK, 1) # number of basis functions 
+  oo = size(xiK, 2) # number of occupied orbitals
+  AA = size(xiK, 3) # number of aux basis functions
+
+  # transpose transpose gemm transpose tensor contraction 
+  μ_vector =  reshape(xiK, (μμ, oo*AA))
+  ν_vector =  reshape(xiK, (μμ, oo*AA))
+  exchange_blas_vec = BLAS.gemm('N', 'T', 1.0, μ_vector, ν_vector)
+  exchange_blas = reshape(exchange_blas_vec, (μμ, μμ))
+  axpy!(-1.0, exchange_blas, two_electron_fock)
 end
 
 # exchange kernel 
@@ -92,44 +57,77 @@ end
   return dot(view(xiK, μ,:, :), view(xiK, ν,:, :))
 end
 
+
 #original tensor operation  
 #@tensoropt (μμ => 10, νν => 10) two_electron_fock_component[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
 @inline function calculate_coulomb_kernel(xyK, xiK, intermediate, index)
   μ = index[1]
   ν = index[2]
   return dot(view(xyK, μ, ν, :) , intermediate)
+  # μ = index[1]
+  # ν = index[2]
+  # two_electron_fock_component[μ, ν] = 0.0
+  # for A in axes(xyK, 3)
+  #   for μμ in axes(occupied_orbital_coefficients, 1)
+  #     for νν in axes(occupied_orbital_coefficients, 2)
+  #       two_electron_fock_component[μ, ν] += 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
+  #     end
+  #   end
+  # end
 end
 
 @inline function calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
-  comm = MPI.COMM_WORLD 
-  cartesian_indecies = CartesianIndices(two_electron_fock)
-  n_threads = Threads.nthreads()
-  number_of_indecies = length(cartesian_indecies)
-  batch_size = ceil(Int, number_of_indecies / n_threads)
-  thread_coulombs = [zeros(Float64, size(two_electron_fock)) for i in 1:n_threads]
+  
+  io = open("coulomb.txt", "a")
+  write(io, "xyK\n")
+  write(io, "$(vec(xyK))\n")
 
-  intermediate = zeros(size(xiK,3)) 
-  for A in axes(xiK, 3)
-    intermediate[A] = dot(view(xiK,:, :, A), occupied_orbital_coefficients)
-  end
+  write(io, "xiK\n")
+  write(io, "$(vec(xiK))\n")
+  write(io, "occupied_orbital_coefficients\n")
 
-  if load == "sequential"
-    for index in cartesian_indecies
-      two_electron_fock[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
-    end
-  elseif load == "static"    
-    Threads.@sync for batch_index in 1:batch_size+1:number_of_indecies
-      Threads.@spawn begin
-        thread_coulomb = thread_coulombs[Threads.threadid()]
-        for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-          index = cartesian_indecies[view_index]
-          thread_coulomb[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
-        end
-        axpy!(2.0, thread_coulomb, two_electron_fock) 
-      end
-    end
-  end
-  MPI.Barrier(comm)
+  write(io, "$(vec(occupied_orbital_coefficients))\n")
+  @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
+  write(io, "two_electron_fock\n")
+  write(io, "$(vec(two_electron_fock))\n")
+  close(io)
+  # μμ = size(xiK, 1) # number of basis functions
+  # νν = size(xiK, 2) # number of basis functions
+  # AA = size(xiK, 3) # number of AUX basis functions
+
+  # xiK_matrix = permutedims(reshape(xiK, (μμ*νν, AA)), (2,1))
+  # intermediate_matrix = BLAS.gemm('N', 'N', 1.0, xiK_matrix, occupied_orbital_coefficients)
+
+
+  # comm = MPI.COMM_WORLD 
+  # cartesian_indecies = CartesianIndices(two_electron_fock)
+  # n_threads = Threads.nthreads()
+  # number_of_indecies = length(cartesian_indecies)
+  # batch_size = ceil(Int, number_of_indecies / n_threads)
+  # thread_coulombs = [zeros(Float64, size(two_electron_fock)) for i in 1:n_threads]
+
+  # intermediate = zeros(size(xiK,3)) 
+  # for A in axes(xiK, 3)
+  #   intermediate[A] = dot(view(xiK,:, :, A), occupied_orbital_coefficients)
+  # end
+
+  # if load == "sequential"
+  #   for index in cartesian_indecies
+  #     two_electron_fock[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
+  #   end
+  # elseif load == "static"    
+  #   Threads.@sync for batch_index in 1:batch_size+1:number_of_indecies
+  #     Threads.@spawn begin
+  #       thread_coulomb = thread_coulombs[Threads.threadid()]
+  #       for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
+  #         index = cartesian_indecies[view_index]
+  #         thread_coulomb[index] = calculate_coulomb_kernel(xyK, xiK, intermediate, index)
+  #       end
+  #       axpy!(2.0, thread_coulomb, two_electron_fock) 
+  #     end
+  #   end
+  # end
+  # MPI.Barrier(comm)
 end 
 
 @inline function calculate_xiK_kernel!(xyK, occupied_orbital_coefficients,occ_coef_indexes, index)
@@ -145,39 +143,33 @@ end
 
 # calculate xiK 
 # original tensor operation
-# @tensor xiK[μ, i, A] = xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
+# @tensor xiK[μ, i, A] = xyK[μ, νν, A] * occupied_orbital_coefficients[νν, i]
 
 @inline function calculate_xiK(xyK, occupied_orbital_coefficients,
   basis_function_count, aux_basis_function_count, load)
-  comm = MPI.COMM_WORLD
-  number_off_occ_orbitals = size(occupied_orbital_coefficients, 2)
-  xiK = zeros(basis_function_count, number_off_occ_orbitals, aux_basis_function_count)
+  # io = open("xiK.txt", "a")
+  # write(io, "xyK\n")
+  # write(io, "$(vec(xyK))\n")
+  # write(io, "occupied_orbital_coefficients\n")
+  # write(io, "$(vec(occupied_orbital_coefficients))\n")
+  # xyK_copy = deepcopy(xyK)
+  # occupied_orbital_coefficients_copy = deepcopy(occupied_orbital_coefficients)
+  # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
+  # @tensor xiK_tenop[ν, i, A] := xyK_copy[μμ, ν, A] * occupied_orbital_coefficients_copy[μμ, i]
+    # return xiK_tenop
+  #end 
+  μμ = size(xyK, 1)
+  νν = size(xyK, 2)
+  AA = size(xyK, 3)
+  ii = size(occupied_orbital_coefficients, 2)
 
-  cartesian_indecies = CartesianIndices(xiK)
-  number_of_indecies = length(cartesian_indecies)
-  n_threads = Threads.nthreads()
-  batch_size = ceil(Int, number_of_indecies / n_threads)
+  xyK_permuted = permutedims(xyK, (1,3,2))
+  xyK_matrix =  reshape(xyK_permuted, (νν*AA,μμ))
+  
+  xiK_blas_vec = BLAS.gemm('N', 'N' , 1.0, xyK_matrix, occupied_orbital_coefficients)
 
-  occ_coef_indexes =  axes(occupied_orbital_coefficients, 1)
-
-
-  if load == "sequential"
-    for index in cartesian_indecies
-      index = cartesian_indecies[view_index]
-      xiK[index] = calculate_xiK_kernel!(xyK, occupied_orbital_coefficients, occ_coef_indexes, index)
-    end
-  elseif load == "static"
-    @sync for batch_index in 1:batch_size+1:number_of_indecies
-      Threads.@spawn begin
-        for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-          index = cartesian_indecies[view_index]
-          xiK[index] = calculate_xiK_kernel!(xyK, occupied_orbital_coefficients, occ_coef_indexes, index)
-        end # end threads spawn
-      end  # end sync     
-    end # end batch for loop
-  end # end load if 
-  MPI.Barrier(comm)
-  return xiK
+  xiK_blas = permutedims(reshape(xiK_blas_vec, (μμ,AA,ii)), (1,3,2))
+  return xiK_blas
 end
 
 
@@ -194,21 +186,37 @@ end
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized
   Linv_t = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
-  cartesian_indecies = CartesianIndices(xyK)
-  number_of_indecies = length(cartesian_indecies)
-  n_threads = Threads.nthreads()
-  batch_size = ceil(Int, number_of_indecies / n_threads)
-  if load == "sequential"
-    for index in cartesian_indecies
-      calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, index)
-    end
-  elseif load == "static" || MPI.Comm_size(comm) == 1
-    @sync for batch_index in 1:batch_size+1:number_of_indecies
-      Threads.@spawn begin
-        do_xyK_batch(xyK, three_center_integrals, Linv_t, cartesian_indecies, batch_index, batch_size, number_of_indecies)
-      end  
-    end
-  end # end if
+  
+  # # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
+  # @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
+  # #   return
+  # # end
+  println("doing xyK blas")
+  μμ = size(three_center_integrals, 2)
+  νν = size(three_center_integrals, 3)
+  AA = size(three_center_integrals, 1)
+  # use transpose transpose gemm transpose to perform tensor contraction 
+  # Linv_T is already a 2D matrix so no need to reshape, and is in correct order
+  tci_vector =  reshape(permutedims(three_center_integrals, (2,3,1)) , (μμ*νν,AA))
+  xyK_vec = BLAS.gemm('N', 'N', 1.0, tci_vector, Linv_t)
+  xyK .= reshape(xyK_vec, (μμ, νν, AA))
+  
+  
+  # cartesian_indecies = CartesianIndices(xyK)
+  # number_of_indecies = length(cartesian_indecies)
+  # n_threads = Threads.nthreads()
+  # batch_size = ceil(Int, number_of_indecies / n_threads)
+  # if load == "sequential"
+  #   for index in cartesian_indecies
+  #     calculate_xyK_kernel!(xyK, three_center_integrals, Linv_t, index)
+  #   end
+  # elseif load == "static" || MPI.Comm_size(comm) == 1
+  #   @sync for batch_index in 1:batch_size+1:number_of_indecies
+  #     Threads.@spawn begin
+  #       do_xyK_batch(xyK, three_center_integrals, Linv_t, cartesian_indecies, batch_index, batch_size, number_of_indecies)
+  #     end  
+  #   end
+  # end # end if
   # MPI.Barrier(comm)
 end # end function calculate_xyK
 
@@ -397,14 +405,16 @@ end
   end
 end
 
-@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, two_center_integrals, load) where {T<:DFRHFTEIEngine}
+@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, load) where {T<:DFRHFTEIEngine}
+
+  aux_basis_function_count = basis_sets.auxillary.norb
+  two_center_integrals = zeros(Float64, aux_basis_function_count, aux_basis_function_count) 
   comm = MPI.COMM_WORLD
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   cartesian_indicies = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
   number_of_indecies = length(cartesian_indicies)
   n_threads = Threads.nthreads()
   batch_size = ceil(Int, number_of_indecies / n_threads)
-
 
   max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
   thead_integral_buffer = [zeros(Float64, max_nbas^2) for i in 1:n_threads]
@@ -430,6 +440,7 @@ end
     error("integral threading load type: $(load) not supported")
   end
   MPI.Barrier(comm)
+  return two_center_integrals
 
 end
 

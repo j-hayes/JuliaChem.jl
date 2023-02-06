@@ -506,6 +506,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         density_fitting_converged = true
         jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
         println("------------ done with density fitted iterations --------------")
+        break
       end
     else
       iter_converged = Base.abs_float(ΔE) <= dele && D_rms <= rmsd
