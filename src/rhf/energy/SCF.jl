@@ -528,13 +528,16 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
     
     if do_density_fitting && !density_fitting_converged 
+      #todo the density fitting convergence values should be a parameter 
       density_fitting_converged = Base.abs_float(ΔE) <= 10^(-3) && D_rms <= 10^(-3)
+      # max iter for density fitting should be a parameter
       if density_fitting_converged || iter > 20
         xyK = nothing
         xiK = nothing
         two_electron_fock_component = nothing        
         do_density_fitting = false
         density_fitting_converged = true
+        timings.density_fitting_iteration_range = 2:iter
         if scf_options.guess == Guess.density_fitting # density fitting guess done proceed to RHF 
           jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) for thread in 1:nthreads ]
           if MPI.Comm_rank(comm) == 0 && output >= 2
