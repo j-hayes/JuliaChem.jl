@@ -4,18 +4,20 @@ mutable struct SCFOptions
     density_fitting :: Bool 
     contraction_mode :: String
     load :: String 
+    guess :: String
 end 
 
 function create_default_scf_options()
     return SCFOptions(
         false, # density_fitting
         SCF_Keywords.ContractionMode.default,
-        SCF_Keywords.Load.default
+        SCF_Keywords.Load.default,
+        SCF_Keywords.Guess.default
         )
 end
 
-function create_scf_options(density_fitting :: Bool, contraction_mode :: String, load::String)    
-    return SCFOptions(density_fitting, contraction_mode, load)
+function create_scf_options(density_fitting :: Bool, contraction_mode :: String, load::String, guess::String)
+    return SCFOptions(density_fitting, contraction_mode, load, guess)
 end
 
 function print_scf_options(options::SCFOptions, output ::Int)
@@ -25,6 +27,7 @@ function print_scf_options(options::SCFOptions, output ::Int)
         println("Density Fitting: ", options.density_fitting)
         println("Contraction Mode: ", options.contraction_mode)
         println("Integral Load: ", options.load)
+        println("Guess: ", options.guess)
         println("------------------------------") 
     end
 end

@@ -7,6 +7,14 @@ module SCF_Keywords
         const density_fitting = "df" # Density Fitted Restricted Hartree Fock
     end
 
+    module Guess
+        const guess = "guess"
+        const default = "default"
+        const hcore = "hcore"
+        const density_fitting = "df" # density fitting with hcore guess before using full rhf 
+        const sad = "sad"
+    end
+
     module ContractionMode 
         const contraction_mode = "contraction_mode"
         const default = "default"
@@ -20,7 +28,7 @@ module SCF_Keywords
         const dynamic = "dynamic"
     end
     
-    export SCFType, ContractionMode, IntegralLoad
+    export SCFType, ContractionMode, IntegralLoad, Guess
 end 
 
 

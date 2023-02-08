@@ -17,12 +17,14 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   # todo move this all to a function 
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
   niter::Int = haskey(scf_flags, "niter") ? scf_flags["niter"] : 50
-  guess::String = haskey(scf_flags, "guess") ? scf_flags["guess"] : "sad" 
   
   ndiis::Int = haskey(scf_flags, "ndiis") ? scf_flags["ndiis"] : 10
   dele::Float64 = haskey(scf_flags, "dele") ? scf_flags["dele"] : 1E-6
   rmsd::Float64 = haskey(scf_flags, "rmsd") ? scf_flags["rmsd"] : 1E-6
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
+
+  guess::String = haskey(scf_flags, Guess.guess) ?
+    scf_flags[Guess.guess] : Guess.default
 
   load::String = haskey(scf_flags, IntegralLoad.load) ? scf_flags[IntegralLoad.load] : IntegralLoad.default
 
@@ -31,12 +33,15 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   do_density_fitting::Bool = haskey(scf_flags, SCFType.scf_type) ? 
     lowercase(scf_flags[SCFType.scf_type]) == SCFType.density_fitting : false
 
-  scf_options = create_scf_options(do_density_fitting, contraction_mode, load)
+  scf_options = create_scf_options(do_density_fitting, 
+    contraction_mode,
+    load,
+    guess)
   print_scf_options(scf_options, output)
   check_auxillary_basis_is_provided(do_density_fitting, basis_sets)
 
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
-    niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd,
+    niter=niter, ndiis=ndiis, dele=dele, rmsd=rmsd,
     fdiff=fdiff, scf_options=scf_options)
 end
 
@@ -62,7 +67,7 @@ method = the method to calculate the SCF E.G. RHF (Restricted Hatree Fock) or DF
 """
 function rhf_kernel(mol::Molecule, 
   basis_sets::CalculationBasisSets; 
-  output::Int64, debug::Bool, niter::Int, guess::String, ndiis::Int, 
+  output::Int64, debug::Bool, niter::Int, ndiis::Int, 
   dele::Float64, rmsd::Float64, fdiff::Bool, scf_options::SCFOptions)
   
   basis = basis_sets.primary
@@ -94,9 +99,19 @@ function rhf_kernel(mol::Molecule,
 
   H = T .+ V
  
-  #== compute initial guess ==# 
-  guess_matrix = guess == "sad" ? sad_guess(mol, basis) : deepcopy(H) 
-  
+  #== build the initial matrices with guesss ==#
+  if scf_options.guess == Guess.sad
+    guess_matrix = sad_guess(mol, basis)
+    D = guess_matrix
+    F = zeros(size(H))
+  elseif scf_options.guess == Guess.hcore || scf_options.guess == Guess.density_fitting
+    guess_matrix = deepcopy(H)
+    F = guess_matrix
+    D = zeros(size(H))
+  else
+    error("Guess $(scf_options.guess) not a valid guess mode")
+  end
+
   if debug && MPI.Comm_rank(comm) == 0
     h5write("debug.h5","RHF/Iteration-None/E_nuc", E_nuc)
     h5write("debug.h5","RHF/Iteration-None/S", S)
@@ -107,9 +122,6 @@ function rhf_kernel(mol::Molecule,
   end
 
   #== build the initial matrices ==#
-  D = guess == "sad" ? guess_matrix : zeros(size(H)) 
-  F = guess == "hcore" ? guess_matrix : zeros(size(H)) 
- 
   F_eval = Vector{Float64}(undef,basis.norb)
   F_evec = zeros(size(F))
 
@@ -159,7 +171,7 @@ function rhf_kernel(mol::Molecule,
 
   E_elec = 0.0
   F_eval = zeros(size(F)[1])
-  if guess == "hcore"
+  if scf_options.guess == Guess.hcore || scf_options.guess == Guess.density_fitting
     E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a, 
       workspace_b, ortho, basis_sets, 0, debug)
   end
@@ -363,11 +375,13 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
 
-  jeri_engine_thread = scf_options.density_fitting ? 
+  do_density_fitting = scf_options.density_fitting || scf_options.guess == Guess.density_fitting
+
+  jeri_engine_thread = do_density_fitting ? 
     [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] :
     [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
 
-  if scf_options.density_fitting
+  if do_density_fitting
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     electrons_count = Int64(basis_sets.primary.nels)
@@ -425,7 +439,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   
     #== build new Fock matrix ==#
-    if !scf_options.density_fitting || density_fitting_converged
+    if !do_density_fitting
       rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
@@ -504,16 +518,22 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       @printf("%d      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms)
     end
 
-    if scf_options.density_fitting && !density_fitting_converged 
+    if do_density_fitting && !density_fitting_converged 
       density_fitting_converged = Base.abs_float(ΔE) <= 10^(-3) && D_rms <= 10^(-3)
       if density_fitting_converged || iter > 20
         xyK = nothing
         xiK = nothing
         two_electron_fock_component = nothing        
+        do_density_fitting = false
         density_fitting_converged = true
-        jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
-        println("------------ done with density fitted iterations --------------")
-        break
+        if scf_options.guess == Guess.density_fitting # density fitting guess done proceed to RHF 
+          jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) for thread in 1:nthreads ]
+          if MPI.Comm_rank(comm) == 0 && output >= 2
+            println("------------ done with density fitted iterations --------------")
+          end
+        else # Density Fitting RHF done 
+          break 
+        end
       end
     else
       iter_converged = Base.abs_float(ΔE) <= dele && D_rms <= rmsd

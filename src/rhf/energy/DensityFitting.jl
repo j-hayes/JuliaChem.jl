@@ -19,15 +19,15 @@ Indecies for all tensor contractions
     basis_function_count = basis_sets.primary.norb
     two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
   if iteration == 1
-    @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
-    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-    @time calculate_xyK(two_center_integrals, three_center_integrals, xyK, scf_options)
+    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+    calculate_xyK(two_center_integrals, three_center_integrals, xyK, scf_options)
   end
-  @time xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, scf_options)
+  xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, scf_options)
   #Coulomb
-  @time calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,scf_options) 
+  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,scf_options) 
   #Exchange
-  @time calculate_exchange!(two_electron_fock, xiK, basis_function_count,scf_options)
+  calculate_exchange!(two_electron_fock, xiK, basis_function_count,scf_options)
   MPI.Barrier(comm)
 
   return two_electron_fock
