@@ -7,10 +7,6 @@ wave function for closed-shell systems.
 """
 module JCRHF
 
-#== RHF Constants module ==#
-Base.include(@__MODULE__,"./Constants.jl")
-export Constants
-
 #== RHF energy module ==#
 Base.include(@__MODULE__,"energy/Energy.jl")
 export Energy

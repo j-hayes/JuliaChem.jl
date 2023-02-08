@@ -1,6 +1,7 @@
 using Base.Threads
 using LinearAlgebra
 using TensorOperations
+using JuliaChem.Shared.Constants.SCF_Keywords
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 #== 
@@ -12,33 +13,34 @@ Indecies for all tensor contractions
 
 ==#
 @inline function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets,
-  occupied_orbital_coefficients, xyK, iteration, load) where {T<:DFRHFTEIEngine}
+  occupied_orbital_coefficients, xyK, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
     comm = MPI.COMM_WORLD
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
-
   if iteration == 1
-    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, load)
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, load)
-    calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
+    @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+    @time calculate_xyK(two_center_integrals, three_center_integrals, xyK, scf_options)
   end
-  xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, load)
+  @time xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, scf_options)
   #Coulomb
-  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
+  @time calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,scf_options) 
   #Exchange
-  calculate_exchange!(two_electron_fock, xiK, basis_function_count,load)
+  @time calculate_exchange!(two_electron_fock, xiK, basis_function_count,scf_options)
   MPI.Barrier(comm)
 
   return two_electron_fock
 end
 
 #original tensor operation  @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
-function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
-  # two_electron_fock_copy = deepcopy(two_electron_fock)
-  # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
-  #   @tensor exchange[μ, ν] := xiK[μ, νν, AA] * xiK[ν, νν, AA]
-  # end
+function calculate_exchange!(two_electron_fock, xiK, basis_function_count, scf_options::SCFOptions)
+  if scf_options.contraction_mode == ContractionMode.tensor_operations
+    @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
+    return 
+  end
+
+  # todo get these from constants to make this more readable 
   μμ = size(xiK, 1) # number of basis functions 
   oo = size(xiK, 2) # number of occupied orbitals
   AA = size(xiK, 3) # number of aux basis functions
@@ -51,11 +53,12 @@ function calculate_exchange!(two_electron_fock, xiK, basis_function_count, load)
   BLAS.axpy!(-1.0, exchange_blas, two_electron_fock)
 end
 
-@inline function calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,load) 
+@inline function calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count , scf_options::SCFOptions) 
   
-  # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
-    # @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
-  # end
+  if scf_options.contraction_mode == ContractionMode.tensor_operations
+    @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
+    return 
+  end
   μμ = size(xiK, 1)
   ii = size(xiK, 2)
   AA = size(xiK, 3)
@@ -89,11 +92,11 @@ end
 
 # calculate xiK 
 @inline function calculate_xiK(xyK, occupied_orbital_coefficients,
-  basis_function_count, aux_basis_function_count, load)
-  # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
-    # @tensor xiK_tenop[ν, i, A] := xyK[μμ, ν, A] * occupied_orbital_coefficients[μμ, i]
-  # return xiK_tenop
-  #end 
+  basis_function_count, aux_basis_function_count, scf_options::SCFOptions)
+  if scf_options.contraction_mode == ContractionMode.tensor_operations
+    @tensor xiK_tenop[ν, i, A] := xyK[μμ, ν, A] * occupied_orbital_coefficients[μμ, i]
+    return xiK_tenop
+  end 
   μμ = size(xyK, 1)
   νν = size(xyK, 2)
   AA = size(xyK, 3)
@@ -108,15 +111,17 @@ end
   return xiK_blas
 end
 
-@inline function calculate_xyK(two_center_integrals, three_center_integrals, xyK, load)
+@inline function calculate_xyK(two_center_integrals, three_center_integrals, xyK, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized
   Linv_t = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
   
-  # # if scf_options.contraction_library == Constants.Contraction.Tensor_Op
-  # @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
-  #   return
-  # # end
+  if scf_options.contraction_mode == ContractionMode.tensor_operations
+    @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
+    return
+  end
+  
+  ## todo get this from a parameter to make this more readable 
   μμ = size(three_center_integrals, 2)
   νν = size(three_center_integrals, 3)
   AA = size(three_center_integrals, 1)
@@ -128,7 +133,7 @@ end
   # MPI.Barrier(comm)
 end # end function calculate_xyK
 
-@inline function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, load)
+@inline function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
 
   aux_basis_function_count = basis_sets.auxillary.norb
@@ -145,13 +150,13 @@ end # end function calculate_xyK
   max_primary_nbas = max_number_of_basis_functions(basis_sets.primary)
   max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
   thead_integral_buffer = [zeros(Float64, max_primary_nbas^2*max_aux_nbas) for thread in 1:n_threads]
-  if load == "sequential"
+  if scf_options.load == "sequential"
     engine = jeri_engine_thread[1]
     integral_buffer = thead_integral_buffer[1]
     for cartesian_index in cartesian_indecies
       calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
-  elseif load == "static" || MPI.Comm_size(comm) == 1  # todo fix this multithreading issue
+  elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1  # todo fix this multithreading issue
     Threads.@sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
         do_three_center_integral_batch(batch_index,
@@ -161,7 +166,7 @@ end # end function calculate_xyK
       end
     end
   else
-    error("integral threading load type: $(load) not supported")
+    error("integral threading load type: $(scf_options.load) not supported")
   end
   return three_center_integrals
   MPI.Barrier(comm)
@@ -307,7 +312,7 @@ end
   end
 end
 
-@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, load) where {T<:DFRHFTEIEngine}
+@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
 
   aux_basis_function_count = basis_sets.auxillary.norb
   two_center_integrals = zeros(Float64, aux_basis_function_count, aux_basis_function_count) 
@@ -320,13 +325,13 @@ end
 
   max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
   thead_integral_buffer = [zeros(Float64, max_nbas^2) for i in 1:n_threads]
-  if load == "sequential"
+  if scf_options.load == "sequential"
     engine = jeri_engine_thread[1]
     for cartesian_index in cartesian_indicies
       integral_buffer = thead_integral_buffer[1]
       calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
-  elseif load == "static" || MPI.Comm_size(comm) == 1
+  elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1
     @sync for batch_index in 1:batch_size+1:number_of_indecies
       Threads.@spawn begin
         thread_id = Threads.threadid()
@@ -339,7 +344,7 @@ end
       end
     end
   else
-    error("integral threading load type: $(load) not supported")
+    error("integral threading load type: $(scf_options.load) not supported")
   end
   MPI.Barrier(comm)
   return two_center_integrals

@@ -3,7 +3,8 @@ using LinearAlgebra
 using HDF5
 using PrettyTables
 using Printf
-using JuliaChem.JCRHF.Constants
+using JuliaChem.Shared.Constants.SCF_Keywords
+using JuliaChem.Shared
 using TensorOperations
 
 const do_continue_print = false 
@@ -12,6 +13,8 @@ const print_eri = false
 function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
   
+  # todo move all of these options to scf_options 
+  # todo move this all to a function 
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
   niter::Int = haskey(scf_flags, "niter") ? scf_flags["niter"] : 50
   guess::String = haskey(scf_flags, "guess") ? scf_flags["guess"] : "sad" 
@@ -19,15 +22,22 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   ndiis::Int = haskey(scf_flags, "ndiis") ? scf_flags["ndiis"] : 10
   dele::Float64 = haskey(scf_flags, "dele") ? scf_flags["dele"] : 1E-6
   rmsd::Float64 = haskey(scf_flags, "rmsd") ? scf_flags["rmsd"] : 1E-6
-  load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
-  do_density_fitting::Bool = haskey(scf_flags, SCF_Keywords.SCF_TYPE) ? lowercase(scf_flags[SCF_Keywords.SCF_TYPE]) == SCF.DensityFitting : false
 
+  load::String = haskey(scf_flags, IntegralLoad.load) ? scf_flags[IntegralLoad.load] : IntegralLoad.default
+
+  contraction_mode::String = haskey(scf_flags, ContractionMode.contraction_mode) ?
+   scf_flags[ContractionMode.contraction_mode] : ContractionMode.default
+  do_density_fitting::Bool = haskey(scf_flags, SCFType.scf_type) ? 
+    lowercase(scf_flags[SCFType.scf_type]) == SCFType.density_fitting : false
+
+  scf_options = create_scf_options(do_density_fitting, contraction_mode, load)
+  print_scf_options(scf_options, output)
   check_auxillary_basis_is_provided(do_density_fitting, basis_sets)
 
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
-    niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
-    fdiff=fdiff, do_density_fitting=do_density_fitting)
+    niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd,
+    fdiff=fdiff, scf_options=scf_options)
 end
 
 
@@ -53,7 +63,7 @@ method = the method to calculate the SCF E.G. RHF (Restricted Hatree Fock) or DF
 function rhf_kernel(mol::Molecule, 
   basis_sets::CalculationBasisSets; 
   output::Int64, debug::Bool, niter::Int, guess::String, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, do_density_fitting::Bool)
+  dele::Float64, rmsd::Float64, fdiff::Bool, scf_options::SCFOptions)
   
   basis = basis_sets.primary
   comm=MPI.COMM_WORLD
@@ -170,7 +180,7 @@ function rhf_kernel(mol::Molecule,
     F_eval, F_evec, F_old, workspace_a, workspace_b, workspace_c,
     E_nuc, E_elec, E_old, basis_sets; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele,
-    rmsd=rmsd, load=load, fdiff=fdiff, do_density_fitting=do_density_fitting)
+    rmsd=rmsd, fdiff=fdiff, scf_options = scf_options)
 
   if !converged
     if MPI.Comm_rank(comm) == 0 && output >= 1
@@ -241,7 +251,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
   workspace_c::Vector{Matrix{Float64}}, E_nuc::Float64, E_elec::Float64, 
   E_old::Float64, basis_sets::CalculationBasisSets;
   output::Int64, debug::Bool, niter::Int, ndiis::Int, 
-  dele::Float64, rmsd::Float64, load::String, fdiff::Bool, do_density_fitting)
+  dele::Float64, rmsd::Float64, fdiff::Bool, scf_options::SCFOptions)
   basis = basis_sets.primary
   #== read in some more variables from scf flags input ==#
   nsh = length(basis)
@@ -298,7 +308,7 @@ function scf_cycles(F::Matrix{Float64}, D::Matrix{Float64},
     D_old, ΔD, D_input, scf_converged, FDS, 
     schwarz_bounds, Dsh; 
     output=output, debug=debug, niter=niter, ndiis=ndiis, dele=dele, 
-    rmsd=rmsd, load=load, fdiff=fdiff, do_density_fitting)
+    rmsd=rmsd, fdiff=fdiff, scf_options)
   #== we are done! ==#
   if debug
     h5write("debug.h5","RHF/Iteration-Final/F", F)
@@ -326,7 +336,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   ΔD::Matrix{Float64}, D_input::Matrix{Float64}, scf_converged::Bool,  
   FDS::Matrix{Float64}, 
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64}; 
-  output, debug, niter, ndiis, dele, rmsd, load, fdiff, do_density_fitting)
+  output, debug, niter, ndiis, dele, rmsd, fdiff, scf_options:: SCFOptions)
   basis = basis_sets.primary
   auxiliary_basis = basis_sets.auxillary
   #== initialize a few more variables ==#
@@ -353,12 +363,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
  
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
 
-  jeri_engine_thread = do_density_fitting ? 
+  jeri_engine_thread = scf_options.density_fitting ? 
     [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] :
     [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
 
-  if do_density_fitting
-    # enable_blas() 
+  if scf_options.density_fitting
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     electrons_count = Int64(basis_sets.primary.nels)
@@ -416,18 +425,16 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   
     #== build new Fock matrix ==#
-    if !do_density_fitting || density_fitting_converged
+    if !scf_options.density_fitting || density_fitting_converged
       rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
       schwarz_bounds, Dsh,
       eri_quartet_batch_thread, 
       jeri_engine_thread, iter,
-      cutoff, debug, load, fdiff, ΔF, F_cumul)      
+      cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
     else
-      
-      F .= H .+ df_rhf_fock_build(jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), 
-        xyK, iter, load)
+      @time F .= H .+ df_rhf_fock_build(jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), xyK, iter, scf_options)
     end
     
     if debug && MPI.Comm_rank(comm) == 0
@@ -497,7 +504,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       @printf("%d      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms)
     end
 
-    if do_density_fitting && !density_fitting_converged 
+    if scf_options.density_fitting && !density_fitting_converged 
       density_fitting_converged = Base.abs_float(ΔE) <= 10^(-3) && D_rms <= 10^(-3)
       if density_fitting_converged || iter > 20
         xyK = nothing
