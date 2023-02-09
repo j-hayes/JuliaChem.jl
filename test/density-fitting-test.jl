@@ -58,7 +58,7 @@ end
 
 
 # check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
-# check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/water_density_fitted.json", "./example_inputs/density_fitting/water_rhf.json")
+check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/water_density_fitted.json", "./example_inputs/density_fitting/water_rhf.json")
 # check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/H2_density_fitted.json", "./example_inputs/density_fitting/H2_rhf.json")
-MP2_Num = "01"
-check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json", "./example_inputs/density_fitting/$(MP2_Num)_MP2.json")
+# MP2_Num = "01"
+# check_density_fitted_method_matches_RHF("./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json", "./example_inputs/density_fitting/$(MP2_Num)_MP2.json")

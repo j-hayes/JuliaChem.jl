@@ -15,6 +15,22 @@ module SCF_Keywords
         const sad = "sad"
     end
 
+    module Convergence
+        const density_fitting_energy = "df_dele"
+        const energy = "dele"
+        const energy_default = 1E-6
+
+        const density_fitting_density = "df_rmsd"
+        const density = "rmsd"
+        const density_default = 1E-6
+
+        const max_iterations = "niter"
+        const max_iterations_default = 50
+
+        const df_max_iterations = "df_niter"
+        const df_max_iterations_default = 20
+    end
+
     module ContractionMode 
         const contraction_mode = "contraction_mode"
         const default = "default"
@@ -28,7 +44,7 @@ module SCF_Keywords
         const dynamic = "dynamic"
     end
     
-    export SCFType, ContractionMode, IntegralLoad, Guess
+    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence
 end 
 
 
