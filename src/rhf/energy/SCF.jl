@@ -384,6 +384,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     basis_function_count = basis_sets.primary.norb
     electrons_count = Int64(basis_sets.primary.nels)
     xyK = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
+    two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
   end
 
   density_fitting_converged = false
@@ -447,7 +448,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jeri_engine_thread, iter,
       cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
     else
-      F .= H .+ df_rhf_fock_build(jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), xyK, iter, scf_options)
+      F .= H .+ df_rhf_fock_build(two_electron_fock, jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), xyK, iter, scf_options)
     end
     
     if debug && MPI.Comm_rank(comm) == 0

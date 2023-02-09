@@ -12,12 +12,11 @@ Indecies for all tensor contractions
   i = occupied orbitals
 
 ==#
-@inline function df_rhf_fock_build(jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets,
+@inline function df_rhf_fock_build(two_electron_fock, jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, xyK, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
     comm = MPI.COMM_WORLD
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
-    two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
   if iteration == 1
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
