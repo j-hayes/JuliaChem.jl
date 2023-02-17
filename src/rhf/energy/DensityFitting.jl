@@ -2,7 +2,7 @@ using Base.Threads
 using LinearAlgebra
 using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
-
+using JuliaChem.Shared
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 #== 
 Indecies for all tensor contractions 
@@ -16,22 +16,25 @@ Indecies for all tensor contractions
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, D, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
+
   if iteration == 1
   two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
   three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-  calculate_D(two_center_integrals, three_center_integrals, D, scf_options)
+  @time calculate_D(two_center_integrals, three_center_integrals, D, scf_options)
   end
-  D_tilde = calculate_D_tilde(D, occupied_orbital_coefficients, scf_options)
+  @time D_tilde = calculate_D_tilde(D, occupied_orbital_coefficients, scf_options)
+  scf_data = SCFData(D, D_tilde, zeros(size(D_tilde)), two_electron_fock, 1,1,1)
+
   #Coulomb
-  calculate_coulomb!(two_electron_fock,D, D_tilde,occupied_orbital_coefficients,scf_options) 
+  @time calculate_coulomb!(two_electron_fock,D, D_tilde,occupied_orbital_coefficients,scf_options, scf_data) 
   #Exchange
-  calculate_exchange!(two_electron_fock, D_tilde,scf_options)
+  @time calculate_exchange!(two_electron_fock, D_tilde,scf_options, scf_data)
   MPI.Barrier(comm)
   return two_electron_fock
 end
 
 #original tensor operation  @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
-function calculate_exchange!(two_electron_fock, D_tilde, scf_options::SCFOptions)
+function calculate_exchange!(two_electron_fock, D_tilde, scf_options::SCFOptions, scf_data)
   if scf_options.contraction_mode == ContractionMode.tensor_operations
     @tensor two_electron_fock[μ, ν] -= D_tilde[μ, νν, AA] * D_tilde[ν, νν, AA]
     return 
@@ -51,48 +54,54 @@ function calculate_exchange!(two_electron_fock, D_tilde, scf_options::SCFOptions
 end
 
 @inline function calculate_coulomb!(two_electron_fock, D, D_tilde, occupied_orbital_coefficients,
-   scf_options::SCFOptions) 
-  if scf_options.contraction_mode == ContractionMode.tensor_operations
+   scf_options::SCFOptions, scf_data) 
+     
+  scf_data.D_tilde_permuted = permutedims(D_tilde, (2,1,3))
+  if scf_options.contraction_mode == ContractionMode.tensor_operations 
     @tensoropt (μμ => 10, ii => 10) two_electron_fock[μ, ν] = 2.0 * D[μ, ν, A] * 
-      D_tilde[μμ, ii, A] * occupied_orbital_coefficients[μμ, ii]
+    scf_data.D_tilde_permuted[A,μμ,ii] * occupied_orbital_coefficients[μμ, ii]
     return 
   end
-  μμ = size(D_tilde, 1)
-  ii = size(D_tilde, 2)
-  AA = size(D_tilde, 3)
-  
-  xiK_matrix_permuted = permutedims(D_tilde, (3,1,2))
-  xiK_matrix = reshape(xiK_matrix_permuted, (AA,μμ*ii))
+
+  μμ = size(D, 1)
+  ii = size(occupied_orbital_coefficients, 2)
+  AA = size(D, 3)
+
+  scf_data.D_tilde_permuted = reshape(scf_data.D_tilde_permuted, (AA,μμ*ii))
 
   occupied_orbital_coefficients_vector = reshape(occupied_orbital_coefficients, (μμ*ii,1))
-  intermediate_blas = BLAS.gemm('N', 'N', 1.0, xiK_matrix, occupied_orbital_coefficients_vector)
+  intermediate_blas = BLAS.gemm('N', 'N', 1.0, scf_data.D_tilde_permuted, occupied_orbital_coefficients_vector)
   intermediate_blas = reshape(intermediate_blas, (AA,1))
+
   μμ = size(D, 1)
   νν = size(D, 2)
   AA = size(D, 3)
+
   xyK_matrix = reshape(D, (μμ*νν, AA))
-  coulomb_blas = 2.0 * BLAS.gemm('N', 'N', 1.0, xyK_matrix, intermediate_blas)
-  two_electron_fock .= reshape(coulomb_blas, (μμ, νν))
+  two_electron_fock = reshape(two_electron_fock, (μμ*νν, 1))
+  BLAS.gemm!('N', 'N', 2.0, xyK_matrix, intermediate_blas, 0.0 ,two_electron_fock)
+  two_electron_fock = reshape(two_electron_fock, (μμ, νν)) 
+
 end 
 
 # calculate xiK 
-@inline function calculate_D_tilde(xyK, occupied_orbital_coefficients, scf_options::SCFOptions)
+@inline function calculate_D_tilde(D, occupied_orbital_coefficients, scf_options::SCFOptions)
   if scf_options.contraction_mode == ContractionMode.tensor_operations
-    @tensor xiK_tenop[ν, i, A] := xyK[μμ, ν, A] * occupied_orbital_coefficients[μμ, i]
-    return xiK_tenop
+    @tensor D_tilde[ν, A, i] := D[μμ, ν, A] * occupied_orbital_coefficients[μμ, i]
+    return D_tilde
   end 
-  μμ = size(xyK, 1)
-  νν = size(xyK, 2)
-  AA = size(xyK, 3)
+  μμ = size(D, 1)
+  νν = size(D, 2)
+  AA = size(D, 3)
   ii = size(occupied_orbital_coefficients, 2)
 
-  xyK_permuted = permutedims(xyK, (1,3,2))
-  xyK_matrix =  reshape(xyK_permuted, (νν*AA,μμ))
-  
-  xiK_blas_vec = BLAS.gemm('N', 'N' , 1.0, xyK_matrix, occupied_orbital_coefficients)
+  D_permuted = permutedims(D, (1,3,2))
+  D_permuted = reshape(D_permuted, (νν*AA,μμ))
+  d_tilde_vec = BLAS.gemm('N', 'N' , 1.0, D_permuted, occupied_orbital_coefficients)
 
-  xiK_blas = permutedims(reshape(xiK_blas_vec, (μμ,AA,ii)), (1,3,2))
-  return xiK_blas
+  d_tilde = reshape(d_tilde_vec, (μμ,AA,ii))
+
+  return d_tilde
 end
 
 
@@ -114,7 +123,7 @@ end
   # Linv_T is already a 2D matrix so no need to reshape, and is in correct order
   D = reshape(D, (μμ*νν,AA))
   three_center_integrals =  reshape(three_center_integrals, (μμ*νν,AA))
-  BLAS.gemm!('N', 'N', 1.0, three_center_integrals, J_AB_invt, 0.0,D)
+  BLAS.gemm!('N', 'N', 1.0, three_center_integrals, J_AB_invt, 0.0, D)
   D = reshape(D, (μμ, νν, AA))
   # MPI.Barrier(comm)
 end # end function calculate_D
