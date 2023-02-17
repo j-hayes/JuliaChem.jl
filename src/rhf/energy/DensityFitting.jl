@@ -75,17 +75,6 @@ end
   two_electron_fock .= reshape(coulomb_blas, (μμ, νν))
 end 
 
-@inline function calculate_xiK_kernel!(xyK, occupied_orbital_coefficients,occ_coef_indexes, index)
-  μ = index[1] 
-  i = index[2]
-  A = index[3]
-  xiK_value = 0.0 
-  for dd in occ_coef_indexes
-    xiK_value += xyK[μ, dd, A] * occupied_orbital_coefficients[dd, i]
-  end
-  return xiK_value
-end
-
 # calculate xiK 
 @inline function calculate_D_tilde(xyK, occupied_orbital_coefficients, scf_options::SCFOptions)
   if scf_options.contraction_mode == ContractionMode.tensor_operations
@@ -113,28 +102,29 @@ end
   J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
   
   if scf_options.contraction_mode == ContractionMode.tensor_operations
-    @tensor D[μ, ν, A] = three_center_integrals[BB, μ, ν]*J_AB_invt[BB, A]
+    @tensor D[μ, ν, A] = three_center_integrals[μ, ν, BB]*J_AB_invt[BB, A]
     return
   end
   
   ## todo get this from a parameter to make this more readable 
-  μμ = size(three_center_integrals, 2)
-  νν = size(three_center_integrals, 3)
-  AA = size(three_center_integrals, 1)
+  μμ = size(three_center_integrals, 1)
+  νν = size(three_center_integrals, 2)
+  AA = size(three_center_integrals, 3)
   # use transpose transpose gemm transpose to perform tensor contraction 
   # Linv_T is already a 2D matrix so no need to reshape, and is in correct order
-  tci_vector =  reshape(permutedims(three_center_integrals, (2,3,1)) , (μμ*νν,AA))
-  xyK_vec = BLAS.gemm('N', 'N', 1.0, tci_vector, J_AB_invt)
-  D .= reshape(xyK_vec, (μμ, νν, AA))
+  D = reshape(D, (μμ*νν,AA))
+  three_center_integrals =  reshape(three_center_integrals, (μμ*νν,AA))
+  BLAS.gemm!('N', 'N', 1.0, three_center_integrals, J_AB_invt, 0.0,D)
+  D = reshape(D, (μμ, νν, AA))
   # MPI.Barrier(comm)
-end # end function calculate_xyK
+end # end function calculate_D
 
 @inline function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
 
   aux_basis_function_count = basis_sets.auxillary.norb
   basis_function_count = basis_sets.primary.norb
-  three_center_integrals = zeros(Float64, (aux_basis_function_count, basis_function_count, basis_function_count))
+  three_center_integrals = zeros(Float64, (basis_function_count, basis_function_count, aux_basis_function_count))
   auxilliary_basis_shell_count = length(basis_sets.auxillary)
   basis_shell_count = length(basis_sets.primary)
 
@@ -301,7 +291,7 @@ end
   for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1
     for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
       for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
-        three_center_integrals[i, j, k] = values[values_index]
+        three_center_integrals[j, k, i] = values[values_index]
         values_index += 1
       end
     end

@@ -370,7 +370,7 @@ end
       for λsize::Int64 in 0:(nλ-1)
         λnorm = get_axial_normalization_factor(λsize+1,amλ)
         normalization_factor = μνnorm*λnorm        
-        eri_quartet_batch[μ+μsize,ν+νsize,λ+λsize] *= normalization_factor
+        eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize] *= normalization_factor # moved AUX to third index
       end 
     end
   end 
