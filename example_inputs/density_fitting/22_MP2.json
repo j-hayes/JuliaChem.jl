@@ -38,7 +38,7 @@
   },
   "keywords": {
     "scf":{
-      "guess":"sad",
+      "guess":"hcore",
       "dele":1E-7,
       "rmsd":1E-7
     },

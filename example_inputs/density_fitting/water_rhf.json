@@ -15,8 +15,10 @@
   },
   "keywords": {
     "scf":{
-      "guess":"sad",
-      "load":"static"
+      "guess":"hcore",
+      "load":"static",
+      "dele":1E-7,
+      "rmsd":1E-7
     },
     "prop":{
       "mo energies":true,
