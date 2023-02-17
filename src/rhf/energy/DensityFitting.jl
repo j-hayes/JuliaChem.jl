@@ -10,72 +10,69 @@ Indecies for all tensor contractions
   A = Auxillary Basis orbital
   μ,ν = Primary Basis orbital
   i = occupied orbitals
-
 ==#
-@inline function df_rhf_fock_build(two_electron_fock, jeri_engine_thread::Vector{T}, basis_sets::CalculationBasisSets,
-  occupied_orbital_coefficients, xyK, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
-    comm = MPI.COMM_WORLD
-    aux_basis_function_count = basis_sets.auxillary.norb
-    basis_function_count = basis_sets.primary.norb
-  if iteration == 1
-    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-    calculate_xyK(two_center_integrals, three_center_integrals, xyK, scf_options)
-  end
-  xiK = calculate_xiK(xyK, occupied_orbital_coefficients, basis_function_count, aux_basis_function_count, scf_options)
-  #Coulomb
-  calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count ,scf_options) 
-  #Exchange
-  calculate_exchange!(two_electron_fock, xiK, basis_function_count,scf_options)
-  MPI.Barrier(comm)
 
+@inline function df_rhf_fock_build!(two_electron_fock, jeri_engine_thread::Vector{T}, 
+  basis_sets::CalculationBasisSets,
+  occupied_orbital_coefficients, D, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
+  comm = MPI.COMM_WORLD
+  if iteration == 1
+  two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+  three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+  calculate_D(two_center_integrals, three_center_integrals, D, scf_options)
+  end
+  D_tilde = calculate_D_tilde(D, occupied_orbital_coefficients, scf_options)
+  #Coulomb
+  calculate_coulomb!(two_electron_fock,D, D_tilde,occupied_orbital_coefficients,scf_options) 
+  #Exchange
+  calculate_exchange!(two_electron_fock, D_tilde,scf_options)
+  MPI.Barrier(comm)
   return two_electron_fock
 end
 
 #original tensor operation  @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
-function calculate_exchange!(two_electron_fock, xiK, basis_function_count, scf_options::SCFOptions)
+function calculate_exchange!(two_electron_fock, D_tilde, scf_options::SCFOptions)
   if scf_options.contraction_mode == ContractionMode.tensor_operations
-    @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
+    @tensor two_electron_fock[μ, ν] -= D_tilde[μ, νν, AA] * D_tilde[ν, νν, AA]
     return 
   end
 
   # todo get these from constants to make this more readable 
-  μμ = size(xiK, 1) # number of basis functions 
-  oo = size(xiK, 2) # number of occupied orbitals
-  AA = size(xiK, 3) # number of aux basis functions
+  μμ = size(D_tilde, 1) # number of basis functions 
+  oo = size(D_tilde, 2) # number of occupied orbitals
+  AA = size(D_tilde, 3) # number of aux basis functions
 
   # transpose transpose gemm transpose tensor contraction 
-  μ_vector =  reshape(xiK, (μμ, oo*AA))
-  ν_vector =  reshape(xiK, (μμ, oo*AA))
+  μ_vector =  reshape(D_tilde, (μμ, oo*AA))
+  ν_vector =  reshape(D_tilde, (μμ, oo*AA))
   exchange_blas_vec = BLAS.gemm('N', 'T', 1.0, μ_vector, ν_vector)
   exchange_blas = reshape(exchange_blas_vec, (μμ, μμ))
   BLAS.axpy!(-1.0, exchange_blas, two_electron_fock)
 end
 
-@inline function calculate_coulomb!(two_electron_fock, xyK, xiK, occupied_orbital_coefficients, basis_function_count , scf_options::SCFOptions) 
-  
+@inline function calculate_coulomb!(two_electron_fock, D, D_tilde, occupied_orbital_coefficients,
+   scf_options::SCFOptions) 
   if scf_options.contraction_mode == ContractionMode.tensor_operations
-    @tensoropt (μμ => 10, νν => 10) two_electron_fock[μ, ν] = 2.0 * xyK[μ, ν, A] * xiK[μμ, νν, A] * occupied_orbital_coefficients[μμ, νν]
+    @tensoropt (μμ => 10, ii => 10) two_electron_fock[μ, ν] = 2.0 * D[μ, ν, A] * 
+      D_tilde[μμ, ii, A] * occupied_orbital_coefficients[μμ, ii]
     return 
   end
-  μμ = size(xiK, 1)
-  ii = size(xiK, 2)
-  AA = size(xiK, 3)
+  μμ = size(D_tilde, 1)
+  ii = size(D_tilde, 2)
+  AA = size(D_tilde, 3)
   
-  xiK_matrix_permuted = permutedims(xiK, (3,1,2))
+  xiK_matrix_permuted = permutedims(D_tilde, (3,1,2))
   xiK_matrix = reshape(xiK_matrix_permuted, (AA,μμ*ii))
 
   occupied_orbital_coefficients_vector = reshape(occupied_orbital_coefficients, (μμ*ii,1))
   intermediate_blas = BLAS.gemm('N', 'N', 1.0, xiK_matrix, occupied_orbital_coefficients_vector)
   intermediate_blas = reshape(intermediate_blas, (AA,1))
-  μμ = size(xyK, 1)
-  νν = size(xyK, 2)
-  AA = size(xyK, 3)
-  xyK_matrix = reshape(xyK, (μμ*νν, AA))
+  μμ = size(D, 1)
+  νν = size(D, 2)
+  AA = size(D, 3)
+  xyK_matrix = reshape(D, (μμ*νν, AA))
   coulomb_blas = 2.0 * BLAS.gemm('N', 'N', 1.0, xyK_matrix, intermediate_blas)
   two_electron_fock .= reshape(coulomb_blas, (μμ, νν))
-
-  # MPI.Barrier(comm)
 end 
 
 @inline function calculate_xiK_kernel!(xyK, occupied_orbital_coefficients,occ_coef_indexes, index)
@@ -90,8 +87,7 @@ end
 end
 
 # calculate xiK 
-@inline function calculate_xiK(xyK, occupied_orbital_coefficients,
-  basis_function_count, aux_basis_function_count, scf_options::SCFOptions)
+@inline function calculate_D_tilde(xyK, occupied_orbital_coefficients, scf_options::SCFOptions)
   if scf_options.contraction_mode == ContractionMode.tensor_operations
     @tensor xiK_tenop[ν, i, A] := xyK[μμ, ν, A] * occupied_orbital_coefficients[μμ, i]
     return xiK_tenop
@@ -110,13 +106,14 @@ end
   return xiK_blas
 end
 
-@inline function calculate_xyK(two_center_integrals, three_center_integrals, xyK, scf_options::SCFOptions)
+
+@inline function calculate_D(two_center_integrals, three_center_integrals, D, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized
-  Linv_t = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
+  J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
   
   if scf_options.contraction_mode == ContractionMode.tensor_operations
-    @tensor xyK[μ, ν, A] = three_center_integrals[dd, μ, ν]*Linv_t[dd, A]
+    @tensor D[μ, ν, A] = three_center_integrals[BB, μ, ν]*J_AB_invt[BB, A]
     return
   end
   
@@ -127,8 +124,8 @@ end
   # use transpose transpose gemm transpose to perform tensor contraction 
   # Linv_T is already a 2D matrix so no need to reshape, and is in correct order
   tci_vector =  reshape(permutedims(three_center_integrals, (2,3,1)) , (μμ*νν,AA))
-  xyK_vec = BLAS.gemm('N', 'N', 1.0, tci_vector, Linv_t)
-  xyK .= reshape(xyK_vec, (μμ, νν, AA))
+  xyK_vec = BLAS.gemm('N', 'N', 1.0, tci_vector, J_AB_invt)
+  D .= reshape(xyK_vec, (μμ, νν, AA))
   # MPI.Barrier(comm)
 end # end function calculate_xyK
 

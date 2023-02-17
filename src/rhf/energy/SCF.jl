@@ -448,7 +448,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jeri_engine_thread, iter,
       cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
     else
-      F .= H .+ df_rhf_fock_build(two_electron_fock, jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), xyK, iter, scf_options)
+      df_rhf_fock_build!(two_electron_fock, jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), xyK, iter, scf_options)
+      F .= H .+ two_electron_fock
     end
     
     if debug && MPI.Comm_rank(comm) == 0

@@ -31,7 +31,7 @@ end
 #================================#
 #== JuliaChem execution script ==#
 #================================#
-function travis_rhf_density_fitting(input_file, auxilliary_basis, df_is_guess = false)
+function travis_rhf_density_fitting(input_file, auxilliary_basis, df_is_guess = false, guess = "", contraction_mode = "")
   try
     #== read in input file ==#
     molecule, driver, model, keywords = JuliaChem.JCInput.run(input_file;       
@@ -40,13 +40,26 @@ function travis_rhf_density_fitting(input_file, auxilliary_basis, df_is_guess = 
     model["auxiliary_basis"] = auxilliary_basis
     
     if df_is_guess
+      keywords["scf"]["scf_type"] = "rhf" #todo use constant    
       keywords["scf"]["guess"] = "df" #todo use constant    
+      keywords["scf"]["df_dele"] = 1E-3 #todo use constant
+      keywords["scf"]["df_drms"] = 1E-3 #todo use constant
     else
       keywords["scf"]["scf_type"] = "df" #todo use constant
+      keywords["scf"]["df_dele"] = 1E-6 #todo use constant
+      keywords["scf"]["df_drms"] = 1E-6 #todo use constant   
+      if length(guess) > 0
+        keywords["scf"]["guess"] = guess #todo use constant
+      end
     end
+
+    if length(contraction_mode) > 0
+      keywords["scf"]["contraction_mode"] = contraction_mode #todo use constant
+    end
+
     rhf_energy, rhf_properties = run_travis_rhf(molecule, driver, model, keywords)
 
-    return (Energy = rhf_energy, Properties = rhf_properties) 
+    return (Energy = rhf_energy, Properties = rhf_properties, Keywords = keywords, Model = model, Molecule = molecule) 
   catch e                                                                       
     bt = catch_backtrace()                                                      
     msg = sprint(showerror, e, bt)                                              
@@ -60,15 +73,18 @@ end
 #================================#
 #== JuliaChem execution script ==#
 #================================#
-function travis_rhf(input_file)
+function travis_rhf(input_file, guess = "")
   try
     #== read in input file ==#
     molecule, driver, model, keywords = JuliaChem.JCInput.run(input_file;       
       output=0)       
-    
+    if length(guess) > 0
+      keywords["scf"]["guess"] = guess #todo use constant
+    end
+
     rhf_energy, rhf_properties = run_travis_rhf(molecule, driver, model, keywords)
 
-    return (Energy = rhf_energy, Properties = rhf_properties) 
+    return (Energy = rhf_energy, Properties = rhf_properties, Keywords = keywords, Model = model, Molecule = molecule) 
   catch e                                                                       
     bt = catch_backtrace()                                                      
     msg = sprint(showerror, e, bt)                                              

@@ -28,7 +28,7 @@ module SCF_Keywords
         const max_iterations_default = 50
 
         const df_max_iterations = "df_niter"
-        const df_max_iterations_default = 20
+        const df_max_iterations_default = 50
     end
 
     module ContractionMode 
