@@ -1,8 +1,10 @@
 mutable struct SCFData
-    D :: AbstractArray
-    D_tilde :: AbstractArray
-    D_tilde_permuted :: AbstractArray
-    two_electron_fock :: AbstractArray
+    D 
+    D_permuted
+    D_tilde 
+    D_tilde_permuted 
+    two_electron_fock
+    coulomb_intermediate
     μ :: Int
     occ :: Int
     A :: Int

@@ -378,13 +378,23 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   jeri_engine_thread = do_density_fitting ? 
     [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] :
     [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
+    
+  scf_data = SCFData([],[],[],[],[],[],0,0,0)
 
   if do_density_fitting
-    aux_basis_function_count = basis_sets.auxillary.norb
-    basis_function_count = basis_sets.primary.norb
-    electrons_count = Int64(basis_sets.primary.nels)
-    xyK = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
-    two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
+    # scf_data = SCFData([],[],[],[],0,0,0)
+    # aux_basis_function_count = basis_sets.auxillary.norb
+    # basis_function_count = basis_sets.primary.norb
+    # electrons_count = Int64(basis_sets.primary.nels)
+
+    # scf_data.D = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
+    # scf_data.D_tilde = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
+    # scf_data.D_tilde = deepcopy(scf_data.D_tilde)
+    # scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
+    # scf_data.μ = basis_function_count
+    # scf_data.A = auxiliary_basis_function_count
+    # scf_data.occ = electrons_count÷2
+    
   end
 
   density_fitting_converged = false
@@ -448,8 +458,26 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jeri_engine_thread, iter,
       cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
     else
-      df_rhf_fock_build!(two_electron_fock, jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), xyK, iter, scf_options)
-      F .= H .+ two_electron_fock
+
+      aux_basis_function_count = basis_sets.auxillary.norb
+      basis_function_count = basis_sets.primary.norb
+      electrons_count = Int64(basis_sets.primary.nels)
+      occupied_orbital_count = electrons_count÷2
+
+      if iter == 1
+        scf_data.D = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
+        scf_data.D_permuted = zeros(basis_function_count, aux_basis_function_count,basis_function_count)
+        scf_data.D_tilde = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
+        scf_data.D_tilde = deepcopy(scf_data.D_tilde)
+        scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
+        scf_data.coulomb_intermediate = zeros(Float64, (aux_basis_function_count, 1))
+        scf_data.μ = basis_function_count
+        scf_data.A = aux_basis_function_count
+        scf_data.occ = electrons_count÷2
+      end
+
+      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), iter, scf_options)
+      F .= H .+ scf_data.two_electron_fock
     end
     
     if debug && MPI.Comm_rank(comm) == 0
