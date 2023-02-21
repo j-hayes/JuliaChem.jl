@@ -43,20 +43,22 @@ function run_test(input_file_path:: String, results_file_output::String, number_
     travis_rhf(input_file_path, guess)
     contraction_mode = "TensorOperations"
     travis_rhf_density_fitting(input_file_path, "cc-pVTZ-JKFIT", true, guess, contraction_mode)
+    contraction_mode = "default"
     travis_rhf_density_fitting(input_file_path, "cc-pVTZ-JKFIT", false, guess, contraction_mode)
 
     println("doing s22 = $s22_number")
-    flush(stdout)
     for iter in 1:number_of_samples
         guess = "hcore"
         do_named_run_rhf(test_results, iter, RHF_HCORE, input_file_path, guess)
         contraction_mode = "default"
-        if s22_number != 7 && s22_number != 15
-            do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE, input_file_path, guess, false, contraction_mode)
-            do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE, input_file_path, guess, true, contraction_mode)
-        end
+        println("default")
+        do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE, input_file_path, guess, false, contraction_mode)
+        println("TensorOperations")
         contraction_mode = "TensorOperations"
-        println("doing DF_RHF_HCORE_TENOP")
+        do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE, input_file_path, guess, false, contraction_mode)
+        do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE, input_file_path, guess, true, contraction_mode)
+    
+        contraction_mode = "TensorOperations"
         do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE_TENOP, input_file_path, guess, false, contraction_mode)
         do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE_TENOP, input_file_path, guess, true, contraction_mode)
         guess = "sad"
@@ -103,7 +105,7 @@ end
 args_length = length(ARGS)
 s22_number = 7
 output_file_path = "./S22_results_$(s22_number)_again.data"
-number_of_samples = 2
+number_of_samples = 3
 
 if args_length >= 1
     s22_number = parse(Int, ARGS[1])

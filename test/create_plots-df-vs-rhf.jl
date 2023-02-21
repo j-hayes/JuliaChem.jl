@@ -204,13 +204,6 @@ function plot_s22_vs_rhf_hcore()
 
     run_names = [DF_RHF_HCORE, DF_GUESS_RHF_HCORE , DF_RHF_HCORE_TENOP]
     for i in 1:22
-        if i == 7 || i == 15
-            original_avg_run_times[i] = 1
-            avg_run_times[i,1] = 1
-            avg_run_times[i,2] = 1
-            avg_run_times[i,3] = 1
-            continue
-        end
         results =  deserialize("./testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol/$i.data")
         original_avg_run_times[i] = calculate_average_runtime(results, RHF_HCORE)
         avg_run_times[i,1] = calculate_average_runtime(results, DF_GUESS_RHF_HCORE)
@@ -305,36 +298,28 @@ function get_s22_results(path)
         results =  deserialize("$path/$i.data")
         original_avg_run_times[i] = calculate_average_runtime(results, RHF_HCORE)
         original_energies[i] = get_result_run_energy(results, RHF_HCORE)
-
-        if i == 7 || i == 15
-            avg_run_times[i,1] = original_avg_run_times[i] # display these as no speedup they did not run
-            energies[i,1] = original_energies[i]
-            avg_run_times[i,2] = original_avg_run_times[i] # display these as no speedup they did not run
-            energies[i,2] = original_energies[i]
-        else
-            avg_run_times[i,1] = calculate_average_runtime(results, DF_RHF_HCORE)
-            energies[i,1] = get_result_run_energy(results, DF_RHF_HCORE)
-            avg_run_times[i,2] = calculate_average_runtime(results, DF_GUESS_RHF_HCORE)
-            energies[i,2] = get_result_run_energy(results, DF_GUESS_RHF_HCORE)
-        end
-            avg_run_times[i,3] = calculate_average_runtime(results, DF_RHF_HCORE_TENOP) 
-            energies[i,3] = get_result_run_energy(results, DF_RHF_HCORE_TENOP)
-            avg_run_times[i,4] = calculate_average_runtime(results, DF_GUESS_RHF_HCORE_TENOP)
-            energies[i,4] = get_result_run_energy(results, DF_GUESS_RHF_HCORE_TENOP)
-            avg_run_times[i,5] = calculate_average_runtime(results, DF_RHF_SAD)
-            energies[i,5] = get_result_run_energy(results, DF_RHF_SAD)
-            avg_run_times[i,6] = calculate_average_runtime(results, RHF_SAD)    
-            energies[i,6] = get_result_run_energy(results, RHF_SAD)
+        avg_run_times[i,1] = calculate_average_runtime(results, DF_RHF_HCORE)
+        energies[i,1] = get_result_run_energy(results, DF_RHF_HCORE)
+        avg_run_times[i,2] = calculate_average_runtime(results, DF_GUESS_RHF_HCORE)
+        energies[i,2] = get_result_run_energy(results, DF_GUESS_RHF_HCORE)
+        avg_run_times[i,3] = calculate_average_runtime(results, DF_RHF_HCORE_TENOP) 
+        energies[i,3] = get_result_run_energy(results, DF_RHF_HCORE_TENOP)
+        avg_run_times[i,4] = calculate_average_runtime(results, DF_GUESS_RHF_HCORE_TENOP)
+        energies[i,4] = get_result_run_energy(results, DF_GUESS_RHF_HCORE_TENOP)
+        avg_run_times[i,5] = calculate_average_runtime(results, DF_RHF_SAD)
+        energies[i,5] = get_result_run_energy(results, DF_RHF_SAD)
+        avg_run_times[i,6] = calculate_average_runtime(results, RHF_SAD)    
+        energies[i,6] = get_result_run_energy(results, RHF_SAD)
     end
-    filename = "S22_Speedup_vs_$(RHF_HCORE)_run3"
+    filename = "S22_Speedup_vs_$(RHF_HCORE)_mem_cleanup"
     create_Δ_E_csv(original_energies, RHF_HCORE, "RHF HCore", energies, run_keys, run_names, filename)
-    # create_avg_runtime_csv(original_avg_run_times, RHF_HCORE , avg_run_times, run_names, filename)
-    # create_speedup_csv(original_avg_run_times, RHF_HCORE , avg_run_times, run_names, filename)
-    # plot_s22_speedup_results(original_avg_run_times, RHF_HCORE, avg_run_times, run_names; filename =filename)
+    create_avg_runtime_csv(original_avg_run_times, RHF_HCORE , avg_run_times, run_names, filename)
+    create_speedup_csv(original_avg_run_times, RHF_HCORE , avg_run_times, run_names, filename)
+    plot_s22_speedup_results(original_avg_run_times, RHF_HCORE, avg_run_times, run_names; filename =filename)
 end
-get_s22_results("./testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol_3")
+get_s22_results("./testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol_mem_cleanup")
 # plot_s22_vs_rhf_hcore()
 # plot_s22_tenop_vs_hcore()
 
-# validate_results("../testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol_3/")
+# validate_results("/home/jackson/source/JuliaChem.jl/testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol_mem_cleanup/")
 # compare_results_for_file("/home/jackson/source/JuliaChem.jl/testoutputs/S22_results_7_again.data")

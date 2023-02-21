@@ -17,8 +17,8 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     JuliaChem.initialize() 
     #first runs not timed
 
-    # df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
-    # scf_results, properties = full_rhf(input_file)      
+    df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
+    scf_results, properties = full_rhf(input_file)      
 
     println("RUN 2 DF-RHF")
     DF_time = @elapsed begin @time begin 
@@ -62,11 +62,11 @@ end
 # df_path = ARGS[1]
 # rhf_path = ARGS[2]
 
-# df_path = "./example_inputs/density_fitting/water_density_fitted.json"
-# rhf_path = "./example_inputs/density_fitting/water_rhf.json"
+df_path = "./example_inputs/density_fitting/water_density_fitted.json"
+rhf_path = "./example_inputs/density_fitting/water_rhf.json"
 
-MP2_Num = "22"
-df_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json"
-rhf_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2.json"
+# MP2_Num = "07"
+# df_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json"
+# rhf_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2.json"
 
 check_density_fitted_method_matches_RHF(df_path, rhf_path)
