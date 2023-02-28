@@ -116,12 +116,10 @@ function compare_runs(results, run_name_1, run_name_2)
 
 end
 
-function compare_results_for_file(results_data_file_path, s22_number)
+function compare_results_for_file(results_data_file_path)
     results = deserialize(results_data_file_path)
-    if s22_number != 7 && s22_number != 15
-        compare_runs(results, RHF_HCORE, DF_RHF_HCORE)
-        compare_runs(results, RHF_HCORE, DF_GUESS_RHF_HCORE)
-    end
+    compare_runs(results, RHF_HCORE, DF_RHF_HCORE)
+    compare_runs(results, RHF_HCORE, DF_GUESS_RHF_HCORE)
 
     compare_runs(results, RHF_HCORE, DF_RHF_HCORE_TENOP)
 
@@ -311,15 +309,32 @@ function get_s22_results(path)
         avg_run_times[i,6] = calculate_average_runtime(results, RHF_SAD)    
         energies[i,6] = get_result_run_energy(results, RHF_SAD)
     end
-    filename = "S22_Speedup_vs_$(RHF_HCORE)_mem_cleanup"
+    filename = "S22_Speedup_vs_$(RHF_HCORE)_mem_cleanup_2"
     create_Δ_E_csv(original_energies, RHF_HCORE, "RHF HCore", energies, run_keys, run_names, filename)
     create_avg_runtime_csv(original_avg_run_times, RHF_HCORE , avg_run_times, run_names, filename)
     create_speedup_csv(original_avg_run_times, RHF_HCORE , avg_run_times, run_names, filename)
     plot_s22_speedup_results(original_avg_run_times, RHF_HCORE, avg_run_times, run_names; filename =filename)
 end
-get_s22_results("./testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol_mem_cleanup")
+
+function get_s22_scaling_results(path, s22_numbers, thread_count_runs)
+    for s22_number in s22_numbers 
+        average_times_DF = Dict{Int, Float64}()
+        average_times_DF_Tenop = Dict{Int, Float64}()
+        for run_thread_count in thread_count_runs
+            results = deserialize("$path/$run_thread_count/$s22_number.data")
+            average_times_DF[run_thread_count] = calculate_average_runtime(results, DF_RHF_HCORE)
+            average_times_DF_Tenop[run_thread_count] = calculate_average_runtime(results, DF_RHF_HCORE_TENOP)
+        end    
+        println("Times for s22: ", s22_number)    
+        println("DF Hcore: ", average_times_DF)
+        println("DF Hcore T.O.: ", average_times_DF_Tenop)
+    end
+end 
+# get_s22_results("/home/jackson/source/JuliaChem.jl/testoutputs/DF-VS-RHF_S22/df_vs_rhf_s22_memcleanup_2")
+get_s22_scaling_results("./testoutputs/DF-VS-RHF_S22/df_vs_rhf_thread_scaling" , [8 1 4 6], [2 4 8 16])
+
 # plot_s22_vs_rhf_hcore()
 # plot_s22_tenop_vs_hcore()
 
 # validate_results("/home/jackson/source/JuliaChem.jl/testoutputs/DF-VS-RHF_S22/df_vs_rhf_same_etol_mem_cleanup/")
-# compare_results_for_file("/home/jackson/source/JuliaChem.jl/testoutputs/S22_results_7_again.data")
+# compare_results_for_file("/home/jackson/source/JuliaChem.jl/S22_results_5_after_mem_cleanup.data")

@@ -41,6 +41,7 @@
     "scf":{
       "guess":"hcore",
       "scf_type":"df",
+      "contraction_mode": "TensorOperations",
       "dele":1E-6,
       "rmsd":1E-6,
       "df_dele":1E-6,

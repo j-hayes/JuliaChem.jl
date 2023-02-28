@@ -1,11 +1,11 @@
 #!/bin/bash
 run_test() {
-    echo "Running test $1"
+    echo "Running test $1 - threads $3"
     local S22_number=$1
     local number_of_samples=$2
     local number_of_threads=$3
     local run_name=$4
-    local DF_V_RHF="/home/jackson/source/JuliaChem.jl/testoutputs/DF-VS-RHF_S22/$run_name/"
+    local DF_V_RHF="/home/jackson/source/JuliaChem.jl/testoutputs/DF-VS-RHF_S22/$run_name/$number_of_threads/"
     mkdir -p $DF_V_RHF
     local data_extension=".data"
     local log_extension=".log"
@@ -18,11 +18,12 @@ run_test() {
     echo "finished test $1"
 }
 
-# run_test 1 5 hcore 1 df_hcore_vs_rhf_same_etol
-run_name=df_vs_rhf_same_etol_3
-number_of_threads=16
+run_name=df_vs_rhf_thread_scaling
 
-for i in {1..22}
+for number_of_threads in 16 8 4 2 
 do
-    run_test $i 5 $number_of_threads $run_name
+    for i in 1 4 6 8
+    do
+        run_test $i 3 $number_of_threads $run_name
+    done 
 done

@@ -40,7 +40,7 @@ function run_test(input_file_path:: String, results_file_output::String, number_
 
     guess = "hcore"
     # run to compile ignore timings for these
-    travis_rhf(input_file_path, guess)
+    # travis_rhf(input_file_path, guess)
     contraction_mode = "TensorOperations"
     travis_rhf_density_fitting(input_file_path, "cc-pVTZ-JKFIT", true, guess, contraction_mode)
     contraction_mode = "default"
@@ -49,21 +49,16 @@ function run_test(input_file_path:: String, results_file_output::String, number_
     println("doing s22 = $s22_number")
     for iter in 1:number_of_samples
         guess = "hcore"
-        do_named_run_rhf(test_results, iter, RHF_HCORE, input_file_path, guess)
+        # do_named_run_rhf(test_results, iter, RHF_HCORE, input_file_path, guess)
         contraction_mode = "default"
-        println("default")
         do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE, input_file_path, guess, false, contraction_mode)
-        println("TensorOperations")
-        contraction_mode = "TensorOperations"
-        do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE, input_file_path, guess, false, contraction_mode)
-        do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE, input_file_path, guess, true, contraction_mode)
-    
+        # do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE, input_file_path, guess, true, contraction_mode)
         contraction_mode = "TensorOperations"
         do_named_run_dfrhf(test_results, iter, DF_RHF_HCORE_TENOP, input_file_path, guess, false, contraction_mode)
-        do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE_TENOP, input_file_path, guess, true, contraction_mode)
-        guess = "sad"
-        do_named_run_rhf(test_results, iter, RHF_SAD, input_file_path, guess)
-        do_named_run_dfrhf(test_results, iter, DF_RHF_SAD, input_file_path, guess, false, contraction_mode)
+        # do_named_run_dfrhf(test_results, iter, DF_GUESS_RHF_HCORE_TENOP, input_file_path, guess, true, contraction_mode)
+        # guess = "sad"
+        # do_named_run_rhf(test_results, iter, RHF_SAD, input_file_path, guess)
+        # do_named_run_dfrhf(test_results, iter, DF_RHF_SAD, input_file_path, guess, false, contraction_mode)
     end
 
     serialize(results_file_output, test_results)
@@ -103,8 +98,8 @@ end
 
 
 args_length = length(ARGS)
-s22_number = 7
-output_file_path = "./S22_results_$(s22_number)_again.data"
+s22_number = 5
+output_file_path = "./S22_results_$(s22_number)_after_mem_cleanup.data"
 number_of_samples = 3
 
 if args_length >= 1

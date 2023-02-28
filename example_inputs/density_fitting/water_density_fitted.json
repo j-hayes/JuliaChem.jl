@@ -17,15 +17,15 @@
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "guess":"sad", 
+      "guess":"hcore", 
       "load":"static",
       "contraction_mode":"default",
-      "dele":1E-7,
-      "rmsd":1E-7,
-      "df_dele":1E-4,
-      "df_rmsd":1E-4,
-      "niter":50,
-      "df_niter":50
+      "dele":1E-6,
+      "rmsd":1E-6,
+      "df_dele":1E-6,
+      "df_rmsd":1E-6,
+      "niter":20,
+      "df_niter":20
     },
     "prop":{
       "mo energies":true,
