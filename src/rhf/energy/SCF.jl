@@ -381,22 +381,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     
   scf_data = SCFData([],[],[],[],[],[],0,0,0)
 
-  if do_density_fitting
-    # scf_data = SCFData([],[],[],[],0,0,0)
-    # aux_basis_function_count = basis_sets.auxillary.norb
-    # basis_function_count = basis_sets.primary.norb
-    # electrons_count = Int64(basis_sets.primary.nels)
-
-    # scf_data.D = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
-    # scf_data.D_tilde = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
-    # scf_data.D_tilde = deepcopy(scf_data.D_tilde)
-    # scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
-    # scf_data.μ = basis_function_count
-    # scf_data.A = auxiliary_basis_function_count
-    # scf_data.occ = electrons_count÷2
-    
-  end
-
   density_fitting_converged = false
   
   while !iter_converged
@@ -466,9 +450,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
       if iter == 1
         scf_data.D = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
-        scf_data.D_permuted = zeros(basis_function_count, aux_basis_function_count,basis_function_count)
-        scf_data.D_tilde = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
-        scf_data.D_tilde = deepcopy(scf_data.D_tilde)
+        if scf_options.contraction_mode == ContractionMode.default
+          scf_data.D_permuted = zeros(basis_function_count, aux_basis_function_count,basis_function_count)
+          scf_data.D_tilde = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
+          scf_data.D_tilde_permuted = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
+        end
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
         scf_data.coulomb_intermediate = zeros(Float64, (aux_basis_function_count, 1))
         scf_data.μ = basis_function_count
