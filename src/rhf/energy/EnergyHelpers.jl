@@ -359,9 +359,7 @@ end
   amλ = λsh.am
 
   
-  if amμ < 3 && amν < 3 && amλ < 3 
-    return
-  end
+  
   for μsize::Int64 in 0:(nμ-1) 
     for νsize::Int64 in 0:(nν-1)
       μnorm = get_axial_normalization_factor(μsize+1,amμ)
@@ -370,6 +368,9 @@ end
       for λsize::Int64 in 0:(nλ-1)
         λnorm = get_axial_normalization_factor(λsize+1,amλ)
         normalization_factor = μνnorm*λnorm        
+        if amμ < 3 && amν < 3 && amλ < 3 
+          normalization_factor = 1
+        end
         eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize] *= normalization_factor # moved AUX to third index
       end 
     end
