@@ -18,6 +18,8 @@ Base.include(@__MODULE__,"EnergyHelpers.jl")
 Base.include(@__MODULE__,"SCF.jl")
 Base.include(@__MODULE__,"./DensityFitting/DensityFitting.jl")
 Base.include(@__MODULE__,"./DensityFitting/TwoCenterIntegrals.jl")
+Base.include(@__MODULE__,"./DensityFitting/ThreeCenterIntegrals.jl")
+Base.include(@__MODULE__,"./DensityFitting/DynamicLoad.jl")
 
 """
   overload to allow old mehtods that don't use auxillary basis sets to not need to be changed

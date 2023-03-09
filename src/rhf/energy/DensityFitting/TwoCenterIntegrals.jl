@@ -7,12 +7,10 @@ using JuliaChem.Shared
 
 @inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
     comm = MPI.COMM_WORLD
-    println("start calculating two center integrals")
-    flush(stdout)
     aux_basis_function_count = basis_sets.auxillary.norb
     two_center_integrals = zeros(Float64, aux_basis_function_count, aux_basis_function_count)
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
-    cartesian_indicies = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
+    cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
 
 
     max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
@@ -20,11 +18,11 @@ using JuliaChem.Shared
     thead_integral_buffer = [zeros(Float64, max_nbas^2) for i in 1:n_threads]
 
     if scf_options.load == "sequential"
-        calculate_two_center_integrals_sequential!(two_center_integrals, cartesian_indicies, jeri_engine_thread[1], thead_integral_buffer[1], basis_sets)
+        calculate_two_center_integrals_sequential!(two_center_integrals, cartesian_indices, jeri_engine_thread[1], thead_integral_buffer[1], basis_sets)
     elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1
-        calculate_two_center_integrals_static!(two_center_integrals, cartesian_indicies, jeri_engine_thread, thead_integral_buffer, basis_sets)
+        calculate_two_center_integrals_static!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     elseif scf_options.load == "dynamic"
-        run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indicies, jeri_engine_thread, thead_integral_buffer, basis_sets)
+        run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
@@ -52,27 +50,27 @@ end
     bf_2_pos = shell_2.pos
 
     JERI.compute_two_center_eri_block(engine, integral_buffer, shell_1_index - 1, shell_2_index - 1, shell_1_basis_count, shell_2_basis_count)
-    copy_values_to_output!(two_center_integrals, integral_buffer, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
+    copy_integral_results!(two_center_integrals, integral_buffer, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
     axial_normalization_factor(two_center_integrals, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count, bf_1_pos, bf_2_pos)
 end
 
-@inline function calculate_two_center_integrals_sequential!(two_center_integrals, cartesian_indicies, engine, integral_buffer, basis_sets)
-    for cartesian_index in cartesian_indicies
+@inline function calculate_two_center_integrals_sequential!(two_center_integrals, cartesian_indices, engine, integral_buffer, basis_sets)
+    for cartesian_index in cartesian_indices
         calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
 end
 
-@inline function calculate_two_center_integrals_static!(two_center_integrals, cartesian_indicies, jeri_engine_thread, thead_integral_buffer, basis_sets)
+@inline function calculate_two_center_integrals_static!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     
-    number_of_indecies = length(cartesian_indicies)
+    number_of_indices = length(cartesian_indices)
     n_threads = Threads.nthreads()
-    batch_size = ceil(Int, number_of_indecies / n_threads)
+    batch_size = ceil(Int, number_of_indices / n_threads)
 
-    @sync for batch_index in 1:batch_size+1:number_of_indecies
+    @sync for batch_index in 1:batch_size+1:number_of_indices
         Threads.@spawn begin
             thread_id = Threads.threadid()
-            for view_index in batch_index:min(number_of_indecies, batch_index + batch_size)
-                cartesian_index = cartesian_indicies[view_index]
+            for view_index in batch_index:min(number_of_indices, batch_index + batch_size)
+                cartesian_index = cartesian_indices[view_index]
                 engine = jeri_engine_thread[thread_id]
                 integral_buffer = thead_integral_buffer[thread_id]
                 calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
@@ -89,15 +87,15 @@ end
 # until all batches are done 
 # then the coordinator rank sends a message to all the worker ranks to end the program [ij_index] = -1
 
-# ij_index is the index of the cartesian_indicies array. i.e. cartesian_indicies[ij_index] =>
+# ij_index is the index of the cartesian_indices array. i.e. cartesian_indices[ij_index] =>
 # shell_1_index = cartesian_index[1]
 # shell_2_index = cartesian_index[2]
 
-function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indicies, jeri_engine_thread, thead_integral_buffer, basis_sets)
+function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
-    n_pairs = length(cartesian_indicies)
-    batch_size = size(cartesian_indicies, 1)
+    n_pairs = length(cartesian_indices)
+    batch_size = size(cartesian_indices, 1)
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
     task_top_index = n_pairs
@@ -105,7 +103,7 @@ function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indic
         setup_two_center_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
     else
         run_two_center_integrals_worker(two_center_integrals,
-            cartesian_indicies,
+            cartesian_indices,
             batch_size,
             jeri_engine_thread,
             thead_integral_buffer, basis_sets)
@@ -117,9 +115,7 @@ function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indic
 end
 
 function setup_two_center_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
-    println("set up coordinator")
     task_top_index = send_initial_tasks_two_center_integral_workers!(task_top_index, batch_size, n_ranks, n_threads)
-    println("sent initial tasks, send dynamic tasks")
     send_two_center_integral_tasks_dynamic(task_top_index, batch_size)
     send_end_signals(n_ranks, n_threads)
 end
@@ -139,26 +135,15 @@ function send_two_center_integral_tasks_dynamic(task_top_index, batch_size)
     recv_mesg = [0,0,0] # message type, rank, thread
     while task_top_index > 0
         status = MPI.Probe(MPI.MPI_ANY_SOURCE, 0, comm) 
-        println("coordinator recieved dynamic message")
-        flush(stdout)
         rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-        println("sending task to rank $(recv_mesg[2]) thread $(recv_mesg[3]) with top index $(task_top_index)")
-        flush(stdout)
         sreq = MPI.Isend([ task_top_index ], recv_mesg[2], recv_mesg[3], comm)
         task_top_index -= batch_size + 1
     end
 end
 
-function send_end_signals(n_ranks, n_threads)
-    for rank in 1:(n_ranks-1)
-        for thread in 1:n_threads
-            sreq = MPI.Isend([-1], rank, thread, MPI.COMM_WORLD)
-        end
-    end
-end
 
-function run_two_center_integrals_worker(two_center_integrals,
-    cartesian_indicies,
+@inline function run_two_center_integrals_worker(two_center_integrals,
+    cartesian_indices,
     batch_size,
     jeri_engine_thread,
     thead_integral_buffer, basis_sets)
@@ -177,18 +162,15 @@ function run_two_center_integrals_worker(two_center_integrals,
             rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
             ij_index = recv_mesg[1]
             unlock(mutex_mpi_worker)
-            println("do in itial task $ij_index on rank $(MPI.Comm_rank(comm)) thread $thread")
 
             while ij_index >= 1
                 do_two_center_integral_batch(two_center_integrals,
                 ij_index,
                 batch_size,
-                cartesian_indicies,
+                cartesian_indices,
                 jeri_engine_thread[thread],
                 thead_integral_buffer[thread], basis_sets)
                 ij_index = get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
-                println("got next batch $ij_index on rank $(MPI.Comm_rank(comm)) thread $thread")
-                flush(stdout)
             end
         end
     end
@@ -205,21 +187,21 @@ function get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
     return ij_index
 end
 
-function do_two_center_integral_batch(two_center_integrals,
+@inline function do_two_center_integral_batch(two_center_integrals,
     top_index,
     batch_size,
-    cartesian_indicies,
+    cartesian_indices,
     engine,
     integral_buffer, basis_sets)
     for ij in top_index:-1:(max(1, top_index - batch_size))
-        shell_index = cartesian_indicies[ij]
+        shell_index = cartesian_indices[ij]
         calculate_two_center_intgrals_kernel!(two_center_integrals, engine, shell_index, basis_sets, integral_buffer)
     end
 end
 
 
 
-@inline function copy_values_to_output!(two_center_integrals, values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
+@inline function copy_integral_results!(two_center_integrals, values, shell_1, shell_2, shell_1_basis_count, shell_2_basis_count)
     temp_index = 1
     for i in shell_1.pos:shell_1.pos+shell_1_basis_count-1
         for j in shell_2.pos:shell_2.pos+shell_2_basis_count-1
