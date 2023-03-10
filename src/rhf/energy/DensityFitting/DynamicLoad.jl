@@ -1,6 +1,6 @@
 @inline function setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
     task_top_index = send_initial_tasks_to_workers!(task_top_index, batch_size, n_ranks, n_threads)
-    send_two_center_integral_tasks_dynamic(task_top_index, batch_size)
+    send_integral_tasks_dynamic(task_top_index, batch_size)
     send_end_signals(n_ranks, n_threads)
 end
 
@@ -15,7 +15,7 @@ end
 end
 
 
-@inlne function send_two_center_integral_tasks_dynamic(task_top_index, batch_size)
+@inlne function send_integral_tasks_dynamic(task_top_index, batch_size)
     comm = MPI.COMM_WORLD
     recv_mesg = [0,0,0] # message type, rank, thread
     while task_top_index > 0
