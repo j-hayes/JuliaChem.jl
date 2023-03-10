@@ -100,7 +100,7 @@ function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indic
     n_ranks = MPI.Comm_size(comm)
     task_top_index = n_pairs
     if rank == 0
-        setup_two_center_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
+        setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
     else
         run_two_center_integrals_worker(two_center_integrals,
             cartesian_indices,
@@ -114,32 +114,6 @@ function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indic
     MPI.Barrier(comm)
 end
 
-function setup_two_center_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
-    task_top_index = send_initial_tasks_two_center_integral_workers!(task_top_index, batch_size, n_ranks, n_threads)
-    send_two_center_integral_tasks_dynamic(task_top_index, batch_size)
-    send_end_signals(n_ranks, n_threads)
-end
-
-function send_initial_tasks_two_center_integral_workers!(task_top_index, batch_size, n_ranks, n_threads)
-    for rank in 1:n_ranks-1
-        for thread in 1:n_threads
-            sreq = MPI.Isend([task_top_index], rank, thread, MPI.COMM_WORLD)
-            task_top_index -= batch_size + 1
-        end
-    end
-    return task_top_index
-end
-
-function send_two_center_integral_tasks_dynamic(task_top_index, batch_size)
-    comm = MPI.COMM_WORLD
-    recv_mesg = [0,0,0] # message type, rank, thread
-    while task_top_index > 0
-        status = MPI.Probe(MPI.MPI_ANY_SOURCE, 0, comm) 
-        rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-        sreq = MPI.Isend([ task_top_index ], recv_mesg[2], recv_mesg[3], comm)
-        task_top_index -= batch_size + 1
-    end
-end
 
 
 @inline function run_two_center_integrals_worker(two_center_integrals,
