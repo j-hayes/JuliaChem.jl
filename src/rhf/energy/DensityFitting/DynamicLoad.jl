@@ -15,7 +15,7 @@ end
 end
 
 
-@inlne function send_integral_tasks_dynamic(task_top_index, batch_size)
+@inline function send_integral_tasks_dynamic(task_top_index, batch_size)
     comm = MPI.COMM_WORLD
     recv_mesg = [0,0,0] # message type, rank, thread
     while task_top_index > 0
