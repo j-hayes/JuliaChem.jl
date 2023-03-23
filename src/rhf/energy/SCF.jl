@@ -763,8 +763,7 @@ H = One-electron Hamiltonian Matrix
       #== hand out quartets to slaves dynamically ==#
       #println("Start sending out rest of tasks") 
       while task[1] > 0 
-        status = MPI.Probe(MPI.MPI_ANY_SOURCE, MPI.MPI_ANY_TAG, 
-          comm) 
+        status = MPI.Probe(-2, -1, comm) 
         #rreq = MPI.Recv!(recv_mesg_master, status.source, status.tag, 
         #  comm)  
         #println("Sending task $task to rank ", status.source)

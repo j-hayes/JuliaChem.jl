@@ -21,11 +21,9 @@ indices for all tensor contractions
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D!(scf_data, two_center_integrals, three_center_integrals, scf_options)
   end
-    calculate_D_tilde!(scf_data, occupied_orbital_coefficients, scf_options)
-    calculate_coulomb!(scf_data, occupied_orbital_coefficients, scf_options) 
-    calculate_exchange!(scf_data,scf_options)
-  
-  MPI.Barrier(comm)
+  calculate_D_tilde!(scf_data, occupied_orbital_coefficients, scf_options)
+  calculate_coulomb!(scf_data, occupied_orbital_coefficients, scf_options) 
+  calculate_exchange!(scf_data,scf_options)
 end
 
 #original tensor operation  @tensor two_electron_fock[μ, ν] -= xiK[μ, νν, AA] * xiK[ν, νν, AA]
@@ -93,10 +91,7 @@ end
 @inline function calculate_D!(scf_data, two_center_integrals, three_center_integrals, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized
-  flush(stdout)
   J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \I))
-
-
   if scf_options.contraction_mode == ContractionMode.tensor_operations
     @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB]*J_AB_invt[BB, A]
     return

@@ -1,3 +1,5 @@
+using MPI 
+
 @inline function setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
     task_top_index = send_initial_tasks_to_workers!(task_top_index, batch_size, n_ranks, n_threads)
     send_integral_tasks_dynamic(task_top_index, batch_size)
@@ -19,7 +21,7 @@ end
     comm = MPI.COMM_WORLD
     recv_mesg = [0,0,0] # message type, rank, thread
     while task_top_index > 0
-        status = MPI.Probe(MPI.MPI_ANY_SOURCE, 0, comm) 
+        status = MPI.Probe(-2, 0, comm) # -2 = MPI.MPI_ANY_SOURCE
         rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
         sreq = MPI.Isend([ task_top_index ], recv_mesg[2], recv_mesg[3], comm)
         task_top_index -= batch_size + 1

@@ -91,7 +91,7 @@ end
 # shell_1_index = cartesian_index[1]
 # shell_2_index = cartesian_index[2]
 
-function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
+@inline function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
     n_pairs = length(cartesian_indices)
