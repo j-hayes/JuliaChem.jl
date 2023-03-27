@@ -30,6 +30,9 @@ using JuliaChem.Shared
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+    MPI.Barrier(comm)
+    three_center_integrals = MPI.Allreduce(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
+    MPI.Barrier(comm)
     return three_center_integrals
 end
 
@@ -67,14 +70,19 @@ end
 end
 
 @inline function calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
+    comm = MPI.COMM_WORLD
     number_of_indices = length(cartesian_indices)
-    n_threads = Threads.nthreads()
-    batch_size = ceil(Int, number_of_indices / n_threads)
+    comm_size = MPI.Comm_size(comm)
+    batch_size = ceil(Int, number_of_indices / (Threads.nthreads()*comm_size))
 
-    Threads.@sync for batch_index in 1:batch_size+1:number_of_indices
+    stride =  comm_size*batch_size
+    start_index = MPI.Comm_rank(comm)*batch_size + 1
+
+    Threads.@sync for batch_index in start_index:stride:number_of_indices
         Threads.@spawn begin
             thread_id = Threads.threadid()
-            for view_index in batch_index:min(number_of_indices, batch_index + batch_size)
+            
+            for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
                 cartesian_index = cartesian_indices[view_index]
                 engine = jeri_engine_thread[thread_id]
                 integral_buffer = thead_integral_buffer[thread_id]
@@ -102,9 +110,6 @@ end
         jeri_engine_thread,
         thead_integral_buffer, basis_sets)
     end
-    MPI.Barrier(comm)
-    three_center_integrals = MPI.Allreduce(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
-    MPI.Barrier(comm)
 end
 
 
