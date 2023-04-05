@@ -28,6 +28,7 @@ using JuliaChem.Shared
     end
     MPI.Barrier(comm)
     two_center_integrals .= MPI.Allreduce(two_center_integrals, MPI.SUM, MPI.COMM_WORLD)
+    
     MPI.Barrier(comm)
     return two_center_integrals
 end

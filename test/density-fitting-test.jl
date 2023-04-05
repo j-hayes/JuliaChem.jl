@@ -65,7 +65,10 @@ end
 df_path = "./example_inputs/density_fitting/water_density_fitted.json"
 rhf_path = "./example_inputs/density_fitting/water_rhf.json"
 
-# MP2_Num = "22"
+# df_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water_df.json"
+# rhf_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water.json"
+
+# MP2_Num = "10"
 # df_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json"
 # rhf_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2.json"
 
