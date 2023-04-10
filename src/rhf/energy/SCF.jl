@@ -459,10 +459,16 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         scf_data.coulomb_intermediate = zeros(Float64, (aux_basis_function_count, 1))
         scf_data.μ = basis_function_count
         scf_data.A = aux_basis_function_count
-        scf_data.occ = electrons_count÷2
+        scf_data.occ = occupied_orbital_count
       end
 
-      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, view(C, :,1:electrons_count÷2), iter, scf_options)
+
+
+      MPI.Bcast!(C, 0, comm)
+
+      occupied_orbital_coefficients = C[:,1:occupied_orbital_count]
+
+      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iter, scf_options)
       F .= H .+ scf_data.two_electron_fock
     end
     
