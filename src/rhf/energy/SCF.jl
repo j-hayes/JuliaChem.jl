@@ -449,10 +449,10 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       occupied_orbital_count = electrons_count÷2
 
       if iter == 1
-        scf_data.D = zeros(basis_function_count, basis_function_count, aux_basis_function_count)
+        scf_data.D = zeros(basis_function_count, aux_basis_function_count,basis_function_count)
         if scf_options.contraction_mode == ContractionMode.default
           scf_data.D_permuted = zeros(basis_function_count, aux_basis_function_count,basis_function_count)
-          scf_data.D_tilde = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
+          scf_data.D_tilde = zeros(aux_basis_function_count, occupied_orbital_count, basis_function_count)
           scf_data.D_tilde_permuted = zeros(basis_function_count, aux_basis_function_count, occupied_orbital_count)
         end
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
