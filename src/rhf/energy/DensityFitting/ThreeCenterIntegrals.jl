@@ -21,6 +21,7 @@ using JuliaChem.Shared
     max_primary_nbas = max_number_of_basis_functions(basis_sets.primary)
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
+    
     if scf_options.load == "sequential"
         calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets)
     elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1
@@ -30,6 +31,8 @@ using JuliaChem.Shared
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+
+    #todo this doesn't need to be reduced to all procs if it is done in the same batching as the contractions batched by basis function
     MPI.Barrier(comm)
     three_center_integrals = MPI.Allreduce(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
     MPI.Barrier(comm)

@@ -54,16 +54,16 @@ end
   comm = MPI.COMM_WORLD
 
   if iteration == 1
-    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-    calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, scf_options)
+    @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+    @time calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, scf_options)
   end
   scf_data.D_tilde .= 0.0
   scf_data.two_electron_fock .= 0.0
 
-  calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
-  calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
-  calculate_exchange_multi_node!(scf_data, scf_options)
+  @time calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
+  @time calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
+  @time calculate_exchange_multi_node!(scf_data, scf_options)
 
 end
 
@@ -74,15 +74,25 @@ end
 
 @inline function calculate_exchange_multi_node!(scf_data, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
-  batch_start, batch_end = get_contraction_batch_bounds(scf_data.μ)
-  @sync for μ in batch_start:batch_end
-    for ν in 1:scf_data.μ      
-      scf_data.two_electron_fock[ν, μ] -= dot(view(scf_data.D_tilde, :, :,μ), view(scf_data.D_tilde,:, :,ν))
+  number_of_elements = scf_data.A * scf_data.occ
+  indicies = filter(x-> x[1] >= x[2], CartesianIndices(scf_data.two_electron_fock))
+  batch_start, batch_end = get_contraction_batch_bounds(length(indicies))
+  println("batch_start $(batch_start) batch_end $(batch_end) total: $(length(indicies))")
+  @sync for index in batch_start:batch_end
+    Threads.@spawn begin
+        ν = indicies[index][1]
+        μ = indicies[index][2]
+        exchange = BLAS.dot(number_of_elements, view(scf_data.D_tilde, :, :,μ), 1 ,view(scf_data.D_tilde,:, :,ν), 1)
+        scf_data.two_electron_fock[ν, μ] -= exchange
+        if ν != μ
+          scf_data.two_electron_fock[μ, ν] -= exchange
+        end      
     end
   end
   MPI.Barrier(comm)
   MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   MPI.Barrier(comm)
+
 end
 
 @inline function calculate_coulomb!(scf_data, occupied_orbital_coefficients,
@@ -93,11 +103,8 @@ end
 
 function calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
-  #todo make this a blas/LA call
-  @time begin
-    for A in 1:scf_data.A
-      scf_data.coulomb_intermediate[A] = dot(transpose(view(scf_data.D_tilde, A,:, :)), occupied_orbital_coefficients)
-    end
+  for A in 1:scf_data.A
+    scf_data.coulomb_intermediate[A] = dot(transpose(view(scf_data.D_tilde, A,:, :)), occupied_orbital_coefficients)
   end
 
   batch_start, batch_end = get_contraction_batch_bounds(scf_data.μ)
@@ -143,7 +150,7 @@ end # end function calculate_D
 
 function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
-  # this needs to be mpi parallelized
+  # this needs to be mpi parallelized? or is it okay to just do it on every node?
   J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
   batch_start, batch_end = get_contraction_batch_bounds(scf_data.μ)
   @sync for μ in batch_start:batch_end
