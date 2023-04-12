@@ -21,7 +21,6 @@ using JuliaChem.Shared
     max_primary_nbas = max_number_of_basis_functions(basis_sets.primary)
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
-    
     if scf_options.load == "sequential"
         calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets)
     elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1
@@ -31,11 +30,6 @@ using JuliaChem.Shared
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
-
-    #todo this doesn't need to be reduced to all procs if it is done in the same batching as the contractions batched by basis function
-    MPI.Barrier(comm)
-    three_center_integrals = MPI.Allreduce(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
-    MPI.Barrier(comm)
     return three_center_integrals
 end
 
@@ -81,18 +75,40 @@ end
     stride =  comm_size*batch_size
     start_index = MPI.Comm_rank(comm)*batch_size + 1
 
-    Threads.@sync for batch_index in start_index:stride:number_of_indices
-        Threads.@spawn begin
-            thread_id = Threads.threadid()
-            
-            for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
-                cartesian_index = cartesian_indices[view_index]
-                engine = jeri_engine_thread[thread_id]
-                integral_buffer = thead_integral_buffer[thread_id]
-                calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+    rank = MPI.Comm_rank(comm)
+
+    indicies = get_df_static_shell_indices(basis_sets, comm_size, rank)
+    if comm_size > 1
+        println("doing some new integral loading")
+        Threads.@sync for shell1_index in indicies
+            Threads.@spawn begin
+                thread_id = Threads.threadid()
+                for shell_2_index in 1:length(basis_sets.primary)
+                    for aux_shell_index in 1:length(basis_sets.auxillary)
+                        cartesian_index =  CartesianIndex(aux_shell_index, shell1_index, shell_2_index)
+                        engine = jeri_engine_thread[thread_id]
+                        integral_buffer = thead_integral_buffer[thread_id]
+                        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+                    end
+                end
             end
         end
     end
+
+    # Threads.@sync for batch_index in start_index:stride:number_of_indices
+    #     Threads.@spawn begin
+    #         thread_id = Threads.threadid()
+            
+    #         for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
+    #             cartesian_index = cartesian_indices[view_index]
+    #             engine = jeri_engine_thread[thread_id]
+    #             integral_buffer = thead_integral_buffer[thread_id]
+    #             calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+    #         end
+    #     end
+    # end
+
+
 end
 
 
@@ -113,6 +129,9 @@ end
         jeri_engine_thread,
         thead_integral_buffer, basis_sets)
     end
+    MPI.Barrier(comm)
+    three_center_integrals = MPI.Allreduce(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
+    MPI.Barrier(comm)
 end
 
 

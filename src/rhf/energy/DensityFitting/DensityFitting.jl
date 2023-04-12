@@ -54,16 +54,16 @@ end
   comm = MPI.COMM_WORLD
 
   if iteration == 1
-    @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
-    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-    @time calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, scf_options)
+     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+     calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, basis_sets ,scf_options)
   end
   scf_data.D_tilde .= 0.0
   scf_data.two_electron_fock .= 0.0
 
-  @time calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
-  @time calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
-  @time calculate_exchange_multi_node!(scf_data, scf_options)
+  calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
+  calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
+  calculate_exchange_multi_node!(scf_data, scf_options)
 
 end
 
@@ -147,12 +147,14 @@ end # end function calculate_D
 
 
 
-function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, scf_options::SCFOptions)
+function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, basis_sets, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized? or is it okay to just do it on every node?
   J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
-  batch_start, batch_end = get_contraction_batch_bounds(scf_data.μ)
-  @sync for μ in batch_start:batch_end
+  
+  indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
+
+  @sync for μ in indicies
     Threads.@spawn begin
       BLAS.gemm!('N', 'N', 1.0, three_center_integrals[μ, :, :], J_AB_invt, 0.0, view(scf_data.D, :, :, μ))
     end

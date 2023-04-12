@@ -35,3 +35,32 @@ end
         end
     end
 end
+
+# move these to a static load file
+@inline function get_df_static_basis_indices(basis_sets, comm_size, rank)
+    number_of_shells = length(basis_sets.primary)
+    indicies = []
+    i = rank+1
+    while i <= number_of_shells
+      pos = basis_sets.primary[i].pos
+      end_index = pos + basis_sets.primary[i].nbas-1
+      for index in pos:end_index
+        push!(indicies, index)
+      end
+      i += comm_size
+    end
+    return indicies
+  end
+  
+  
+  @inline function get_df_static_shell_indices(basis_sets, comm_size, rank)
+    number_of_shells = length(basis_sets.primary)
+    indicies = []
+    i = rank+1
+    while i <= number_of_shells
+      push!(indicies, i)
+      i += comm_size
+    end
+    return indicies
+  end
+  
