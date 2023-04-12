@@ -77,7 +77,6 @@ end
   number_of_elements = scf_data.A * scf_data.occ
   indicies = filter(x-> x[1] >= x[2], CartesianIndices(scf_data.two_electron_fock))
   batch_start, batch_end = get_contraction_batch_bounds(length(indicies))
-  println("batch_start $(batch_start) batch_end $(batch_end) total: $(length(indicies))")
   @sync for index in batch_start:batch_end
     Threads.@spawn begin
         ν = indicies[index][1]
