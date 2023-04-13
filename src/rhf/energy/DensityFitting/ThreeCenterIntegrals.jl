@@ -93,22 +93,20 @@ end
                 end
             end
         end
+    else
+        Threads.@sync for batch_index in start_index:stride:number_of_indices
+            Threads.@spawn begin
+                thread_id = Threads.threadid()
+                
+                for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
+                    cartesian_index = cartesian_indices[view_index]
+                    engine = jeri_engine_thread[thread_id]
+                    integral_buffer = thead_integral_buffer[thread_id]
+                    calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+                end
+            end
+        end
     end
-
-    # Threads.@sync for batch_index in start_index:stride:number_of_indices
-    #     Threads.@spawn begin
-    #         thread_id = Threads.threadid()
-            
-    #         for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
-    #             cartesian_index = cartesian_indices[view_index]
-    #             engine = jeri_engine_thread[thread_id]
-    #             integral_buffer = thead_integral_buffer[thread_id]
-    #             calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
-    #         end
-    #     end
-    # end
-
-
 end
 
 

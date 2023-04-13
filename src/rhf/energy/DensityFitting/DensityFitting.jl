@@ -22,6 +22,7 @@ indices for all tensor contractions
   comm_size = MPI.Comm_size(comm)
 
   if comm_size == 1 
+    println("do single node")
     df_rfh_fock_build_single_node!(scf_data, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options)
 
@@ -43,8 +44,8 @@ end
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D!(scf_data, two_center_integrals, three_center_integrals, scf_options)
   end
-  calculate_D_tilde!(scf_data, occupied_orbital_coefficients, scf_options)
-  calculate_coulomb!(scf_data, occupied_orbital_coefficients, scf_options) 
+  calculate_D_tilde!(scf_data, occupied_orbital_coefficients,  scf_options)
+  calculate_coulomb!(scf_data, occupied_orbital_coefficients,  scf_options) 
   calculate_exchange!(scf_data,scf_options)
 end
 
@@ -61,8 +62,8 @@ end
   scf_data.D_tilde .= 0.0
   scf_data.two_electron_fock .= 0.0
 
-  calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
-  calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options)
+  calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, basis_sets, scf_options)
+  calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, basis_sets, scf_options)
   calculate_exchange_multi_node!(scf_data, scf_options)
 
 end
@@ -100,14 +101,14 @@ end
     scf_data.D_tilde[A, ii,μμ] * occupied_orbital_coefficients[μμ, ii]    
 end
 
-function calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, scf_options::SCFOptions)
+function calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, basis_sets,  scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
   for A in 1:scf_data.A
     scf_data.coulomb_intermediate[A] = dot(transpose(view(scf_data.D_tilde, A,:, :)), occupied_orbital_coefficients)
   end
 
-  batch_start, batch_end = get_contraction_batch_bounds(scf_data.μ)
-  @sync for μ in batch_start:batch_end
+  indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
+  @sync for μ in indicies
     Threads.@spawn begin
       # mul!(view(scf_data.two_electron_fock, :,μ), view(scf_data.D, :, :,μ), scf_data.coulomb_intermediate, 2.0, 0.0)
       BLAS.gemm!('N', 'N', 2.0, view(scf_data.D, :, :,μ), scf_data.coulomb_intermediate, 0.0, view(scf_data.two_electron_fock, :,μ))
@@ -122,13 +123,13 @@ end
 end
 
 # calculate xiK 
-@inline function calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, scf_options::SCFOptions)
+@inline function calculate_D_tilde_multi_node!(scf_data, occupied_orbital_coefficients, basis_sets, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
-  batch_start, batch_end = get_contraction_batch_bounds(scf_data.μ)
+  indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
 
-  @sync for μ in batch_start:batch_end
+  @sync for μ in indicies
     Threads.@spawn begin
-      BLAS.gemm!('N', 'N', 1.0, scf_data.D[μ, :, :], occupied_orbital_coefficients, 0.0,  view(scf_data.D_tilde, :, :, μ))
+      BLAS.gemm!('T', 'N', 1.0, scf_data.D[:, :,μ], occupied_orbital_coefficients, 0.0,  view(scf_data.D_tilde, : , :, μ))
     end
   end
 
@@ -140,7 +141,6 @@ end
 
 @inline function calculate_D!(scf_data, two_center_integrals, three_center_integrals, scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
-  # this needs to be mpi parallelized
     J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
     @tensor scf_data.D[ν, A,μ] = three_center_integrals[μ, ν, BB] * J_AB_invt[BB, A]
 end # end function calculate_D
@@ -151,18 +151,12 @@ function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_in
   comm = MPI.COMM_WORLD
   # this needs to be mpi parallelized? or is it okay to just do it on every node?
   J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
-  
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-
   @sync for μ in indicies
     Threads.@spawn begin
       BLAS.gemm!('N', 'N', 1.0, three_center_integrals[μ, :, :], J_AB_invt, 0.0, view(scf_data.D, :, :, μ))
     end
   end
-
-  MPI.Barrier(comm)
-  MPI.Allreduce!(scf_data.D, MPI.SUM, comm)
-  MPI.Barrier(comm)
 end
 
 function get_contraction_batch_bounds(total_number_of_operations)
