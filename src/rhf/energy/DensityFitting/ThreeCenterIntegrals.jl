@@ -80,12 +80,12 @@ end
     indicies = get_df_static_shell_indices(basis_sets, comm_size, rank)
     if comm_size > 1
         println("doing some new integral loading")
-        Threads.@sync for shell1_index in indicies
+        Threads.@sync for auxiliary_shell_index in 1:length(basis_sets.auxillary)
             Threads.@spawn begin
                 thread_id = Threads.threadid()
-                for shell_2_index in 1:length(basis_sets.primary)
-                    for aux_shell_index in 1:length(basis_sets.auxillary)
-                        cartesian_index =  CartesianIndex(aux_shell_index, shell1_index, shell_2_index)
+                for shell_1_index in 1:length(basis_sets.primary)
+                    for shell_2_index in 1:length(basis_sets.primary)
+                        cartesian_index =  CartesianIndex(auxiliary_shell_index, shell_1_index, shell_2_index)
                         engine = jeri_engine_thread[thread_id]
                         integral_buffer = thead_integral_buffer[thread_id]
                         calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
@@ -94,6 +94,7 @@ end
             end
         end
     else
+        # todo this section of if else not needed likely
         Threads.@sync for batch_index in start_index:stride:number_of_indices
             Threads.@spawn begin
                 thread_id = Threads.threadid()
