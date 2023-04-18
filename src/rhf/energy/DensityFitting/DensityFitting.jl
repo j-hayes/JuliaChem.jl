@@ -62,11 +62,11 @@ end
 
     @tensor density[μ, ν] := 2*occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
     indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-    @sync for A in indicies     
+    @sync for node_aux_index in eachindex(indicies)   
       Threads.@spawn begin
         for μ in 1:scf_data.μ
           for ν in 1:scf_data.μ
-            scf_data.coulomb_intermediate[A] += scf_data.D[μ,ν,A]*density[μ,ν]
+            scf_data.coulomb_intermediate[node_aux_index] += scf_data.D[μ,ν,node_aux_index]*density[μ,ν]
           end
         end
       end
@@ -74,20 +74,20 @@ end
     @sync for μ in 1:scf_data.μ
       Threads.@spawn begin
         for ν in 1:scf_data.μ
-          for A in indicies
-            scf_data.two_electron_fock[μ,ν] += scf_data.D[μ, ν,A] * scf_data.coulomb_intermediate[A]            
+          for node_aux_index in eachindex(indicies)   
+            scf_data.two_electron_fock[μ,ν] += scf_data.D[μ, ν,node_aux_index] * scf_data.coulomb_intermediate[node_aux_index]            
           end            
         end
       end
     end
     
     
-    @sync for A in indicies
+    @sync for node_aux_index in eachindex(indicies)   
       Threads.@spawn begin
         for μ in 1:scf_data.μ
           for i in 1:scf_data.occ
              for ν in 1:scf_data.μ
-                scf_data.D_tilde[μ, i, A] += occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,A]
+                scf_data.D_tilde[μ, i, node_aux_index] += occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,node_aux_index]
              end
           end
         end
@@ -97,8 +97,8 @@ end
       Threads.@spawn begin
         for ν in 1:scf_data.μ
           for i in 1:scf_data.occ
-            for A in indicies
-              scf_data.two_electron_fock[μ,ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
+            for node_aux_index in 1:length(indicies)
+              scf_data.two_electron_fock[μ,ν] -= scf_data.D_tilde[μ, i, node_aux_index]*scf_data.D_tilde[ν, i, node_aux_index]
             end
           end
         end
@@ -269,12 +269,13 @@ function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_in
   # this needs to be mpi parallelized? or is it okay to just do it on every node?
   J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-  @sync for A in indicies
+  @sync for aux_node_index in eachindex(indicies)
     Threads.@spawn begin
+      A = indicies[aux_node_index]
       for μ in 1:scf_data.μ
         for ν in 1:scf_data.μ
           for B in 1:scf_data.A
-            scf_data.D[μ, ν, A] += three_center_integrals[μ, ν, B] * J_AB_invt[B, A]
+            scf_data.D[μ, ν, aux_node_index] += three_center_integrals[μ, ν, B] * J_AB_invt[B, A]
           end
         end
       end
