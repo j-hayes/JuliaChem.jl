@@ -18,34 +18,34 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     #first runs not timed
 
     df_scf_results, density_fitted_properties = full_rhf("./example_inputs/density_fitting/water_density_fitted.json") #run small calc
-    # scf_results, properties = full_rhf("./example_inputs/density_fitting/water_rhf.json")      
+    scf_results, properties = full_rhf("./example_inputs/density_fitting/water_rhf.json")      
 
-    # println("RUN 2 DF-RHF")
-    # DF_time = @elapsed begin @time begin 
-    #   df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
-    # end end
-    # RHF_time = @elapsed begin @time begin 
-    #   scf_results, properties = full_rhf(input_file)      
-    # end end
+    println("RUN 2 DF-RHF")
+    DF_time = @elapsed begin @time begin 
+      df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
+    end end
+    RHF_time = @elapsed begin @time begin 
+      scf_results, properties = full_rhf(input_file)      
+    end end
 
-    # println("done iwth runs")
-    # flush(stdout)
+    println("done iwth runs")
+    flush(stdout)
 
-    # println("---------------------------------------------")
-    # println("RHF iteration Times (seconds):")
-    # print_iteration_times(scf_results["Timings"])
+    println("---------------------------------------------")
+    println("RHF iteration Times (seconds):")
+    print_iteration_times(scf_results["Timings"])
     
-    # println("DF-RHF iteration Times (seconds):")
-    # print_iteration_times(df_scf_results["Timings"])
+    println("DF-RHF iteration Times (seconds):")
+    print_iteration_times(df_scf_results["Timings"])
 
   
-    # println("---------------------------------------------")
+    println("---------------------------------------------")
 
-    # println("RHF energy   : $(scf_results["Energy"]), time: $(RHF_time) seconds")
-    # println("DF-RHF energy: $(df_scf_results["Energy"]) time: $(DF_time) seconds")
+    println("RHF energy   : $(scf_results["Energy"]), time: $(RHF_time) seconds")
+    println("DF-RHF energy: $(df_scf_results["Energy"]) time: $(DF_time) seconds")
 
-    # Test.@test scf_results["Energy"] ≈ df_scf_results["Energy"] atol=.00015 #15 micro hartree tolerance
-    # println("Test run successfully!")
+    Test.@test scf_results["Energy"] ≈ df_scf_results["Energy"] atol=.00015 #15 micro hartree tolerance
+    println("Test run successfully!")
   catch e
     println("check_density_fitted_method_matches_RHF Failed with exception:\n") 
     display(e) 
@@ -62,14 +62,14 @@ end
 # df_path = ARGS[1]
 # rhf_path = ARGS[2]
 
-df_path = "./example_inputs/density_fitting/water_density_fitted.json"
-rhf_path = "./example_inputs/density_fitting/water_rhf.json"
+# df_path = "./example_inputs/density_fitting/water_density_fitted.json"
+# rhf_path = "./example_inputs/density_fitting/water_rhf.json"
 
 # df_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water_df.json"
 # rhf_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water.json"
 
-# MP2_Num = "10"
-# df_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json"
-# rhf_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2.json"
+MP2_Num = "10"
+df_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json"
+rhf_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2.json"
 
 check_density_fitted_method_matches_RHF(df_path, rhf_path)
