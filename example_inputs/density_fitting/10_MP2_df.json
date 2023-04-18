@@ -31,8 +31,9 @@
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "contraction_library":"TensorOperations",
-      "guess":"sad"
+      "contraction_library":"default",
+      "guess":"hcore",
+      "load":"static"
     },
     "prop":{
       "mo energies":true,

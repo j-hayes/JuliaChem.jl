@@ -24,7 +24,9 @@
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "guess":"sad"
+      "guess":"sad",
+      "contraction_mode":"default",
+      "load": "dynamic"
     },
     "prop":{
       "mo energies":true,

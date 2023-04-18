@@ -45,7 +45,8 @@
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "guess":"hcore"
+      "guess":"hcore",
+      "load": "dynamic"
 },
     "prop":{
       "mo energies":true,

@@ -11,14 +11,21 @@
   "driver": "energy",
   "model": {   
     "method": "RHF",
-    "basis": "6-31G(2df,p)"
+    "basis": "6-31G(2df,p)",
+    "auxiliary_basis": "cc-pVTZ-JKFIT"
   },
   "keywords": {
     "scf":{
-      "guess":"hcore",
+      "scf_type":"df",
+      "guess":"hcore", 
       "load":"dynamic",
-      "dele":1E-7,
-      "rmsd":1E-7
+      "contraction_mode":"default",
+      "dele":10,
+      "rmsd":10,
+      "df_dele":10,
+      "df_rmsd":10,
+      "niter":20,
+      "df_niter":20
     },
     "prop":{
       "mo energies":true,

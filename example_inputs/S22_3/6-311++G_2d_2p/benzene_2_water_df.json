@@ -42,13 +42,19 @@
   "driver": "energy",
   "model": {
     "method": "RHF",
-    "basis": "6-31+G*"
+    "basis": "6-31+G*",
+    "auxiliary_basis": "cc-pVTZ-JKFIT"
   },
   "keywords": {
     "scf": {
       "guess":"hcore",
       "dele":1.0, 
-      "rmsd":2.0E-5 
+      "rmsd":2.0E-5,
+      "df_dele":1.0,
+      "df_rmsd":2.0E-5,
+      "scf_type":"df",
+      "load":"static",
+      "contraction_mode":"default"
     },
     "prop":{
       "mo energies":true,
