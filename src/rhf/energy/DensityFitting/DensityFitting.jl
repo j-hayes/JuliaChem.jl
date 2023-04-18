@@ -96,23 +96,6 @@ end
       end
     end
     
-    # MPI.Barrier(comm)
-    # MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
-    # MPI.Allreduce!(V, MPI.SUM, comm)
-    # MPI.Barrier(comm)
-
-
-
-    # if MPI.Comm_rank(comm) == 0
-    #   println("V = $V")
-
-    #   for μ in 1:scf_data.μ
-    #     for ν in 1:scf_data.μ
-    #       println("coulomb[$(μ), $(ν)] = $(scf_data.two_electron_fock[μ, ν])")
-    #     end
-    #   end
-    # end
-
     W = zeros(Float64, scf_data.μ, scf_data.occ, scf_data.A)
     @sync for A in indicies
       Threads.@spawn begin
