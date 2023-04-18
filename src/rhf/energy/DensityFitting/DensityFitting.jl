@@ -39,7 +39,7 @@ end
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
 
   comm = MPI.COMM_WORLD
-  if MPI.Comm_size(comm) == 1 && 2 < 1
+  if MPI.Comm_size(comm) == 1
     if iteration == 1
       two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
       three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
