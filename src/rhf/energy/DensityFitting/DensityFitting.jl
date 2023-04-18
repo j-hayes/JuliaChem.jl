@@ -46,42 +46,27 @@ end
       calculate_D!(scf_data, two_center_integrals, three_center_integrals, scf_options)
     end  
     @tensor density[μ, ν] := 2*occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
-    @tensor V[A] := scf_data.D[μ,ν,A]*density[μ,ν]
-    @tensor scf_data.two_electron_fock[μ, ν] = V[A]*scf_data.D[μ,ν,A]
-
-    @tensor W[μ, i, A] := occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,A] 
-    for μ in 1:scf_data.μ
-      for i in 1:scf_data.occ
-        for A in 1:scf_data.A
-          println("W[$(μ), $(i), $(A)] = $(W[μ, i, A])")
-        end
-      end
-    end
-
-    @tensor scf_data.two_electron_fock[μ, ν] -= W[μ, i, A]*W[ν, i, A]
-
-    for μ in 1:scf_data.μ
-      for ν in 1:scf_data.μ
-        println("two_electron_fock[$(μ), $(ν)] = $(scf_data.two_electron_fock[μ, ν])")
-      end
-    end
-
+    @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*density[μ,ν]
+    @tensor scf_data.two_electron_fock[μ, ν] = V[A]scf_data.coulomb_intermediate*scf_data.D[μ,ν,A]
+    @tensor scf_data.D_tilde[ν,i,A] = occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,A] 
+    @tensor scf_data.two_electron_fock[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
   else
     if iteration == 1
       two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
       three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
       calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, basis_sets, scf_options)
     end  
-    V = zeros(Float64, scf_data.A)
-    scf_data.two_electron_fock = zeros(Float64, scf_data.μ, scf_data.μ)
+    scf_data.coulomb_intermediate .= 0.0
+    scf_data.D_tilde .= 0.0
+    scf_data.two_electron_fock .= 0.0
+
     @tensor density[μ, ν] := 2*occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
     indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-    println(indicies)
-     @sync for A in indicies     
+    @sync for A in indicies     
       Threads.@spawn begin
         for μ in 1:scf_data.μ
           for ν in 1:scf_data.μ
-            V[A] += scf_data.D[μ,ν,A]*density[μ,ν]
+            scf_data.coulomb_intermediate[A] += scf_data.D[μ,ν,A]*density[μ,ν]
           end
         end
       end
@@ -90,36 +75,19 @@ end
       Threads.@spawn begin
         for ν in 1:scf_data.μ
           for A in indicies
-            scf_data.two_electron_fock[μ,ν] += scf_data.D[μ, ν,A] * V[A]            
+            scf_data.two_electron_fock[μ,ν] += scf_data.D[μ, ν,A] * scf_data.coulomb_intermediate[A]            
           end            
         end
       end
     end
     
-    # MPI.Barrier(comm)
-    # MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
-    # MPI.Allreduce!(V, MPI.SUM, comm)
-    # MPI.Barrier(comm)
-
-
-
-    # if MPI.Comm_rank(comm) == 0
-    #   println("V = $V")
-
-    #   for μ in 1:scf_data.μ
-    #     for ν in 1:scf_data.μ
-    #       println("coulomb[$(μ), $(ν)] = $(scf_data.two_electron_fock[μ, ν])")
-    #     end
-    #   end
-    # end
-
-    W = zeros(Float64, scf_data.μ, scf_data.occ, scf_data.A)
+    
     @sync for A in indicies
       Threads.@spawn begin
         for μ in 1:scf_data.μ
           for i in 1:scf_data.occ
              for ν in 1:scf_data.μ
-                W[μ, i, A] += occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,A]
+                scf_data.D_tilde[μ, i, A] += occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,A]
              end
           end
         end
@@ -130,7 +98,7 @@ end
         for ν in 1:scf_data.μ
           for i in 1:scf_data.occ
             for A in indicies
-              scf_data.two_electron_fock[μ,ν] -= W[μ, i, A]*W[ν, i, A]
+              scf_data.two_electron_fock[μ,ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
             end
           end
         end
@@ -141,20 +109,7 @@ end
     MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
     MPI.Barrier(comm)
 
-
-    if MPI.Comm_rank(comm) == 0
-
-      for μ in 1:scf_data.μ
-        for ν in 1:scf_data.μ
-          println("fock[$(μ), $(ν)] = $(scf_data.two_electron_fock[μ, ν])")
-        end
-      end
-    end
   end
-  
-  # calculate_D_tilde!(scf_data, occupied_orbital_coefficients,  scf_options)
-  # calculate_coulomb!(scf_data, occupied_orbital_coefficients,  scf_options) 
-  # calculate_exchange!(scf_data,scf_options)
 end
 
 @inline function df_rfh_fock_build_single_node!(scf_data, jeri_engine_thread::Vector{T},
@@ -235,24 +190,14 @@ end
         end
       end
     end
-    for index in CartesianIndices(scf_data.two_electron_fock)
-      println("scf_data.two_electron_fock[$(index[1]), $(index[2])] = $(scf_data.two_electron_fock[index]))]")
-    end  
 end
 
 function calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, basis_sets,  scf_options::SCFOptions)
   comm = MPI.COMM_WORLD
-  # for A in 1:scf_data.A
-  #   scf_data.coulomb_intermediate[A] = 
-  # end
-
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-  println("rank = $(MPI.Comm_rank(comm)) indicies = $(indicies)")
   @sync for A in indicies
     Threads.@spawn begin
-      # intermediate = dot(transpose(view(scf_data.D_tilde, :,:, A)), occupied_orbital_coefficients)
-      intermediate = 0.0
-      
+      intermediate = 0.0      
       for ii in 1:scf_data.occ
         for μμ in 1:scf_data.μ
           intermediate += scf_data.D_tilde[μμ, ii,A] * occupied_orbital_coefficients[μμ, ii]
@@ -264,8 +209,6 @@ function calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, 
            scf_data.two_electron_fock[μ,ν] +=  2.0 * scf_data.D[μ,ν,A] #* intermediate
         end
       end
-      # mul!(view(scf_data.two_electron_fock, :,μ), view(scf_data.D, :, :,μ), scf_data.coulomb_intermediate, 2.0, 0.0)
-      # BLAS.gemm!('N', 'N', 2.0, view(scf_data.D, :, :,μ), scf_data.coulomb_intermediate, 0.0, view(scf_data.two_electron_fock, :,μ))
     end
   end    
 
@@ -273,13 +216,6 @@ function calculate_coulomb_multi_node!(scf_data, occupied_orbital_coefficients, 
   MPI.Barrier(comm)
   MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   MPI.Barrier(comm)
-
-  if MPI.Comm_rank(comm) == 0
-    for index in CartesianIndices(scf_data.two_electron_fock)
-      println("scf_data.two_electron_fock[$(index[1]), $(index[2])] = $(scf_data.two_electron_fock[index]))]")
-    end
-  end
-
 end
 
 
@@ -344,10 +280,6 @@ function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_in
       end
     end
   end
-  
-  # for index in CartesianIndices(scf_data.D)
-  #   println("scf_data.D[$(index[1]), $(index[2]), $(index[3])] = $(scf_data.D[index]))]")
-  # end
 end
 
 function get_contraction_batch_bounds(total_number_of_operations)
