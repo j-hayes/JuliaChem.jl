@@ -17,8 +17,8 @@
     "scf":{
       "guess":"hcore",
       "load":"dynamic",
-      "dele":1E-7,
-      "rmsd":1E-7
+      "dele":1E-6,
+      "rmsd":1E-6
     },
     "prop":{
       "mo energies":true,

@@ -60,47 +60,32 @@ end
     scf_data.D_tilde .= 0.0
     scf_data.two_electron_fock .= 0.0
 
-    @tensor density[μ, ν] := 2*occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
+    @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
     indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
     @sync for node_aux_index in eachindex(indicies)   
       Threads.@spawn begin
-        for μ in 1:scf_data.μ
-          for ν in 1:scf_data.μ
-            scf_data.coulomb_intermediate[node_aux_index] += scf_data.D[μ,ν,node_aux_index]*density[μ,ν]
-          end
-        end
+        scf_data.coulomb_intermediate[node_aux_index] = dot(scf_data.D[:,:,node_aux_index], density[:,:])
       end
     end
     @sync for μ in 1:scf_data.μ
       Threads.@spawn begin
         for ν in 1:scf_data.μ
-          for node_aux_index in eachindex(indicies)   
-            scf_data.two_electron_fock[μ,ν] += scf_data.D[μ, ν,node_aux_index] * scf_data.coulomb_intermediate[node_aux_index]            
-          end            
-        end
+            scf_data.two_electron_fock[μ,ν] = 2*dot(scf_data.D[μ, ν,:] , scf_data.coulomb_intermediate[:])            
+        end            
       end
     end
     
-    
+
     @sync for node_aux_index in eachindex(indicies)   
       Threads.@spawn begin
-        for μ in 1:scf_data.μ
-          for i in 1:scf_data.occ
-             for ν in 1:scf_data.μ
-                scf_data.D_tilde[μ, i, node_aux_index] += occupied_orbital_coefficients[ν,i]*scf_data.D[μ,ν,node_aux_index]
-             end
-          end
-        end
+        BLAS.gemm!('N', 'N', 1.0, view(scf_data.D, :,:,node_aux_index), occupied_orbital_coefficients, 0.0, view(scf_data.D_tilde, :,:,node_aux_index))
       end
     end
+
     @sync for μ in 1:scf_data.μ
       Threads.@spawn begin
         for ν in 1:scf_data.μ
-          for i in 1:scf_data.occ
-            for node_aux_index in 1:length(indicies)
-              scf_data.two_electron_fock[μ,ν] -= scf_data.D_tilde[μ, i, node_aux_index]*scf_data.D_tilde[ν, i, node_aux_index]
-            end
-          end
+          scf_data.two_electron_fock[μ, ν] -= dot(view(scf_data.D_tilde, μ,:,:), view(scf_data.D_tilde, ν,:,:))
         end
       end
     end
