@@ -16,92 +16,23 @@ indices for all tensor contractions
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
 
-
   comm = MPI.COMM_WORLD
-
-  comm_size = MPI.Comm_size(comm)
-  df_rfh_fock_build_single_node_GTFOCK!(scf_data, jeri_engine_thread,
-  basis_sets, occupied_orbital_coefficients, iteration, scf_options)
-
-  # if comm_size == 1
-  #   println("do single node")  
-  #   df_rfh_fock_build_single_node!(scf_data, jeri_engine_thread,
-  #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
-  # else  
-  #   df_rhf_fock_build_multi_node!(scf_data, jeri_engine_thread,
-  #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
-  # end
-  
-end
-
-@inline function df_rfh_fock_build_single_node_GTFOCK!(scf_data, jeri_engine_thread::Vector{T},
-  basis_sets::CalculationBasisSets,
-  occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
-
-  comm = MPI.COMM_WORLD
-  if MPI.Comm_size(comm) == 1
-    if iteration == 1
-      two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
-      three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-      calculate_D!(scf_data, two_center_integrals, three_center_integrals, scf_options)
-    end  
-    @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
-    @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*density[μ,ν]
-    @tensor scf_data.two_electron_fock[μ, ν] = 2*scf_data.coulomb_intermediate[A]*scf_data.D[μ,ν,A]
-    @tensor scf_data.D_tilde[ν,i,A] = scf_data.D[ν, μμ, A] * occupied_orbital_coefficients[μμ, i]
-    @tensor scf_data.two_electron_fock[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
-  else
-    if iteration == 1
-      @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
-      @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-      @time calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, basis_sets, scf_options)
-    end  
-    @time begin 
-    scf_data.coulomb_intermediate .= 0.0
-    scf_data.D_tilde .= 0.0
-    scf_data.two_electron_fock .= 0.0
-
-    @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
+  if iteration == 1
+    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+    J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
     indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-    @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*density[μ,ν]
-    @tensor scf_data.two_electron_fock[μ, ν] = 2.0*scf_data.coulomb_intermediate[A]*scf_data.D[μ,ν,A]
-    @tensor scf_data.D_tilde[ν,i,A] = scf_data.D[ν, μμ, A]*occupied_orbital_coefficients[μμ, i]
-    @tensor scf_data.two_electron_fock[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
-    
-    # @sync for node_aux_index in eachindex(indicies)   
-    #   Threads.@spawn begin
-    #     scf_data.coulomb_intermediate[node_aux_index] = dot(scf_data.D[:,:,node_aux_index], density[:,:])
-    #   end
-    # end
-    # @sync for μ in 1:scf_data.μ
-    #   Threads.@spawn begin
-    #     for ν in 1:scf_data.μ
-    #         scf_data.two_electron_fock[μ,ν] = 2*dot(scf_data.D[μ, ν,:] , scf_data.coulomb_intermediate[:])            
-    #     end            
-    #   end
-    # end
-    
-
-    # @sync for node_aux_index in eachindex(indicies)   
-    #   Threads.@spawn begin
-    #     BLAS.gemm!('N', 'N', 1.0, view(scf_data.D, :,:,node_aux_index), occupied_orbital_coefficients, 0.0, view(scf_data.D_tilde, :,:,node_aux_index))
-    #   end
-    # end
-
-    # @sync for μ in 1:scf_data.μ
-    #   Threads.@spawn begin
-    #     for ν in 1:scf_data.μ
-    #       scf_data.two_electron_fock[μ, ν] -= dot(view(scf_data.D_tilde, μ,:,:), view(scf_data.D_tilde, ν,:,:))
-    #     end
-    #   end
-    # end
-
-    MPI.Barrier(comm)
-    MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
-    MPI.Barrier(comm)
-
-  end
-  end # end time
+    @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[:, indicies][BB,A]
+  end  
+  @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
+  @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*density[μ,ν]
+  @tensor scf_data.two_electron_fock[μ, ν] = 2.0*scf_data.coulomb_intermediate[A]*scf_data.D[μ,ν,A]
+  @tensor scf_data.D_tilde[ν,i,A] = scf_data.D[ν, μμ, A]*occupied_orbital_coefficients[μμ, i]
+  @tensor scf_data.two_electron_fock[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
+  
+  MPI.Barrier(comm)
+  MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
+  MPI.Barrier(comm)
 end
 
 @inline function df_rfh_fock_build_single_node!(scf_data, jeri_engine_thread::Vector{T},
@@ -250,13 +181,6 @@ end
     @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[BB, A]
 end # end function calculate_D
 
-function calculate_D_multi_node!(scf_data, two_center_integrals, three_center_integrals, basis_sets, scf_options::SCFOptions)
-  comm = MPI.COMM_WORLD
-  # this needs to be mpi parallelized? or is it okay to just do it on every node?
-  J_AB_invt = convert(Array, transpose(cholesky(Hermitian(two_center_integrals, :L)).L \ I))
-  indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-  @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[:, indicies][BB,A]
-end
 
 function get_contraction_batch_bounds(total_number_of_operations)
   comm = MPI.COMM_WORLD

@@ -15,10 +15,13 @@
   },
   "keywords": {
     "scf":{
-      "guess":"hcore",
-      "load":"dynamic",
+      "scf_type":"rhf",
+      "guess":"hcore", 
+      "load":"static",
+      "contraction_mode":"default",
       "dele":1E-6,
-      "rmsd":1E-6
+      "rmsd":1E-6,
+      "niter":20
     },
     "prop":{
       "mo energies":true,
