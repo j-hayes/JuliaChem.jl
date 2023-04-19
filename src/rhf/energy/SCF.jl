@@ -452,6 +452,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
         node_indicie_count = length(indicies)
         scf_data.D = zeros(basis_function_count, basis_function_count, node_indicie_count)
+        scf_data.D_permuted = zeros(basis_function_count, node_indicie_count, basis_function_count)
         scf_data.D_tilde = zeros(basis_function_count, occupied_orbital_count, node_indicie_count)
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
         scf_data.coulomb_intermediate = zeros(Float64, (node_indicie_count))
