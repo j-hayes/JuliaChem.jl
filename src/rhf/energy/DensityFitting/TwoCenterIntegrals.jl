@@ -27,8 +27,7 @@ using JuliaChem.Shared
         error("integral threading load type: $(scf_options.load) not supported")
     end
     MPI.Barrier(comm)
-    two_center_integrals .= MPI.Allreduce(two_center_integrals, MPI.SUM, MPI.COMM_WORLD)
-    
+    MPI.Allreduce!(two_center_integrals, MPI.SUM, MPI.COMM_WORLD)
     MPI.Barrier(comm)
     return two_center_integrals
 end

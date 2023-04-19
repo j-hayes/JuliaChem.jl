@@ -443,16 +443,15 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
     else
 
-      aux_basis_function_count = basis_sets.auxillary.norb
-      basis_function_count = basis_sets.primary.norb
-      electrons_count = Int64(basis_sets.primary.nels)
-      occupied_orbital_count = electrons_count÷2
-
       if iter == 1
+        aux_basis_function_count = basis_sets.auxillary.norb
+        basis_function_count = basis_sets.primary.norb
+        electrons_count = Int64(basis_sets.primary.nels)
+        occupied_orbital_count = electrons_count÷2
+
         indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
         node_indicie_count = length(indicies)
         scf_data.D = zeros(basis_function_count, basis_function_count, node_indicie_count)
-        scf_data.D_permuted = zeros(basis_function_count, node_indicie_count, basis_function_count)
         scf_data.D_tilde = zeros(basis_function_count, occupied_orbital_count, node_indicie_count)
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
         scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
@@ -463,12 +462,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       end
 
 
-
       MPI.Bcast!(C, 0, comm)
-
-      occupied_orbital_coefficients = C[:,1:occupied_orbital_count]
-
-      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iter, scf_options)
+      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
       F .= H .+ scf_data.two_electron_fock
     end
     
