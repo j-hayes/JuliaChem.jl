@@ -37,7 +37,7 @@ end
     @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[:, indicies][BB,A]
 
   end  
-  @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
+  @tensor scf_data.density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
   @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*density[μ,ν]
   @tensor scf_data.two_electron_fock[μ, ν] = 2.0*scf_data.coulomb_intermediate[A]*scf_data.D[μ,ν,A]
   @tensor scf_data.D_tilde[ν,i,A] = scf_data.D[ν, μμ, A]*occupied_orbital_coefficients[μμ, i]
@@ -55,12 +55,14 @@ end
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
 
   if iteration == 1
+    println("doing BLAS DF algorithm")
+
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
   end  
   
-  @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
+  @tensor scf_data.density[μ, ν] = occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
   calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
   calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
   
@@ -82,20 +84,21 @@ end
 
   # use transpose transpose gemm transpose to perform tensor contraction 
   # J_AB_invt is already a 2D matrix so no need to reshape, and is in correct order
-  D_reshaped = reshape(scf_data.D, (μμ*νν,AA))
-  three_center_integrals =  reshape(three_center_integrals, (μμ*νν,scf_data.A))
-  BLAS.gemm!('N', 'N', 1.0, three_center_integrals, J_AB_invt[:, indicies], 0.0, D_reshaped)
+  BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_invt[:, indicies], 0.0, reshape(scf_data.D, (μμ*νν,AA)))
   # MPI.Barrier(comm)
 end # end function calculate_D
 
 @inline function calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
   AA = length(indicies)
   scf_data.coulomb_intermediate = zeros(Float64, (AA,1))
-  @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
-  for aux_index in eachindex(indicies)
+  @time @tensor density[μ, ν] := occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
+  @time begin 
+    for aux_index in eachindex(indicies)
     scf_data.coulomb_intermediate[aux_index] = dot(scf_data.D[:,:,aux_index], density[:,:])  # @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*density[μ,ν]
+    end
   end
-  BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0,
+
+  @time BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0,
     reshape(scf_data.two_electron_fock,(scf_data.μ*scf_data.μ, 1)))
 end
 
@@ -106,7 +109,6 @@ end
   ii = scf_data.occ
   
   BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
-
   BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, oo*AA)), reshape(scf_data.D_tilde, (μμ, oo*AA)), 1.0, scf_data.two_electron_fock)
 
 end
