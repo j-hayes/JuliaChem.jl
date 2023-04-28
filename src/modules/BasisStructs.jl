@@ -34,7 +34,7 @@ end
 export am_to_nbas_cart 
 
 @inline function create_static_vector_small(
-  input::Vector{T}) where {T<:Number}
+  input::Array{T}) where {T<:Number}
   
   output_dynamic::Vector{T} = Vector{T}(undef,MAX_CONTRACTION)
   @views output_dynamic[1:size(input)[1]] = input[:]
@@ -42,7 +42,7 @@ export am_to_nbas_cart
 end
 
 @inline function create_static_vector_large(
-  input::Vector{T}) where {T<:Number}
+  input::Array{T}) where {T<:Number}
   
   output_dynamic::Vector{T} = Vector{T}(undef,2*MAX_CONTRACTION)
   @views output_dynamic[1:size(input)[1]] = input[:]
@@ -50,7 +50,7 @@ end
 end
 
 @inline function calculate_coefficients(
-  coef::Vector{T}, exp::Vector{T}, am::Int64, nprim::Int64, nbas::Int64, 
+  coef::Array{T}, exp::Vector{T}, am::Int64, nprim::Int64, nbas::Int64, 
   unnormalize::Bool) where {T<:Number}
 
   #== unnormalize basis functions ==#
