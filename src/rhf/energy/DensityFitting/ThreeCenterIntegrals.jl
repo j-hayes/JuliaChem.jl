@@ -67,47 +67,55 @@ end
 end
 
 @inline function calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
+    #todo(Jackson) break this up into some functions that are easier to read
+    
     comm = MPI.COMM_WORLD
-    number_of_indices = length(cartesian_indices)
-    comm_size = MPI.Comm_size(comm)
-    batch_size = ceil(Int, number_of_indices / (Threads.nthreads()*comm_size))
-
-    stride =  comm_size*batch_size
-    start_index = MPI.Comm_rank(comm)*batch_size + 1
-
-    rank = MPI.Comm_rank(comm)
-
-    indicies = get_df_static_shell_indices(basis_sets, comm_size, rank)
-    if comm_size > 1
-        println("doing some new integral loading")
-        Threads.@sync for auxiliary_shell_index in 1:length(basis_sets.auxillary)
-            Threads.@spawn begin
-                thread_id = Threads.threadid()
-                for shell_1_index in 1:length(basis_sets.primary)
-                    for shell_2_index in 1:length(basis_sets.primary)
-                        cartesian_index =  CartesianIndex(auxiliary_shell_index, shell_1_index, shell_2_index)
-                        engine = jeri_engine_thread[thread_id]
-                        integral_buffer = thead_integral_buffer[thread_id]
-                        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
-                    end
-                end
-            end
-        end
-    else
-        # todo this section of if else not needed likely
-        Threads.@sync for batch_index in start_index:stride:number_of_indices
-            Threads.@spawn begin
-                thread_id = Threads.threadid()
-                
-                for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
-                    cartesian_index = cartesian_indices[view_index]
+    rank_shell_indicies = get_df_static_shell_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
+    Threads.@sync for aux_index in rank_shell_indicies
+        Threads.@spawn begin
+            thread_id = Threads.threadid()       
+            for μ in 1:length(basis_sets.primary)
+                for ν in 1:length(basis_sets.primary)
+                    cartesian_index = CartesianIndex(aux_index, μ, ν)
                     engine = jeri_engine_thread[thread_id]
                     integral_buffer = thead_integral_buffer[thread_id]
                     calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
                 end
-            end
+            end                 
         end
     end
+    tci_send_tag = 101
+    rank_basis_indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
+    if MPI.Comm_rank(comm) != 0
+        MPI.send(MPI.Buffer_send(three_center_integrals[:,:,rank_basis_indicies]),  0, tci_send_tag, comm)
+    end
+    if MPI.Comm_rank(comm) == 0
+        ranks = MPI.Comm_size(comm)
+        for rank in 1:ranks-1
+            indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), rank)
+            recv_tuple = MPI.recv(rank, tci_send_tag, comm)          
+            three_center_integrals[:,:,indicies] .= recv_tuple[1].data
+        end
+    end
+
+    tci_send_back_tag = 102
+    if MPI.Comm_rank(comm) == 0
+        for rank in 1:ranks-1
+            send_rank_indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), rank)
+            all_indicies = 1:size(three_center_integrals, 3)
+            other_rank_indicies = findall(!in(send_rank_indicies), all_indicies)
+            MPI.send(MPI.Buffer(three_center_integrals[:,:,other_rank_indicies]),  rank, tci_send_back_tag, comm)
+        end
+    else    
+        recv_tuple = MPI.recv(0, tci_send_back_tag, comm)
+        sub_arr = recv_tuple[1].data
+        indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
+        all_indicies = 1:size(three_center_integrals, 3)
+        other_rank_indicies = findall(!in(indicies), all_indicies)
+        three_center_integrals[:,:,other_rank_indicies] .= sub_arr
+    end
+  
+    MPI.Barrier(comm)     
 end
 
 
