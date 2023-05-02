@@ -158,7 +158,7 @@ function rhf_kernel(mol::Molecule,
     println("       Starting RHF iterations...                 ")
     println("----------------------------------------          ")
     println(" ")
-    println("Iter        Energy                ΔE                Drms")
+    println("Iter        Energy                ΔE                Drms                time")
   end
 
   E_elec = 0.0
@@ -348,7 +348,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   auxiliary_basis = basis_sets.auxillary
  
   scf_converged::Bool = true
-  
+  iter_start = time()
   #== initialize a few more variables ==#
   comm=MPI.COMM_WORLD
 
@@ -529,11 +529,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     E = E_elec + E_nuc
     ΔE = E - E_old
 
-    if MPI.Comm_rank(comm) == 0 && output >= 2
-      #println(iter,"     ", E,"     ", ΔE,"     ", D_rms)
-      @printf("%d      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms)
-    end
-    
     if do_density_fitting && !density_fitting_converged 
       #todo the density fitting convergence values should be a parameter
         
@@ -561,6 +556,13 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       iter_converged = Base.abs_float(ΔE) <= dele && D_rms <= rmsd
     end
 
+    iteration_end = time()
+    timings.iteration_times["$iter"] = iteration_end - iteration_start
+    if MPI.Comm_rank(comm) == 0 && output >= 2
+      #println(iter,"     ", E,"     ", ΔE,"     ", D_rms)
+      @printf("%d      %.10f      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms,  timings.iteration_times["$iter"])
+    end
+    
     if maximum_iterations_exceeded(iter, scf_options)
       scf_converged = false
       break
@@ -569,8 +571,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
     #== if not converged, replace old D and E values for next iteration ==#
     E_old = E
-    iteration_end = time()
-    timings.iteration_times["$iter"] = iteration_end - iteration_start
   end
 
   #== build energy-weighted density matrix ==#

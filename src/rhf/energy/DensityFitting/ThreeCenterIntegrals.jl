@@ -84,37 +84,79 @@ end
             end                 
         end
     end
+
+    if MPI.Comm_size(comm) == 1 
+        return
+    end
+
     tci_send_tag = 101
     rank_basis_indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
+    println("rank indicies $(rank_basis_indicies) on rank $(MPI.Comm_rank(comm))")
     if MPI.Comm_rank(comm) != 0
-        MPI.send(MPI.Buffer_send(three_center_integrals[:,:,rank_basis_indicies]),  0, tci_send_tag, comm)
+        total_indicies = length(rank_basis_indicies)
+        batch_size = ceil(Int, total_indicies ÷ 10)
+        range_start = 1
+        while range_start <= total_indicies
+            range = range_start: min( total_indicies, range_start+batch_size)
+            subset_indicies = rank_basis_indicies[range]
+            println("sending indicies: $subset_indicies")
+            MPI.send(view(three_center_integrals,:,:,subset_indicies),  0, tci_send_tag, comm)
+            range_start += batch_size + 1
+        end
     end
     if MPI.Comm_rank(comm) == 0
         ranks = MPI.Comm_size(comm)
         for rank in 1:ranks-1
             indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), rank)
-            recv_tuple = MPI.recv(rank, tci_send_tag, comm)          
-            three_center_integrals[:,:,indicies] .= recv_tuple[1].data
+            total_indicies = length(indicies)
+            batch_size = ceil(Int, total_indicies ÷ 10)
+            range_start = 1
+            while range_start <= total_indicies
+                range = range_start: min( total_indicies, range_start+batch_size)
+                subset_indicies = rank_basis_indicies[range]
+                subset_indicies = indicies[range]
+                recv_tuple = MPI.recv(rank, tci_send_tag, comm)  
+                println("recieving indicies: $subset_indicies")        
+                three_center_integrals[:,:,subset_indicies] .= recv_tuple[1]
+                range_start += batch_size + 1
+            end
+
         end
     end
 
+    MPI.Barrier(comm)     
+
     tci_send_back_tag = 102
+    all_indicies = 1:size(three_center_integrals, 3)
     if MPI.Comm_rank(comm) == 0
         for rank in 1:ranks-1
             send_rank_indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), rank)
-            all_indicies = 1:size(three_center_integrals, 3)
             other_rank_indicies = findall(!in(send_rank_indicies), all_indicies)
-            MPI.send(MPI.Buffer(three_center_integrals[:,:,other_rank_indicies]),  rank, tci_send_back_tag, comm)
+            total_indicies = length(other_rank_indicies)
+            batch_size = ceil(Int, total_indicies ÷ 10)                      
+            range_start = 1
+            while range_start <= total_indicies
+                range = range_start: min( total_indicies, range_start+batch_size)
+                subset_indicies = other_rank_indicies[range]
+                MPI.send(view(three_center_integrals, :,:,subset_indicies),  rank, tci_send_back_tag, comm)  
+                range_start += batch_size + 1
+            end
         end
     else    
-        recv_tuple = MPI.recv(0, tci_send_back_tag, comm)
-        sub_arr = recv_tuple[1].data
         indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
-        all_indicies = 1:size(three_center_integrals, 3)
         other_rank_indicies = findall(!in(indicies), all_indicies)
-        three_center_integrals[:,:,other_rank_indicies] .= sub_arr
+        total_indicies = length(other_rank_indicies)
+        batch_size = ceil(Int, total_indicies ÷ 10)                      
+        range_start = 1
+        while range_start <= total_indicies
+            range = range_start: min( total_indicies, range_start+batch_size)
+            subset_indicies = other_rank_indicies[range]
+            recv_tuple = MPI.recv(0, tci_send_back_tag, comm)
+            sub_arr = recv_tuple[1]
+            three_center_integrals[:,:,subset_indicies] .= sub_arr
+            range_start += batch_size + 1
+        end
     end
-  
     MPI.Barrier(comm)     
 end
 

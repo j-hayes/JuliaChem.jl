@@ -59,18 +59,13 @@ end
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
-    println("D calculated")
-    three_center_integrals = nothing
-    two_center_integrals = nothing
-    GC.gc()
   end  
-   calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
-   calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
-   begin
+  calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
+  calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
+
   MPI.Barrier(comm)
   MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   MPI.Barrier(comm)
-  end
 end
 
 @inline function calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options::SCFOptions)
@@ -82,6 +77,19 @@ end
   LAPACK.potrf!('L', two_center_integrals)
   J_AB_INV = inv(two_center_integrals)[ indicies,:]
   BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
+  scf_data.D = reshape(scf_data.D, (μμ, νν,AA))
+  # MPI.Barrier(comm)
+  # MPI.Allreduce!(scf_data.D, MPI.SUM, comm)
+  # MPI.Barrier(comm)
+
+  # if MPI.Comm_rank(comm) == 0
+  #    io = open("D_2proc.txt", "w")
+  #    for index in CartesianIndices(scf_data.D)
+  #      write(io, "D[$(index[1]), $(index[2]), $(index[3])] = $(scf_data.D[index])\n")
+  #    end
+  # end
+
+
 end # end function calculate_D
 
 
