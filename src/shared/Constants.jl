@@ -33,8 +33,9 @@ module SCF_Keywords
 
     module ContractionMode 
         const contraction_mode = "contraction_mode"
-        const default = "default"
+        const default = "TensorOperations"
         const tensor_operations = "TensorOperations" # use TensorOperations.jl library 
+        const BLAS = "BLAS" # use BLAS library 
     end 
 
     module IntegralLoad 
