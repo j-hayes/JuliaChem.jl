@@ -150,6 +150,17 @@ end
     end
 end
 
+function get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
+    lock(mutex_mpi_worker)
+        send_mesg = [ 0 , MPI.Comm_rank(comm), thread ]   
+        status = MPI.Isend(send_mesg, 0, 0, comm)
+        status = MPI.Probe(0, thread, comm)
+        rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
+        ij_index = recv_mesg[1]
+    unlock(mutex_mpi_worker)
+    return ij_index
+end
+
 @inline function do_three_center_integral_batch!(three_center_integrals,
     top_index,
     batch_size,
