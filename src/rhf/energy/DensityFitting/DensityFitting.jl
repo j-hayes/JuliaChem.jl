@@ -36,7 +36,6 @@ end
     @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[indicies,:][A,BB]
 
   end  
-  GC.safepoint()
 
   @tensor scf_data.density[μ, ν] = occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
   @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*scf_data.density[μ,ν]
@@ -78,19 +77,8 @@ end
   J_AB_INV = inv(two_center_integrals)[ indicies,:]
   BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
   scf_data.D = reshape(scf_data.D, (μμ, νν,AA))
-  # MPI.Barrier(comm)
-  # MPI.Allreduce!(scf_data.D, MPI.SUM, comm)
-  # MPI.Barrier(comm)
 
-  # if MPI.Comm_rank(comm) == 0
-  #    io = open("D_2proc.txt", "w")
-  #    for index in CartesianIndices(scf_data.D)
-  #      write(io, "D[$(index[1]), $(index[2]), $(index[3])] = $(scf_data.D[index])\n")
-  #    end
-  # end
-
-
-end # end function calculate_D
+end
 
 
 @inline function calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)

@@ -24,7 +24,7 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
 
   scf_options = create_scf_options(scf_flags)
 
-  if MPI.Comm_rank(MPI.COMM_WORLD) == 0 && output >= 2
+  if MPI.Comm_rank(MPI.COMM_WORLD) == 0
     print_scf_options(scf_options)
   end
   
@@ -246,9 +246,9 @@ function rhf_kernel(mol::Molecule,
              "Overlap" => S,                                                   
              "Energy" => E,                                                     
              "Converged?" => converged,
-             "Timings"=> timings,                                      
-            )                                                                   
-                                                                                
+             "Timings"=> timings                                              
+            )      
+  
   return scf 
 end
 

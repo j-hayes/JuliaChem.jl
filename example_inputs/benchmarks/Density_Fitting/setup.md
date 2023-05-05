@@ -6,7 +6,7 @@ setup sysimg
 julia -q
 ] 
 activate . 
-add add /home/jackson/source/JuliaChem.jl#your_branch_here
+add /home/jackson/source/JuliaChem.jl#your_branch_here
 using Pkg; Pkg.add("PackageCompiler")
 using PackageCompiler
 PackageCompiler.create_sysimage(["JuliaChem"]; sysimage_path="JuliaChem.so")
