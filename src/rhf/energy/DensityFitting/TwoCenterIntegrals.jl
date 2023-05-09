@@ -133,8 +133,6 @@ end
     jeri_engine_thread,
     thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker)
     
-    comm = MPI.COMM_WORLD
-    
     threadid = Threads.threadid()
     ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     while ij_index >= 1
