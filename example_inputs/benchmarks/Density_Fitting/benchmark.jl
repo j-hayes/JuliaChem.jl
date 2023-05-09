@@ -32,6 +32,11 @@ function run_julia_chem(molecule, driver, model, keywords)
     end_time = time()
     rhf_energy["Timings"].run_time = end_time - start_time
   end 
+  keywords["prop"] = Dict()
+  keywords["prop"]["mo energies"] = true
+  keywords["prop"]["mulliken"] = true
+  keywords["prop"]["multipole"] = "dipole"
+
   #== compute molecular properties ==# 
   rhf_properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, keywords["prop"],
     output=0)  
