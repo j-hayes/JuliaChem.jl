@@ -89,17 +89,28 @@ end
         return
     end
 
+    reduce_integrals(three_center_integrals, basis_sets)
+
+end
+
+@inline function reduce_integrals(three_center_integrals, basis_sets)
+    comm = MPI.COMM_WORLD
     tci_send_tag = 101
+
+    # MPI.Barrier(comm)
+    # MPI.Allreduce!(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
+    # MPI.Barrier(comm)
+
+    number_of_reduce_batches = 1
+
     rank_basis_indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
-    println("rank indicies $(rank_basis_indicies) on rank $(MPI.Comm_rank(comm))")
     if MPI.Comm_rank(comm) != 0
         total_indicies = length(rank_basis_indicies)
-        batch_size = ceil(Int, total_indicies ÷ 10)
+        batch_size = ceil(Int, total_indicies ÷ number_of_reduce_batches)
         range_start = 1
         while range_start <= total_indicies
             range = range_start: min( total_indicies, range_start+batch_size)
             subset_indicies = rank_basis_indicies[range]
-            println("sending indicies: $subset_indicies")
             MPI.send(view(three_center_integrals,:,:,subset_indicies),  0, tci_send_tag, comm)
             range_start += batch_size + 1
         end
@@ -109,15 +120,14 @@ end
         for rank in 1:ranks-1
             indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), rank)
             total_indicies = length(indicies)
-            batch_size = ceil(Int, total_indicies ÷ 10)
+            batch_size = ceil(Int, total_indicies ÷ number_of_reduce_batches)
             range_start = 1
             while range_start <= total_indicies
                 range = range_start: min( total_indicies, range_start+batch_size)
                 subset_indicies = rank_basis_indicies[range]
                 subset_indicies = indicies[range]
                 recv_tuple = MPI.recv(rank, tci_send_tag, comm)  
-                println("recieving indicies: $subset_indicies")        
-                three_center_integrals[:,:,subset_indicies] .= recv_tuple[1]
+                view(three_center_integrals, :,:,subset_indicies) .= recv_tuple[1]
                 range_start += batch_size + 1
             end
 
@@ -133,7 +143,7 @@ end
             send_rank_indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), rank)
             other_rank_indicies = findall(!in(send_rank_indicies), all_indicies)
             total_indicies = length(other_rank_indicies)
-            batch_size = ceil(Int, total_indicies ÷ 10)                      
+            batch_size = ceil(Int, total_indicies ÷ number_of_reduce_batches)                      
             range_start = 1
             while range_start <= total_indicies
                 range = range_start: min( total_indicies, range_start+batch_size)
@@ -146,20 +156,19 @@ end
         indicies = get_df_static_basis_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
         other_rank_indicies = findall(!in(indicies), all_indicies)
         total_indicies = length(other_rank_indicies)
-        batch_size = ceil(Int, total_indicies ÷ 10)                      
+        batch_size = ceil(Int, total_indicies ÷ number_of_reduce_batches)                      
         range_start = 1
         while range_start <= total_indicies
             range = range_start: min( total_indicies, range_start+batch_size)
             subset_indicies = other_rank_indicies[range]
             recv_tuple = MPI.recv(0, tci_send_back_tag, comm)
             sub_arr = recv_tuple[1]
-            three_center_integrals[:,:,subset_indicies] .= sub_arr
+            view(three_center_integrals, :,:,subset_indicies) .= sub_arr
             range_start += batch_size + 1
         end
     end
     MPI.Barrier(comm)     
 end
-
 
 @inline function calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     comm = MPI.COMM_WORLD
@@ -179,7 +188,7 @@ end
         thead_integral_buffer, basis_sets)
     end
     MPI.Barrier(comm)
-    three_center_integrals = MPI.Allreduce(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
+    MPI.Allreduce!(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
     MPI.Barrier(comm)
 end
 
