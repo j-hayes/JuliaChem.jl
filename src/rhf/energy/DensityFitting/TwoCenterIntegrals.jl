@@ -19,9 +19,10 @@ using JuliaChem.Shared
 
     if scf_options.load == "sequential"
         calculate_two_center_integrals_sequential!(two_center_integrals, cartesian_indices, jeri_engine_thread[1], thead_integral_buffer[1], basis_sets)
-    elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1
+    elseif scf_options.load == "static"
         calculate_two_center_integrals_static!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     elseif scf_options.load == "dynamic"
+        println("doing dynamic load two center integrals")
         run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     else
         error("integral threading load type: $(scf_options.load) not supported")
@@ -105,15 +106,22 @@ end
     batch_size = size(cartesian_indices, 1)
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    task_top_index = n_pairs
-    if rank == 0
-        setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
-    else
-        run_two_center_integrals_worker(two_center_integrals,
-            cartesian_indices,
-            batch_size,
-            jeri_engine_thread,
-            thead_integral_buffer, basis_sets)
+    task_top_index = [n_pairs]
+    mutex_mpi_worker = Base.Threads.ReentrantLock()
+
+    @sync for thread in 1:Threads.nthreads()
+        Threads.@spawn begin
+            threadid = Threads.threadid()
+            if rank == 0 && threadid == 1 && n_ranks > 1
+                setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker)
+            else
+                run_two_center_integrals_worker(two_center_integrals,
+                    cartesian_indices,
+                    batch_size,
+                    jeri_engine_thread,
+                    thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker)
+            end
+        end
     end
 end
 
@@ -123,46 +131,32 @@ end
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets)
-
-    comm = MPI.COMM_WORLD
-    mutex_mpi_worker = Base.Threads.ReentrantLock()
-    #== execute kernel ==#
-    @sync for thread in 1:Threads.nthreads()
-        Threads.@spawn begin
-            #== initial set up ==#
-            recv_mesg = [0]
-            send_mesg = [0, MPI.Comm_rank(comm), thread]
-            #== complete first task ==#
-            lock(mutex_mpi_worker)
-            status = MPI.Probe(0, thread, comm)
-            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-            ij_index = recv_mesg[1]
-            unlock(mutex_mpi_worker)
-
-            while ij_index >= 1
-                do_two_center_integral_batch(two_center_integrals,
-                ij_index,
-                batch_size,
-                cartesian_indices,
-                jeri_engine_thread[thread],
-                thead_integral_buffer[thread], basis_sets)
-                ij_index = get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
-            end
-        end
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker)
+    
+    threadid = Threads.threadid()
+    ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
+    while ij_index >= 1
+        do_two_center_integral_batch(two_center_integrals,
+        ij_index,
+        batch_size,
+        cartesian_indices,
+        jeri_engine_thread[threadid],
+        thead_integral_buffer[threadid], basis_sets)
+        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end
 
-function get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
-    lock(mutex_mpi_worker)
-        send_mesg = [ 0 , MPI.Comm_rank(comm), thread ]   
-        status = MPI.Isend(send_mesg, 0, 0, comm)
-        status = MPI.Probe(0, thread, comm)
-        rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-        ij_index = recv_mesg[1]
-    unlock(mutex_mpi_worker)
-    return ij_index
-end
+
+# function get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
+#     lock(mutex_mpi_worker)
+#         send_mesg = [ 0 , MPI.Comm_rank(comm), thread ]   
+#         status = MPI.Isend(send_mesg, 0, 0, comm)
+#         status = MPI.Probe(0, thread, comm)
+#         rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
+#         ij_index = recv_mesg[1]
+#     unlock(mutex_mpi_worker)
+#     return ij_index
+# end
 
 @inline function do_two_center_integral_batch(two_center_integrals,
     top_index,

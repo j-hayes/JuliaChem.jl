@@ -23,13 +23,19 @@ using JuliaChem.Shared
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
     if scf_options.load == "sequential"
         calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets)
-    elseif scf_options.load == "static" || MPI.Comm_size(comm) == 1
+    elseif scf_options.load == "static"
         calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     elseif scf_options.load == "dynamic"
+        println("doing three center integrals with dynamic load balancing")
         calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+
+    MPI.Barrier(comm)     
+    MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
+    MPI.Barrier(comm)   
+
     return three_center_integrals
 end
 
@@ -82,37 +88,34 @@ end
             end                 
         end
     end
-
-    if MPI.Comm_size(comm) == 1 
-        return
-    end
-
-    MPI.Barrier(comm)     
-    MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
-    MPI.Barrier(comm)     
 end
 
 
-@inline function calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
+@inline function calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, 
+    jeri_engine_thread, basis_sets, thead_integral_buffer)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
     n_pairs = length(cartesian_indices)
     batch_size = size(cartesian_indices, 1)
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    task_top_index = n_pairs
-    if rank == 0
-        setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads)
-    else
-    run_three_center_integrals_worker(three_center_integrals,
-        cartesian_indices,
-        batch_size,
-        jeri_engine_thread,
-        thead_integral_buffer, basis_sets)
+    task_top_index = [n_pairs]
+    mutex_mpi_worker = Base.Threads.ReentrantLock()
+
+    @sync for thread in 1:Threads.nthreads()
+        Threads.@spawn begin
+            threadid = Threads.threadid()
+            if rank == 0 && threadid == 1 && n_ranks > 1
+                setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker)
+            else
+                run_three_center_integrals_worker(three_center_integrals,
+                cartesian_indices,
+                batch_size,
+                jeri_engine_thread,
+                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker)
+            end
+        end
     end
-    MPI.Barrier(comm)
-    MPI.Allreduce!(three_center_integrals, MPI.SUM, MPI.COMM_WORLD)
-    MPI.Barrier(comm)
 end
 
 
@@ -120,35 +123,21 @@ end
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets)
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker)
 
-    comm = MPI.COMM_WORLD
-    mutex_mpi_worker = Base.Threads.ReentrantLock()
-    #== execute kernel ==#
-    @sync for thread in 1:Threads.nthreads()
-        Threads.@spawn begin
-            #== initial set up ==#
-            recv_mesg = [0]
-            send_mesg = [0, MPI.Comm_rank(comm), thread]
-            #== complete first task ==#
-            lock(mutex_mpi_worker)
-            status = MPI.Probe(0, thread, comm)
-            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-            ij_index = recv_mesg[1]
-            unlock(mutex_mpi_worker)
-
-            while ij_index >= 1
-                do_three_center_integral_batch!(three_center_integrals,
-                ij_index,
-                batch_size,
-                cartesian_indices,
-                jeri_engine_thread[thread],
-                thead_integral_buffer[thread], basis_sets)
-                ij_index = get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
-            end
-        end
+    threadid = Threads.threadid()
+    ij_index = ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
+    while ij_index >= 1
+        do_three_center_integral_batch!(three_center_integrals,
+        ij_index,
+        batch_size,
+        cartesian_indices,
+        jeri_engine_thread[threadid],
+        thead_integral_buffer[threadid], basis_sets)
+        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end
+
 
 @inline function do_three_center_integral_batch!(three_center_integrals,
     top_index,
