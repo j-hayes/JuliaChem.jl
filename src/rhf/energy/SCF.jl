@@ -6,6 +6,7 @@ using Printf
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using TensorOperations
+using CUDA
 
 const do_continue_print = false 
 const print_eri = false 
