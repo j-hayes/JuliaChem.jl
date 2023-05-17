@@ -142,7 +142,7 @@ function run_three_center_integrals_worker(three_center_integrals,
         cartesian_indices,
         jeri_engine_thread[threadid],
         thead_integral_buffer[threadid], basis_sets)
-        ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size, ijk_index)
+        ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end
 

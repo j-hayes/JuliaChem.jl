@@ -23,27 +23,26 @@ more_work_tag = 100
     end
 end
 
-function get_next_task(index_lock, top_index, batch_size, current_index)
-    lock(index_lock) do 
-        comm = MPI.COMM_WORLD
-        rank = MPI.Comm_rank(comm)
-        new_index = 0
-        if rank == 0
-            new_index = top_index[1]
-            top_index[1] -= batch_size + 1
-        else
-            send_mesg = [MPI.Comm_rank(comm), Threads.threadid(), current_index]
-            MPI.Send(send_mesg, 0, more_work_tag, comm)
-            recv_mesg = [0]
-            MPI.Recv!(recv_mesg, 0, Threads.threadid(), comm)
-            if recv_mesg[1] < 1
-                println("recieved end message for rank: $(send_mesg[1]) thread: $(send_mesg[2])")
-            end
-            new_index = recv_mesg[1]
-
-        end
-        return new_index
+@inline function get_next_task(mutex_mpi_worker, top_index, batch_size)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    new_index = 0
+    if rank == 0
+        lock(mutex_mpi_worker)
+        new_index = top_index[1]
+        top_index[1] -= batch_size + 1
+        unlock(mutex_mpi_worker)
+    else
+        lock(mutex_mpi_worker)
+        send_mesg = [MPI.Comm_rank(comm), Threads.threadid()]
+        MPI.Send(send_mesg, 0, more_work_tag, comm)
+        recv_mesg = [0]
+        MPI.Recv!(recv_mesg, 0, Threads.threadid(), comm)
+        new_index = recv_mesg[1]
+        unlock(mutex_mpi_worker)
     end
+
+    return new_index
 end
 
 function cleanup_messages()

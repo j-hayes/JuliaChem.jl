@@ -155,7 +155,7 @@ function run_two_center_integrals_worker(two_center_integrals,
         cartesian_indices,
         jeri_engine_thread[threadid],
         thead_integral_buffer[threadid], basis_sets)
-        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size, ij_index)
+        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end
 
