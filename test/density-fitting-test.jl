@@ -17,35 +17,21 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
   try 
     JuliaChem.initialize() 
     #first runs not timed
-    comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
 
-    df_scf_results, density_fitted_properties = full_rhf("./example_inputs/density_fitting/water_density_fitted.json") #run small calc
-    MPI.Barrier(comm)
-
-    ismessage = true
-    
-    recv_mesg = [0]
-        if rank == 0
-        recv_mesg = [0,0,0]    
-    end
-    while ismessage
-        ismessage, status = MPI.Iprobe(-2, -1, comm)
-        if ismessage
-            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
-            println("after run complete outstanding message to $rank from rank: $(status.source) thread: $(status.tag) msg $(recv_mesg)")
-        end
-    end
-    MPI.Barrier(comm)
     # scf_results, properties = full_rhf("./example_inputs/density_fitting/water_rhf.json")      
+    
 
-    println("RUN 2 DF-RHF")
-    DF_time = @elapsed begin @time begin 
+    for i in 1:3
+      println("RUN $i")
+      df_scf_results, density_fitted_properties = full_rhf("./example_inputs/density_fitting/water_density_fitted.json") #run small calc
       df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
-    end end
-    # RHF_time = @elapsed begin @time begin 
-    #   scf_results, properties = full_rhf(input_file)      
-    # end end
+      # DF_time = @elapsed begin @time begin 
+      # end end
+      # RHF_time = @elapsed begin @time begin 
+      #   scf_results, properties = full_rhf(input_file)      
+      # end end
+    end
+    
 
     # println("done iwth runs")
     # flush(stdout)

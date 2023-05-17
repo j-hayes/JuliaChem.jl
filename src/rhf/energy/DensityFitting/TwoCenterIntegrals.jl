@@ -11,7 +11,7 @@ using JuliaChem.Shared
     two_center_integrals = zeros(Float64, aux_basis_function_count, aux_basis_function_count)
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
     cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
-
+    n_ranks = MPI.Comm_size(comm)
 
     max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     n_threads = Threads.nthreads()
@@ -22,18 +22,14 @@ using JuliaChem.Shared
     elseif scf_options.load == "static"
         calculate_two_center_integrals_static!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     elseif scf_options.load == "dynamic"
-        println("doing dynamic load two center integrals")
         run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
-    println("before two center integral barrier rank = $(MPI.Comm_rank(comm))")
-    MPI.Barrier(comm)    
-    println("inside two center integral barrier rank = $(MPI.Comm_rank(comm))")
 
+    MPI.Barrier(comm)    
     MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
     MPI.Barrier(comm)   
-    println("after two center integral barrier rank = $(MPI.Comm_rank(comm))")
 
     return two_center_integrals
 end
@@ -111,11 +107,9 @@ end
     batch_size = size(cartesian_indices, 1)
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    task_top_index = [get_top_task_index(n_indicies ,batch_size, n_ranks, n_threads)]
 
     ## all threads get pre determined first index to process
-    println("two top index $(task_top_index[1])")
-    flush(stdout)
+    task_top_index = [get_top_task_index(n_indicies ,batch_size, n_ranks, n_threads)]
 
     mutex_mpi_worker = Base.Threads.ReentrantLock()
     @sync for thread in 1:Threads.nthreads()
@@ -132,24 +126,9 @@ end
             end
         end
     end
-    println("done with two center integrals")
-    flush(stdout)
 
+    cleanup_messages()
 
-    #clean up any outstanding requests for work
-    ismessage = true
-    recv_mesg = [0]
-        if rank == 0
-        recv_mesg = [0,0,0]    
-    end
-    while ismessage
-        ismessage, status = MPI.Iprobe(-2, -1, comm)
-        if ismessage
-            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
-        end
-    end
-    println("done with two center integrals messages")
-    flush(stdout)
 
 end
 

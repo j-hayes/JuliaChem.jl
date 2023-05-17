@@ -573,7 +573,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     timings.iteration_times["$iter"] = iteration_end - iteration_start
     if MPI.Comm_rank(comm) == 0 && output >= 2
       #println(iter,"     ", E,"     ", ΔE,"     ", D_rms)
-      @printf("%d      %.10f      %.10f      %.10f      %.10f iter\n", iter, E, ΔE, D_rms,  timings.iteration_times["$iter"])
+      @printf("%d      %.10f      %.10f      %.10f      %.10f \n", iter, E, ΔE, D_rms,  timings.iteration_times["$iter"])
     end
     
     if maximum_iterations_exceeded(iter, scf_options)
@@ -780,7 +780,6 @@ end
   @sync for thread_number in 1:n_threads
     Threads.@spawn begin       
       threadid = Threads.threadid()
-      println("starting rank $rank thread $threadid iter $iter")
       if rank == 0 && Threads.threadid() == 1 && n_ranks > 1
         # println("threadid $threadid on rank $rank is coordinator")
 
@@ -799,27 +798,23 @@ end
         schwarz_bounds, Dsh,
         cutoff, debug, mutex_mpi_worker)
       end # end if rank == 0 else
-      println("done on rank $rank thread $threadid")
 
     end  # end threads
   end # end sync
   #== reduce into Fock matrix ==#
   MPI.Barrier(comm)
-  keep_checking = true
-  while keep_checking
-    msg = MPI.Iprobe(-2,-1,comm)
-    if msg[1]
+  ismessage = true
+  while ismessage
+    ismessage, status = MPI.Iprobe(-2,-1,comm)
+    if ismessage
       recv_mesg = [0]
-      println("there is an outstanding message from $(msg[2].source) with tag $(msg[2].tag))")
-      if msg[2].source == 0
+      if status.source == 0
         recv_mesg = [0]
       else  
         recv_mesg = [0,0]
       end     
-      MPI.Recv!(recv_mesg, msg[2].source, msg[2].tag, comm)
-      println("received message from $(msg[2].source) with tag $(msg[2].tag) with message $(recv_mesg)")
+      MPI.Recv!(recv_mesg, status.source, status.tag, comm)
     end
-    keep_checking = msg[1]
   end
    
   for ithread_fock in F_thread 
@@ -842,9 +837,7 @@ end
   F_priv = F_thread[threadid] 
 
   #== execute kernel ==#       
-  # println("ask for first index on rank $rank thread $threadid")
   ijkl_index = get_next_index_scf(task, batch_size, mutex_mpi_worker)
-  # println("rank $rank: Thread $threadid received task $ijkl_index for first index")
   while ijkl_index >= 1 
     for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))
       fock_build_thread_kernel(F_priv, D,
@@ -854,9 +847,6 @@ end
         cutoff, debug)
     end
     ijkl_index = get_next_index_scf(task, batch_size, mutex_mpi_worker)
-    if ijkl_index < 1
-      println("rank $rank: Thread $threadid received task $ijkl_index and is done")      
-    end
   end
 end
 
@@ -879,7 +869,6 @@ end
     end
   end 
   
-  # println("sent request for next task to rank $(status.source) thread: $(recv_mesg[2])", )
 end
 
 @inline function get_next_index_scf(task, batch_size ,mutex_mpi_worker)
@@ -889,11 +878,9 @@ end
     rank = MPI.Comm_rank(comm)
     threadid = Threads.threadid()
     if rank == 0
-      # println("on rank $rank Thread $threadid requesting grabbing next task")
       next_index = task[1]
       task[1] -= batch_size
       return next_index
-      # println("on rank $rank Thread $threadid grabbed task $next_index")
     else
         send_mesg = [MPI.Comm_rank(comm), Threads.threadid()]
         MPI.Send(send_mesg, 0, get_next_index_tag, comm)

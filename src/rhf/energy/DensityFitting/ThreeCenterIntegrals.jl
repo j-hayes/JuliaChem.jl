@@ -26,19 +26,14 @@ using JuliaChem.Shared
     elseif scf_options.load == "static"
         calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     elseif scf_options.load == "dynamic"
-        println("doing three center integrals with dynamic load balancing")
         calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
 
-    println("before three center integral barrier rank = $(MPI.Comm_rank(comm))")
     MPI.Barrier(comm)    
-    println("inside three center integral barrier rank = $(MPI.Comm_rank(comm))")
-
     MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
     MPI.Barrier(comm)   
-    println("after three center integral barrier rank = $(MPI.Comm_rank(comm))")
 
     return three_center_integrals
 end
@@ -108,8 +103,6 @@ end
     task_top_index = [get_top_task_index(n_indicies, batch_size, n_ranks, n_threads)]
 
     mutex_mpi_worker = Base.Threads.ReentrantLock()
-    println("three top index $(task_top_index[1])")
-    flush(stdout)
 
     @sync for thread in 1:Threads.nthreads()
         Threads.@spawn begin
@@ -125,28 +118,7 @@ end
             end
         end
     end
-
-    println("done with three center integrals")
-    flush(stdout)
-
-
-    #clean up any outstanding requests for work
-    ismessage = true
-    recv_mesg = [0]
-        if rank == 0
-        recv_mesg = [0,0,0]    
-    end
-    while ismessage
-        ismessage, status = MPI.Iprobe(-2, -1, comm)
-        if ismessage
-            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
-            println("outstanding message to $rank from rank: $(status.source) thread: $(status.tag) msg $(recv_mesg)")
-        end
-    end
-
-    println("done with three center integrals messages")
-    flush(stdout)
-
+    cleanup_messages()
 end
 
 

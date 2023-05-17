@@ -46,6 +46,27 @@ function get_next_task(index_lock, top_index, batch_size, current_index)
     end
 end
 
+function cleanup_messages()
+    comm = MPI.COMM_WORLD
+    n_ranks = MPI.Comm_size(comm)
+    if n_ranks == 1
+        return 
+    end
+    #clean up any outstanding requests for work
+    ismessage = true
+    recv_mesg = [0]
+        if rank == 0
+        recv_mesg = [0,0,0]    
+    end
+    while ismessage
+        ismessage, status = MPI.Iprobe(-2, -1, comm)
+        if ismessage
+            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
+        end
+    end
+end
+
+
 function get_worker_thread_number(threadid, rank, n_threads, n_ranks)
     worker_thread_number = 0                
     if n_ranks > 1
