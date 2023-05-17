@@ -27,9 +27,14 @@ using JuliaChem.Shared
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
-    MPI.Barrier(comm)
-    MPI.Allreduce!(two_center_integrals, MPI.SUM, MPI.COMM_WORLD)
-    MPI.Barrier(comm)
+    println("before two center integral barrier rank = $(MPI.Comm_rank(comm))")
+    MPI.Barrier(comm)    
+    println("inside two center integral barrier rank = $(MPI.Comm_rank(comm))")
+
+    MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
+    MPI.Barrier(comm)   
+    println("after two center integral barrier rank = $(MPI.Comm_rank(comm))")
+
     return two_center_integrals
 end
 
@@ -102,13 +107,17 @@ end
 @inline function run_two_center_integrals_dynamic!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
-    n_pairs = length(cartesian_indices)
+    n_indicies = length(cartesian_indices)
     batch_size = size(cartesian_indices, 1)
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    task_top_index = [n_pairs]
-    mutex_mpi_worker = Base.Threads.ReentrantLock()
+    task_top_index = [get_top_task_index(n_indicies ,batch_size, n_ranks, n_threads)]
 
+    ## all threads get pre determined first index to process
+    println("two top index $(task_top_index[1])")
+    flush(stdout)
+
+    mutex_mpi_worker = Base.Threads.ReentrantLock()
     @sync for thread in 1:Threads.nthreads()
         Threads.@spawn begin
             threadid = Threads.threadid()
@@ -119,44 +128,57 @@ end
                     cartesian_indices,
                     batch_size,
                     jeri_engine_thread,
-                    thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker)
+                    thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies)
             end
         end
     end
+    println("done with two center integrals")
+    flush(stdout)
+
+
+    #clean up any outstanding requests for work
+    ismessage = true
+    recv_mesg = [0]
+        if rank == 0
+        recv_mesg = [0,0,0]    
+    end
+    while ismessage
+        ismessage, status = MPI.Iprobe(-2, -1, comm)
+        if ismessage
+            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
+        end
+    end
+    println("done with two center integrals messages")
+    flush(stdout)
+
 end
 
 
 
-@inline function run_two_center_integrals_worker(two_center_integrals,
+function run_two_center_integrals_worker(two_center_integrals,
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker)
-    
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies)
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
     threadid = Threads.threadid()
-    ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
-    while ij_index >= 1
+    n_threads = Threads.nthreads()
+    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+
+   
+    worker_thread_number = get_worker_thread_number(threadid, rank, n_threads, n_ranks)
+    ij_index = get_first_task(n_indicies, batch_size, worker_thread_number)
+    
+    while ij_index > 0
         do_two_center_integral_batch(two_center_integrals,
         ij_index,
         batch_size,
         cartesian_indices,
         jeri_engine_thread[threadid],
         thead_integral_buffer[threadid], basis_sets)
-        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
+        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size, ij_index)
     end
 end
-
-
-# function get_next_batch(mutex_mpi_worker, send_mesg, recv_mesg, comm, thread)
-#     lock(mutex_mpi_worker)
-#         send_mesg = [ 0 , MPI.Comm_rank(comm), thread ]   
-#         status = MPI.Isend(send_mesg, 0, 0, comm)
-#         status = MPI.Probe(0, thread, comm)
-#         rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-#         ij_index = recv_mesg[1]
-#     unlock(mutex_mpi_worker)
-#     return ij_index
-# end
 
 @inline function do_two_center_integral_batch(two_center_integrals,
     top_index,

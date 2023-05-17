@@ -32,9 +32,13 @@ using JuliaChem.Shared
         error("integral threading load type: $(scf_options.load) not supported")
     end
 
-    MPI.Barrier(comm)     
+    println("before three center integral barrier rank = $(MPI.Comm_rank(comm))")
+    MPI.Barrier(comm)    
+    println("inside three center integral barrier rank = $(MPI.Comm_rank(comm))")
+
     MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
     MPI.Barrier(comm)   
+    println("after three center integral barrier rank = $(MPI.Comm_rank(comm))")
 
     return three_center_integrals
 end
@@ -95,12 +99,17 @@ end
     jeri_engine_thread, basis_sets, thead_integral_buffer)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
-    n_pairs = length(cartesian_indices)
+    n_indicies = length(cartesian_indices)
     batch_size = size(cartesian_indices, 1)
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    task_top_index = [n_pairs]
+
+    # all threads get pre determined first index to process this is the next lowest index for processing
+    task_top_index = [get_top_task_index(n_indicies, batch_size, n_ranks, n_threads)]
+
     mutex_mpi_worker = Base.Threads.ReentrantLock()
+    println("three top index $(task_top_index[1])")
+    flush(stdout)
 
     @sync for thread in 1:Threads.nthreads()
         Threads.@spawn begin
@@ -112,29 +121,56 @@ end
                 cartesian_indices,
                 batch_size,
                 jeri_engine_thread,
-                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker)
+                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies)
             end
         end
     end
+
+    println("done with three center integrals")
+    flush(stdout)
+
+
+    #clean up any outstanding requests for work
+    ismessage = true
+    recv_mesg = [0]
+        if rank == 0
+        recv_mesg = [0,0,0]    
+    end
+    while ismessage
+        ismessage, status = MPI.Iprobe(-2, -1, comm)
+        if ismessage
+            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
+            println("outstanding message to $rank from rank: $(status.source) thread: $(status.tag) msg $(recv_mesg)")
+        end
+    end
+
+    println("done with three center integrals messages")
+    flush(stdout)
+
 end
 
 
-@inline function run_three_center_integrals_worker(three_center_integrals,
+function run_three_center_integrals_worker(three_center_integrals,
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker)
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies)
 
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
+    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+    n_threads = Threads.nthreads()
     threadid = Threads.threadid()
-    ij_index = ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
-    while ij_index >= 1
+    worker_thread_number = get_worker_thread_number(threadid, rank, n_threads, n_ranks)
+    ijk_index = get_first_task(n_indicies, batch_size, worker_thread_number)
+    
+    while ijk_index > 0
         do_three_center_integral_batch!(three_center_integrals,
-        ij_index,
+        ijk_index,
         batch_size,
         cartesian_indices,
         jeri_engine_thread[threadid],
         thead_integral_buffer[threadid], basis_sets)
-        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
+        ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size, ijk_index)
     end
 end
 

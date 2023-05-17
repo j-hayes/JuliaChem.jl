@@ -9,6 +9,7 @@ using TensorOperations
 
 const do_continue_print = false 
 const print_eri = false 
+const get_next_index_tag = 1111
 
 function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
@@ -572,7 +573,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     timings.iteration_times["$iter"] = iteration_end - iteration_start
     if MPI.Comm_rank(comm) == 0 && output >= 2
       #println(iter,"     ", E,"     ", ΔE,"     ", D_rms)
-      @printf("%d      %.10f      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms,  timings.iteration_times["$iter"])
+      @printf("%d      %.10f      %.10f      %.10f      %.10f iter\n", iter, E, ΔE, D_rms,  timings.iteration_times["$iter"])
     end
     
     if maximum_iterations_exceeded(iter, scf_options)
@@ -688,10 +689,9 @@ H = One-electron Hamiltonian Matrix
 
   nsh = length(basis)
   nindices = (muladd(nsh,nsh,nsh)*(muladd(nsh,nsh,nsh) + 2)) >> 3
-  
+  n_threads = Threads.nthreads()
   batches_per_thread = nsh 
-  batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)*
-    Threads.nthreads()*batches_per_thread))
+  batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)* n_threads*batches_per_thread))
 
   #== sequential method is here for debugging, not reccomended for actual calculations ==#
   if load == "sequential"
@@ -717,7 +717,7 @@ H = One-electron Hamiltonian Matrix
     #== reduce into Fock matrix ==#    
     axpy!(1.0, F_thread[1], F) 
   #== use static task distribution for multirank runs if selected... ==#
-  elseif MPI.Comm_size(comm) == 1  || load == "static"
+  elseif load == "static" || (MPI.Comm_size(comm) == 1 && n_threads == 1)
     #== set up initial indices ==#                                              
     stride = MPI.Comm_size(comm)*batch_size                                       
     top_index = nindices - (MPI.Comm_rank(comm)*batch_size)
@@ -751,105 +751,9 @@ H = One-electron Hamiltonian Matrix
     end
  
   #== ..else use dynamic task distribution ==# 
-  elseif MPI.Comm_size(comm) > 1 && load == "dynamic"
-    #== master rank ==#
-    if MPI.Comm_rank(comm) == 0 
-      #== send out initial tasks to slaves ==#
-      task = [ nindices ]
-      initial_task = 1
-  
-      recv_mesg_master = [ 0 ]
-     
-      #println("Start sending out initial tasks") 
-      while initial_task < MPI.Comm_size(comm)
-        for thread in 1:Threads.nthreads()
-          #println("Sending task $task to rank $initial_task")
-          sreq = MPI.Isend(task, initial_task, thread, comm)
-          #println("Task $task sent to rank $initial_task") 
-        
-          task[1] -= batch_size 
-        end
-        initial_task += 1
-      end
-      #println("Done sending out intiial tasks") 
-
-      #== hand out quartets to slaves dynamically ==#
-      #println("Start sending out rest of tasks") 
-      while task[1] > 0 
-        status = MPI.Probe(-2, -1, comm) 
-        #rreq = MPI.Recv!(recv_mesg_master, status.source, status.tag, 
-        #  comm)  
-        #println("Sending task $task to rank ", status.source)
-        sreq = MPI.Isend(task, status.source, status.tag, comm)  
-        #println("Task $task sent to rank ", status.source)
-        task[1] -= batch_size 
-      end
-      #println("Done sending out rest of tasks") 
-     
-      #== hand out ending signals once done ==#
-      #println("Start sending out enders") 
-      for rank in 1:(MPI.Comm_size(comm)-1)
-        for thread in 1:Threads.nthreads()
-          sreq = MPI.Isend([ -1 ], rank, thread, comm)                           
-        end
-      end      
-      #println("Done sending out enders") 
-    #== worker ranks perform actual computations on quartets ==#
-    elseif MPI.Comm_rank(comm) > 0
-      #== create needed mutices ==#
-      mutex_mpi_worker = Base.Threads.ReentrantLock()
-     
-      #== execute kernel ==# 
-      @sync for thread in 1:Threads.nthreads()
-        Threads.@spawn begin 
-          #== initial set up ==#
-          recv_mesg = [ 0 ] 
-          send_mesg = [ MPI.Comm_rank(comm) ] 
- 
-          eri_quartet_batch_priv = eri_quartet_batch_thread[thread] 
-          jeri_tei_engine_priv = jeri_engine_thread[thread] 
-          F_priv = F_thread[thread] 
-          
-          #== complete first task ==#
-          lock(mutex_mpi_worker)
-            status = MPI.Probe(0, $thread, comm)
-            rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-            ijkl_index = recv_mesg[1]
-          unlock(mutex_mpi_worker)
-          
-          for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))
-            fock_build_thread_kernel(F_priv, D,
-              H, basis_sets, eri_quartet_batch_priv, #mutex,
-              ijkl, jeri_tei_engine_priv,
-              schwarz_bounds, Dsh,
-              cutoff, debug)
-          end
-  
-          #== complete rest of tasks ==#
-          while ijkl_index >= 1 
-            lock(mutex_mpi_worker)
-              status = MPI.Sendrecv!(send_mesg, 0, $thread, recv_mesg, 0, 
-                $thread, comm)
-              ijkl_index = recv_mesg[1]
-            unlock(mutex_mpi_worker)
-            #println("Thread $thread ecieved task $ijkl_index from master")
-
-            for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))
-              fock_build_thread_kernel(F_priv, D,
-                H, basis_sets, eri_quartet_batch_priv, #mutex,
-               ijkl, jeri_tei_engine_priv,
-               schwarz_bounds, Dsh,
-               cutoff, debug)
-            end
-          end
-        end
-      end
-
-      #== reduce into Fock matrix ==#
-      for ithread_fock in F_thread 
-        axpy!(1.0, ithread_fock, F)
-      end
-    end
+  elseif load == "dynamic"
+    do_dynamic_load_scf(F, nindices, batch_size, D, H, eri_quartet_batch_thread, jeri_engine_thread, 
+    F_thread, basis_sets, schwarz_bounds, Dsh, cutoff, debug, iter)
   end
   MPI.Barrier(comm)
 
@@ -861,6 +765,143 @@ H = One-electron Hamiltonian Matrix
   end
 
   return F
+end
+
+@inline function do_dynamic_load_scf(F, nindices, batch_size, D, H, eri_quartet_batch_thread, jeri_engine_thread, 
+    F_thread, basis_sets, schwarz_bounds, Dsh, cutoff, debug, iter)
+
+  comm = MPI.COMM_WORLD
+  task = [ nindices ]
+  rank = MPI.Comm_rank(comm)
+  n_ranks = MPI.Comm_size(comm)
+  n_threads = Threads.nthreads()
+  #== create needed mutex ==#
+  mutex_mpi_worker = Base.Threads.ReentrantLock()
+  @sync for thread_number in 1:n_threads
+    Threads.@spawn begin       
+      threadid = Threads.threadid()
+      println("starting rank $rank thread $threadid iter $iter")
+      if rank == 0 && Threads.threadid() == 1 && n_ranks > 1
+        # println("threadid $threadid on rank $rank is coordinator")
+
+        #== coordinator rank ==#
+        #== hand out quartets to workers dynamically ==#
+
+        send_indicies_dynamic(task, batch_size, mutex_mpi_worker)
+                  
+      else #== worker ranks perform actual computations on quartets ==#
+        # println("rank $rank: threadid $threadid is a worker")
+
+
+        do_dynamic_worker(task, batch_size, F_thread, D,
+        H, basis_sets, eri_quartet_batch_thread,
+        jeri_engine_thread,
+        schwarz_bounds, Dsh,
+        cutoff, debug, mutex_mpi_worker)
+      end # end if rank == 0 else
+      println("done on rank $rank thread $threadid")
+
+    end  # end threads
+  end # end sync
+  #== reduce into Fock matrix ==#
+  MPI.Barrier(comm)
+  keep_checking = true
+  while keep_checking
+    msg = MPI.Iprobe(-2,-1,comm)
+    if msg[1]
+      recv_mesg = [0]
+      println("there is an outstanding message from $(msg[2].source) with tag $(msg[2].tag))")
+      if msg[2].source == 0
+        recv_mesg = [0]
+      else  
+        recv_mesg = [0,0]
+      end     
+      MPI.Recv!(recv_mesg, msg[2].source, msg[2].tag, comm)
+      println("received message from $(msg[2].source) with tag $(msg[2].tag) with message $(recv_mesg)")
+    end
+    keep_checking = msg[1]
+  end
+   
+  for ithread_fock in F_thread 
+    axpy!(1.0, ithread_fock, F)
+  end
+end
+
+@inline function do_dynamic_worker(task, batch_size, F_thread, D,
+  H, basis_sets, eri_quartet_batch_thread,
+  jeri_engine_thread,
+  schwarz_bounds, Dsh,
+  cutoff, debug, mutex_mpi_worker)
+  
+  comm = MPI.COMM_WORLD
+  rank = MPI.Comm_rank(comm)
+  threadid = Threads.threadid()
+
+  eri_quartet_batch_priv = eri_quartet_batch_thread[threadid] 
+  jeri_tei_engine_priv = jeri_engine_thread[threadid] 
+  F_priv = F_thread[threadid] 
+
+  #== execute kernel ==#       
+  # println("ask for first index on rank $rank thread $threadid")
+  ijkl_index = get_next_index_scf(task, batch_size, mutex_mpi_worker)
+  # println("rank $rank: Thread $threadid received task $ijkl_index for first index")
+  while ijkl_index >= 1 
+    for ijkl in ijkl_index:-1:(max(1,ijkl_index-batch_size+1))
+      fock_build_thread_kernel(F_priv, D,
+        H, basis_sets, eri_quartet_batch_priv,
+        ijkl, jeri_tei_engine_priv,
+        schwarz_bounds, Dsh,
+        cutoff, debug)
+    end
+    ijkl_index = get_next_index_scf(task, batch_size, mutex_mpi_worker)
+    if ijkl_index < 1
+      println("rank $rank: Thread $threadid received task $ijkl_index and is done")      
+    end
+  end
+end
+
+@inline function send_indicies_dynamic(task, batch_size, mutex_mpi_worker)
+  # println("in send_next_index")
+  comm = MPI.COMM_WORLD
+  while task[1] > 0 
+    recv_mesg = [0,0]
+    status = MPI.Probe(-2, get_next_index_tag, comm) 
+    rreq = MPI.Recv!(recv_mesg, status.source, get_next_index_tag, comm)  
+    index = get_next_index_scf(task, batch_size, mutex_mpi_worker)
+    if index > 0
+      sreq = MPI.Isend([index], recv_mesg[1], recv_mesg[2], comm)  
+    end
+  end
+  #== hand out ending signals once done ==#
+  for rank in 1:(MPI.Comm_size(comm)-1)
+    for thread in 1:Threads.nthreads()
+      sreq = MPI.Isend([ -1 ], rank, thread, comm)                           
+    end
+  end 
+  
+  # println("sent request for next task to rank $(status.source) thread: $(recv_mesg[2])", )
+end
+
+@inline function get_next_index_scf(task, batch_size ,mutex_mpi_worker)
+  lock(mutex_mpi_worker) do 
+    comm = MPI.COMM_WORLD
+    next_index = 0
+    rank = MPI.Comm_rank(comm)
+    threadid = Threads.threadid()
+    if rank == 0
+      # println("on rank $rank Thread $threadid requesting grabbing next task")
+      next_index = task[1]
+      task[1] -= batch_size
+      return next_index
+      # println("on rank $rank Thread $threadid grabbed task $next_index")
+    else
+        send_mesg = [MPI.Comm_rank(comm), Threads.threadid()]
+        MPI.Send(send_mesg, 0, get_next_index_tag, comm)
+        recv_mesg = [0]
+        MPI.Recv!(recv_mesg, 0, Threads.threadid(), comm)
+        return recv_mesg[1]
+    end
+  end
 end
 
 @inline function fock_build_thread_kernel(F::Matrix{Float64}, D::Matrix{Float64},
