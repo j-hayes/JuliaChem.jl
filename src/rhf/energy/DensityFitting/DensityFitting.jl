@@ -44,7 +44,6 @@ end
     J_AB_invt = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).L))
     cu_J_AB_invt =  CUDA.CuArray{Float64}(undef, (scf_data.A, scf_data.A))
 
-    println("integrals copy to GPU")
     copyto!(cu_three_center_integrals, three_center_integrals)
     copyto!(cu_J_AB_invt, J_AB_invt)    
     @tensor scf_data.D[μ, ν, A] = cu_three_center_integrals[μ, ν, BB] * cu_J_AB_invt[A,BB]
