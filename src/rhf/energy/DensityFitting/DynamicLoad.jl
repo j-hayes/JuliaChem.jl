@@ -24,28 +24,30 @@ more_work_tag = 100
 end
 
 @inline function get_next_task(mutex_mpi_worker, top_index, batch_size)
-    comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    new_index = 0
-    if rank == 0
-        lock(mutex_mpi_worker)
-        new_index = top_index[1]
-        top_index[1] -= batch_size + 1
-        unlock(mutex_mpi_worker)
-    else
-        lock(mutex_mpi_worker)
-        send_mesg = [MPI.Comm_rank(comm), Threads.threadid()]
-        MPI.Send(send_mesg, 0, more_work_tag, comm)
-        recv_mesg = [0]
-        MPI.Recv!(recv_mesg, 0, Threads.threadid(), comm)
-        new_index = recv_mesg[1]
-        unlock(mutex_mpi_worker)
-    end
+    lock(mutex_mpi_worker) do 
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        new_index = 0
+        if rank == 0
+            # lock(mutex_mpi_worker)
+            new_index = top_index[1]
+            top_index[1] -= batch_size + 1
+            # unlock(mutex_mpi_worker)
+        else
+            # lock(mutex_mpi_worker)
+            send_mesg = [MPI.Comm_rank(comm), Threads.threadid()]
+            MPI.Send(send_mesg, 0, more_work_tag, comm)
+            recv_mesg = [0]
+            MPI.Recv!(recv_mesg, 0, Threads.threadid(), comm)
+            new_index = recv_mesg[1]
+            # unlock(mutex_mpi_worker)
+        end
 
-    return new_index
+        return new_index
+    end
 end
 
-function cleanup_messages()
+@inline function cleanup_messages()
     comm = MPI.COMM_WORLD
     n_ranks = MPI.Comm_size(comm)
     if n_ranks == 1
@@ -66,21 +68,19 @@ function cleanup_messages()
 end
 
 
-function get_worker_thread_number(threadid, rank, n_threads, n_ranks)
-    worker_thread_number = 0                
+@inline function get_worker_thread_number(threadid, rank, n_threads, n_ranks)
+    worker_thread_number =threadid - 1               
     if n_ranks > 1
-        worker_thread_number = threadid + (rank*n_threads-2)                
-    else
-        worker_thread_number = threadid + (rank*n_threads-1)    
-    end   
+        worker_thread_number += rank*n_threads - 1                
+    end  
     return worker_thread_number
 end
 
-function get_first_task(n_indicies, batch_size, worker_thread_number)
+@inline function get_first_task(n_indicies, batch_size, worker_thread_number)
     return n_indicies - (batch_size*worker_thread_number) - worker_thread_number
 end
 
-function get_top_task_index(n_indicies ,batch_size, n_ranks, n_threads)
+@inline function get_top_task_index(n_indicies ,batch_size, n_ranks, n_threads)
     task_top_index = n_indicies
     for r in 0:n_ranks-1 
         for t in 1:n_threads

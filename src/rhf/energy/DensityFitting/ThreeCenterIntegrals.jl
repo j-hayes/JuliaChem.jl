@@ -114,7 +114,7 @@ end
                 cartesian_indices,
                 batch_size,
                 jeri_engine_thread,
-                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies)
+                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies, thread)
             end
         end
     end
@@ -126,22 +126,26 @@ function run_three_center_integrals_worker(three_center_integrals,
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies)
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread)
 
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
     n_threads = Threads.nthreads()
-    threadid = Threads.threadid()
-    worker_thread_number = get_worker_thread_number(threadid, rank, n_threads, n_ranks)
-    ijk_index = get_first_task(n_indicies, batch_size, worker_thread_number)
-    
+    n_ranks = MPI.Comm_size(comm)
+   
+    lock(mutex_mpi_worker)
+        worker_thread_number = get_worker_thread_number(thread, rank, n_threads, n_ranks)
+        ijk_index = get_first_task(n_indicies, batch_size, worker_thread_number)
+    unlock(mutex_mpi_worker)
+
+
     while ijk_index > 0
         do_three_center_integral_batch!(three_center_integrals,
         ijk_index,
         batch_size,
         cartesian_indices,
-        jeri_engine_thread[threadid],
-        thead_integral_buffer[threadid], basis_sets)
+        jeri_engine_thread[thread],
+        thead_integral_buffer[thread], basis_sets)
         ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end

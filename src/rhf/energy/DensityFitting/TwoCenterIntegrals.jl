@@ -31,6 +31,7 @@ using JuliaChem.Shared
     MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
     MPI.Barrier(comm)   
 
+    
     return two_center_integrals
 end
 
@@ -114,15 +115,14 @@ end
     mutex_mpi_worker = Base.Threads.ReentrantLock()
     @sync for thread in 1:Threads.nthreads()
         Threads.@spawn begin
-            threadid = Threads.threadid()
-            if rank == 0 && threadid == 1 && n_ranks > 1
+            if rank == 0 && Threads.threadid() == 1 && n_ranks > 1
                 setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker)
             else
                 run_two_center_integrals_worker(two_center_integrals,
                     cartesian_indices,
                     batch_size,
                     jeri_engine_thread,
-                    thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies)
+                    thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies, thread)
             end
         end
     end
@@ -134,27 +134,30 @@ end
 
 
 
-function run_two_center_integrals_worker(two_center_integrals,
+@inline function run_two_center_integrals_worker(two_center_integrals,
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies)
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-    threadid = Threads.threadid()
-    n_threads = Threads.nthreads()
-    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread)
 
-   
-    worker_thread_number = get_worker_thread_number(threadid, rank, n_threads, n_ranks)
-    ij_index = get_first_task(n_indicies, batch_size, worker_thread_number)
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    n_threads = Threads.nthreads()
+    n_ranks = MPI.Comm_size(comm)
+
     
+    lock(mutex_mpi_worker)
+        worker_thread_number = get_worker_thread_number(thread, rank, n_threads, n_ranks)
+        ij_index = get_first_task(n_indicies, batch_size, worker_thread_number)
+    unlock(mutex_mpi_worker)
+
     while ij_index > 0
         do_two_center_integral_batch(two_center_integrals,
         ij_index,
         batch_size,
         cartesian_indices,
-        jeri_engine_thread[threadid],
-        thead_integral_buffer[threadid], basis_sets)
+        jeri_engine_thread[thread],
+        thead_integral_buffer[thread], basis_sets)
         ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end
