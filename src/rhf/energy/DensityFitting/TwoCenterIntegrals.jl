@@ -27,10 +27,11 @@ using JuliaChem.Shared
         error("integral threading load type: $(scf_options.load) not supported")
     end
 
-    MPI.Barrier(comm)    
-    MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
-    MPI.Barrier(comm)   
-
+    if n_ranks > 1
+        MPI.Barrier(comm)    
+        MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
+        MPI.Barrier(comm)   
+    end
     
     return two_center_integrals
 end

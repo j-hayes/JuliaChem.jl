@@ -16,6 +16,7 @@ using JuliaChem.Shared
     cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
     number_of_indices = length(cartesian_indices)
     n_threads = Threads.nthreads()
+    n_ranks = MPI.Comm_size(comm)
     batch_size = ceil(Int, number_of_indices / n_threads)
 
     max_primary_nbas = max_number_of_basis_functions(basis_sets.primary)
@@ -30,10 +31,12 @@ using JuliaChem.Shared
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+    if n_ranks > 1
+        MPI.Barrier(comm)    
+        MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
+        MPI.Barrier(comm)   
+    end
 
-    MPI.Barrier(comm)    
-    MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
-    MPI.Barrier(comm)   
 
     return three_center_integrals
 end

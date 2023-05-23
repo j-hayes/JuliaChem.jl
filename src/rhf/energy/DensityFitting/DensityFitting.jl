@@ -28,6 +28,14 @@ indices for all tensor contractions
     df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread, 
       basis_sets, occupied_orbital_coefficients, iteration, scf_options)
   end
+
+  comm = MPI.COMM_WORLD
+  if MPI.Comm_size(comm) > 1
+    MPI.Barrier(comm)
+    MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
+    MPI.Barrier(comm)
+  end
+  
 end
 
 @inline function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread::Vector{T},
@@ -84,9 +92,6 @@ end
   @tensor scf_data.D_tilde[ν,i,A] = scf_data.D[ν, μμ, A]*occupied_orbital_coefficients[μμ, i]
   @tensor scf_data.two_electron_fock[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
   
-  MPI.Barrier(comm)
-  MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
-  MPI.Barrier(comm)
 end
 
 @inline function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread::Vector{T},
@@ -103,9 +108,6 @@ end
   calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
   calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
 
-  MPI.Barrier(comm)
-  MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
-  MPI.Barrier(comm)
 end
 
 @inline function calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options::SCFOptions)
