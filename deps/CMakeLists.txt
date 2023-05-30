@@ -60,9 +60,18 @@ message("-- Found julia include directory at ${JULIA_INCLUDE_PATH}")
 #message("-- Found libint2.h at ${LIBINT_INCLUDE_PATH}")
 #message("-- Found libint2 library at ${LIBINT_LIB_PATH}")
 
+# Find JLCxx
+# find_package(JlCxx REQUIRED)
+# get_target_property(JlCxx_location JlCxx::cxxwrap_julia LOCATION)
+# get_filename_component(JlCxx_location ${JlCxx_location} DIRECTORY)
+# set(CMAKE_INSTALL_RPATH "$(CMAKE_INSTALL_PREFIX)/lib;$(JLCxx_location)")
+# message(STATUS "Found JlCxx at ${JlCxx_location}")
+
+
 #################################
 #   build and install library   # 
 #################################
+
 add_library(jeri SHARED src/jeri.cpp)
 target_link_libraries(jeri PUBLIC -lcxxwrap_julia -llibint2)
 

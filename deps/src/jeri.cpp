@@ -1,24 +1,34 @@
-#include "jeri-core.hpp"
-#include "jeri-oei.hpp"
-#include "jeri-prop.hpp"
-#include "jeri-tei.hpp"
-#include "jeri-df-tei.hpp"
+
+#include <jlcxx/jlcxx.hpp>
+#include <jlcxx/stl.hpp>
+
+#include "./jeri-core.hpp"
+#include "./jeri-oei.hpp"
+#include "./jeri-prop.hpp"
+#include "./jeri-tei.hpp"
+#include "./jeri-df-tei.hpp"
 
 JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
-  //-- initialize/finalize functions --//
+  // -- initialize/finalize functions --//
   mod.method("initialize", &initialize);
   mod.method("finalize", &finalize);
 
-  //-- atom information --//
-  mod.add_type<libint2::Atom>("Atom")
-    .method("create_atom", &create_atom);
-  jlcxx::stl::apply_stl<libint2::Atom>(mod);
-
-  //-- shell information --//
+  // //-- shell information --//
   mod.add_type<libint2::Shell>("Shell")
     .method("create_shell", &create_shell);
   jlcxx::stl::apply_stl<libint2::Shell>(mod);
 
+  // //-- atom information --//
+  mod.add_type<libint2::Atom>("Atom")
+    .method("create_atom", &create_atom);
+  jlcxx::stl::apply_stl<libint2::Atom>(mod);
+
+
+
+  // //-- shell pair information --//
+  mod.add_type<libint2::ShellPair>("ShellPair");
+  // jlcxx::stl::apply_stl<libint2::ShellPair>(mod);
+ 
   //-- basis set information --//
   mod.add_type<libint2::BasisSet>("BasisSet")
       .constructor<const std::vector<libint2::Atom> &,
@@ -26,13 +36,10 @@ JLCXX_MODULE define_jeri(jlcxx::Module& mod) {
                    .method("nbf", &libint2::BasisSet::nbf)
                    .method("shell2bf", &libint2::BasisSet::shell2bf);
 
-  //-- shell pair information --//
-  mod.add_type<libint2::ShellPair>("ShellPair");
-  jlcxx::stl::apply_stl<libint2::ShellPair>(mod);
   mod.method("precompute_shell_pair_data", &precompute_shell_pair_data);
- 
-  //-- oei engine information --//
-  //mod.add_type<libint2::Engine>("LibIntEngine");
+
+  // -- oei engine information --//
+  mod.add_type<libint2::Engine>("LibIntEngine");
   mod.add_type<OEIEngine>("OEIEngine")
     //.constructor<const std::vector<libint2::Atom>&, 
     //  const std::vector<std::vector<libint2::Shell> >& >()
