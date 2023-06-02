@@ -16,7 +16,6 @@
   },
   "keywords": {
     "scf":{
-      "scf_type":"df",
       "guess":"hcore", 
       "load":"dynamic",
       "contraction_mode":"default",
