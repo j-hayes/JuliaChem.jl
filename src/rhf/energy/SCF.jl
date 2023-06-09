@@ -793,7 +793,7 @@ end
         # println("rank $rank: threadid $threadid is a worker")
 
 
-        do_dynamic_worker(task, batch_size, F_thread, D,
+        do_dynamic_worker(task, thread_number, batch_size, F_thread, D,
         H, basis_sets, eri_quartet_batch_thread,
         jeri_engine_thread,
         schwarz_bounds, Dsh,
@@ -823,7 +823,7 @@ end
   end
 end
 
-@inline function do_dynamic_worker(task, batch_size, F_thread, D,
+@inline function do_dynamic_worker(task, threadid, batch_size, F_thread, D,
   H, basis_sets, eri_quartet_batch_thread,
   jeri_engine_thread,
   schwarz_bounds, Dsh,
@@ -831,7 +831,6 @@ end
   
   comm = MPI.COMM_WORLD
   rank = MPI.Comm_rank(comm)
-  threadid = Threads.threadid()
 
   eri_quartet_batch_priv = eri_quartet_batch_thread[threadid] 
   jeri_tei_engine_priv = jeri_engine_thread[threadid] 
