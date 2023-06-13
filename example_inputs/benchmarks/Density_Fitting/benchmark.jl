@@ -6,17 +6,7 @@ using MPI
 using Base.Threads
 
 function run_julia_chem(molecule, driver, model, keywords)
-  println("=======================================")
-  comm = MPI.COMM_WORLD
-  if MPI.Comm_rank(comm) == 0
-    println(" ")
-    println("Number of worker processes: ", MPI.Comm_size(comm))
-    println("Number of threads per process: ", Threads.nthreads())
-    println("Number of threads in total: ",
-    MPI.Comm_size(comm)*Threads.nthreads())
-  end
-  println("=======================================")
-
+  
   #== generate basis set ==#
   mol, basis = JuliaChem.JCBasis.run(molecule, model; output=0)          
 
@@ -25,13 +15,14 @@ function run_julia_chem(molecule, driver, model, keywords)
 
 
   #== perform scf calculation ==#
-  @time begin
-    start_time = time()
-    rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
-      output=0) 
-    end_time = time()
-    rhf_energy["Timings"].run_time = end_time - start_time
-  end 
+  start_time = time()
+  rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
+    output=0) 
+  end_time = time()
+  rhf_energy["Timings"].run_time = end_time - start_time
+  println("RHF Runtime: $(rhf_energy["Timings"].run_time) seconds")
+  println(rhf_energy["Timings"])
+  
   keywords["prop"] = Dict()
   keywords["prop"]["mo energies"] = true
   keywords["prop"]["mulliken"] = true
@@ -40,7 +31,8 @@ function run_julia_chem(molecule, driver, model, keywords)
   #== compute molecular properties ==# 
   rhf_properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, keywords["prop"],
     output=0)  
-  
+    
+  flush(stdout)
   return rhf_energy, rhf_properties, basis 
 end
 

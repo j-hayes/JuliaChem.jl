@@ -394,7 +394,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     #  resize!(eri_starts,length_eri_sizes)
 
     #  eri_sizes[:] = load("tei_batch.jld",
-  #      "Sizes/$quartet_batch_num_old")
+    #      "Sizes/$quartet_batch_num_old")
 
     #  @views eri_starts[:] = [1, [ sum(eri_sizes[1:i])+1 for i in 1:(length_eri_sizes-1)]... ]
       #eri_starts[:] = load("tei_batch.jld",
@@ -434,6 +434,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       Dsh[jsh, ish] = Dsh[ish, jsh] 
     end
   
+    fock_build_time = time()
     #== build new Fock matrix ==#
     if !do_density_fitting
       rfh_fock_build(workspace_a, workspace_b, F, 
@@ -442,7 +443,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       schwarz_bounds, Dsh,
       eri_quartet_batch_thread, 
       jeri_engine_thread, iter,
-      cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
+      cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul, timings)      
     else
 
       if iter == 1
@@ -477,14 +478,15 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
 
       MPI.Bcast!(C, 0, comm)
-      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
+      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options, timings)
       F .= H .+ scf_data.two_electron_fock
     end
-    
+    timings.named_times["fock_build_$iter"] = time() - fock_build_time
+
     if debug && MPI.Comm_rank(comm) == 0
       h5write("debug.h5","RHF/Iteration-$iter/F/Total", F)
     end
-
+    diis_time = time()
     #== do DIIS ==#
     if ndiis > 0
       BLAS.symm!('L', 'U', 1.0, F, D, 0.0, workspace_a)
@@ -516,7 +518,9 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         end
       end
     end
+    timings.named_times["DIIS_$iter"] = time() - diis_time
 
+    new_matrix_time = time()
     #== dynamic damping of Fock matrix ==#
     x = ΔE >= 1.0 ? 1.0/log(50,50*ΔE) : 1.0 
     LinearAlgebra.BLAS.axpby!(1.0-x, F_old, x, F)
@@ -585,6 +589,9 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
     #== if not converged, replace old D and E values for next iteration ==#
     E_old = E
+
+    timings.named_times["new_matrix_$iter"] = time() - new_matrix_time
+
   end
 
   #== build energy-weighted density matrix ==#
@@ -618,7 +625,7 @@ function rfh_fock_build(workspace_a, workspace_b, F,
   schwarz_bounds, Dsh,
   eri_quartet_batch_thread, 
   jeri_engine_thread, iter,
-  cutoff, debug, load, fdiff, ΔF, F_cumul)
+  cutoff, debug, load, fdiff, ΔF, F_cumul, timings)
 
   workspace_a .= run_rfh_fock_build_kernel(F, 
   F_thread, D, 
@@ -626,7 +633,7 @@ function rfh_fock_build(workspace_a, workspace_b, F,
   schwarz_bounds, Dsh,
   eri_quartet_batch_thread, 
   jeri_engine_thread, iter,
-  cutoff, debug, load)
+  cutoff, debug, load, timings)
 
   workspace_b .= MPI.Allreduce(workspace_a,MPI.SUM,MPI.COMM_WORLD)
   MPI.Barrier(MPI.COMM_WORLD)
@@ -676,7 +683,7 @@ H = One-electron Hamiltonian Matrix
   schwarz_bounds::Matrix{Float64}, Dsh::Matrix{Float64},
   eri_quartet_batch_thread::Vector{Vector{Float64}}, 
   jeri_engine_thread, iter::Int64,
-  cutoff::Float64, debug::Bool, load::String)
+  cutoff::Float64, debug::Bool, load::String, timings::JCTiming)
   basis = basis_sets.primary
 
   comm = MPI.COMM_WORLD
@@ -694,6 +701,7 @@ H = One-electron Hamiltonian Matrix
   batches_per_thread = nsh 
   batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)* n_threads*batches_per_thread))
 
+  integral_start_time = time()
   #== sequential method is here for debugging, not reccomended for actual calculations ==#
   if load == "sequential"
     #== set up initial indices ==#                                              
@@ -756,6 +764,8 @@ H = One-electron Hamiltonian Matrix
     do_dynamic_load_scf(F, nindices, batch_size, D, H, eri_quartet_batch_thread, jeri_engine_thread, 
     F_thread, basis_sets, schwarz_bounds, Dsh, cutoff, debug, iter)
   end
+  integral_end_time = time()
+  timings.named_times["integral_time_$iter"] = integral_end_time - integral_start_time
   MPI.Barrier(comm)
 
   for iorb in 1:basis.norb, jorb in 1:iorb
@@ -775,9 +785,12 @@ end
   task = [ nindices ]
   rank = MPI.Comm_rank(comm)
   n_ranks = MPI.Comm_size(comm)
-  n_threads = Threads.nthreads()
+  n_batches = nindices ÷ batch_size
+  n_threads = min(n_batches-1, Threads.nthreads())
+
   #== create needed mutex ==#
   mutex_mpi_worker = Base.Threads.ReentrantLock()
+
   @sync for thread_number in 1:n_threads
     Threads.@spawn begin       
       threadid = Threads.threadid()
@@ -802,9 +815,11 @@ end
 
     end  # end threads
   end # end sync
+
+
   #== reduce into Fock matrix ==#
   MPI.Barrier(comm)
-  ismessage = true
+  ismessage = true && n_ranks > 1
   while ismessage
     ismessage, status = MPI.Iprobe(-2,-1,comm)
     if ismessage

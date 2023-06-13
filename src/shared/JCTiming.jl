@@ -3,10 +3,11 @@ mutable struct JCTiming
     run_time :: Float64
     iteration_times :: Dict{String, Float64}
     density_fitting_iteration_range :: UnitRange{Int64}
+    named_times :: Dict{String, Float64}
 end
 
 function create_jctiming()
-    return JCTiming(0, Dict{String, Float64}(), 0:0)
+    return JCTiming(0, Dict{String, Float64}(), 0:0, Dict{String, Float64}())
 end
 
 function print_iteration_times(timings::JCTiming)
