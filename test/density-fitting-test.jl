@@ -16,21 +16,19 @@ include("../example_scripts/full-rhf-repl.jl")
 function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input_file)
   try 
     JuliaChem.initialize() 
-    #first runs not timed
 
-    # scf_results, properties = full_rhf("./example_inputs/density_fitting/water_rhf.json")      
+    #startup compilation runs
+    df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted.json"))
+    # scf_results, properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_rhf.json")) 
     
-
-    for i in 1:3
-      println("RUN $i")
-      df_scf_results, density_fitted_properties = full_rhf("./example_inputs/density_fitting/water_density_fitted.json") #run small calc
-      df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
-      # DF_time = @elapsed begin @time begin 
-      # end end
-      # RHF_time = @elapsed begin @time begin 
-      #   scf_results, properties = full_rhf(input_file)      
-      # end end
-    end
+    # for i in 1:5
+    #   DF_time = @elapsed begin @time begin 
+    #     df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
+    #   end end
+    #   RHF_time = @elapsed begin @time begin 
+    #     scf_results, properties = full_rhf(input_file)      
+    #   end end
+    # end
     
 
     # println("done iwth runs")
@@ -67,14 +65,14 @@ end
 # df_path = ARGS[1]
 # rhf_path = ARGS[2]
 
-# df_path = "./example_inputs/density_fitting/water_density_fitted.json"
-# rhf_path = "./example_inputs/density_fitting/water_rhf.json"
+df_path = "./example_inputs/density_fitting/water_density_fitted.json"
+rhf_path = "./example_inputs/density_fitting/water_rhf.json"
 
 # df_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water_df.json"
 # rhf_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water.json"
 
-MP2_Num = "10"
-df_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2_df.json"
-rhf_path =  "./example_inputs/density_fitting/$(MP2_Num)_MP2.json"
+# MP2_Num = "01"
+# df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/$(MP2_Num)_MP2_df.json")
+# rhf_path =  joinpath(@__DIR__, "../example_inputs/density_fitting/$(MP2_Num)_MP2.json")
 
 check_density_fitted_method_matches_RHF(df_path, rhf_path)

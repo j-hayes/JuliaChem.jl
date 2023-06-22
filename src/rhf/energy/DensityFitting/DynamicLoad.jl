@@ -12,7 +12,7 @@ more_work_tag = 100
     while top_index[1] > 0
         status = MPI.Probe(-2, more_work_tag, comm)
         rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-        send_msg = [get_next_task(mutex_mpi_worker, top_index, batch_size, top_index[1])]
+        send_msg = [get_next_task(mutex_mpi_worker, top_index, batch_size)]
         MPI.Send(send_msg, recv_mesg[1], recv_mesg[2], comm)
     end
 
@@ -35,10 +35,11 @@ end
             # unlock(mutex_mpi_worker)
         else
             # lock(mutex_mpi_worker)
-            send_mesg = [MPI.Comm_rank(comm), Threads.threadid()]
+            threadid =  Threads.threadid()
+            send_mesg = [MPI.Comm_rank(comm),threadid]
             MPI.Send(send_mesg, 0, more_work_tag, comm)
             recv_mesg = [0]
-            MPI.Recv!(recv_mesg, 0, Threads.threadid(), comm)
+            MPI.Recv!(recv_mesg, 0, threadid, comm)
             new_index = recv_mesg[1]
             # unlock(mutex_mpi_worker)
         end

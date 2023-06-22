@@ -75,7 +75,7 @@ end
 
     stride =  comm_size*batch_size
     start_index = MPI.Comm_rank(comm)*batch_size + 1
-
+    rank_shell_indicies = get_df_static_shell_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
 
     @sync for batch_index in start_index:stride:number_of_indices
         Threads.@spawn begin
