@@ -185,12 +185,6 @@ function calculate_iteration_times(results, run_name)
     return average_df_time, av_first_iteration_df_time, rhf_average_iteration_time
 end
 
-function calculate_speedup(results, run_name1, run_name2)
-    average_runtime_1 = calculate_average_runtime(results, run_name1)
-    average_runtime_2 = calculate_average_runtime(results, run_name2)
-    speedup = average_runtime_1 / average_runtime_2
-    return speedup
-end
 
 function calculate_average_runtime(results, run_name)
     iteration_keys = collect(keys(results[run_name]))

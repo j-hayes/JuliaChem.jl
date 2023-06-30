@@ -21,11 +21,11 @@
   },
   "keywords": {
     "scf":{
-      "scf_type":"rhf",
+      "scf_type":"df",
       "contraction_library":"TensorOperations",
-      "guess":"df",
-      "dele":1E-7,
-      "rmsd":1E-7,
+      "guess":"hcore",
+      "dele":1E-6,
+      "rmsd":1E-6,
       "df_dele":1E-3,
       "df_rmsd":1E-3,
       "niter":50,

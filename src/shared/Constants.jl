@@ -18,11 +18,11 @@ module SCF_Keywords
     module Convergence
         const density_fitting_energy = "df_dele"
         const energy = "dele"
-        const energy_default = 1E-6
+        const energy_default = 1E-3
 
         const density_fitting_density = "df_rmsd"
         const density = "rmsd"
-        const density_default = 1E-6
+        const density_default = 1E-3
 
         const max_iterations = "niter"
         const max_iterations_default = 50

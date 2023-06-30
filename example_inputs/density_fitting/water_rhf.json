@@ -11,13 +11,13 @@
   "driver": "energy",
   "model": {   
     "method": "RHF",
-    "basis": "6-31G(2df,p)"
+    "basis": "6-311++G(2d,2p)"
   },
   "keywords": {
     "scf":{
       "scf_type":"rhf",
       "guess":"hcore", 
-      "load":"static",
+      "load":"dynamic",
       "contraction_mode":"default",
       "dele":1E-6,
       "rmsd":1E-6,

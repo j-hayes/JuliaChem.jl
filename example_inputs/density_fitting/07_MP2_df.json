@@ -38,15 +38,16 @@
   "driver": "energy",
   "model": {
     "method": "RHF",
-    "basis": "6-31G(2df,p)",
-    "auxiliary_basis": "cc-pVTZ-JKFIT"
+    "basis": "6-31G",
+    "auxiliary_basis": "cc-pVDZ-JKFIT"
 
   },
   "keywords": {
     "scf":{
       "scf_type":"df",
       "guess":"hcore",
-      "load": "dynamic"
+      "load": "dynamic",
+      "contraction_mode": "BLAS"
 },
     "prop":{
       "mo energies":true,

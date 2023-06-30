@@ -70,7 +70,7 @@ function run_df_rhf(input_file, basis = "", auxilliary_basis = "", df_is_guess =
       keywords["scf"]["scf_type"] = "rhf" #todo use constant    
       keywords["scf"]["guess"] = "df" #todo use constant    
       keywords["scf"]["df_dele"] = 1E-3 #todo use constant
-      keywords["scf"]["df_drms"] = 1E-3 #todo use constant
+      keywords["scf"]["df_rmsd"] = 1E-3 #todo use constant
     else
       keywords["scf"]["scf_type"] = "df" #todo use constant
       keywords["scf"]["dele"] = 1E-6

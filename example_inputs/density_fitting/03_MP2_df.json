@@ -24,9 +24,13 @@
   "keywords": {
     "scf":{
       "scf_type":"df",
-      "guess":"sad",
+      "guess":"hcore",
       "contraction_mode":"default",
-      "load": "dynamic"
+      "load": "static",
+      "dele":1E-3,
+      "rmsd":1E-3,
+      "df_dele":1E-3,
+      "df_rmsd":1E-3
     },
     "prop":{
       "mo energies":true,

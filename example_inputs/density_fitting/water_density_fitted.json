@@ -19,13 +19,13 @@
       "scf_type":"df",
       "guess":"hcore", 
       "load":"static",
-      "contraction_mode":"default",
+      "contraction_mode":"BLAS",
       "dele":1E-6,
       "rmsd":1E-6,
       "df_dele":1E-6,
       "df_rmsd":1E-6,
-      "niter":20,
-      "df_niter":20
+      "niter":50,
+      "df_niter":50
     },
     "prop":{
       "mo energies":true,
