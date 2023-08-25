@@ -186,7 +186,8 @@ end
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
     n_indicies = length(cartesian_indices)
-    batch_size = 100
+    batch_size = size(cartesian_indices, 1)
+
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
 
