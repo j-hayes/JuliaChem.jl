@@ -209,13 +209,6 @@ end
         # println("doing bcast")
         MPI.Bcast!(three_center_integrals, comm; root=root)
     end
-    if rank == 0
-        for index in CartesianIndices(three_center_integrals)
-            println("three_center_integrals[$index]: $(three_center_integrals[index])")
-        end
-    end
-
-
 end
 
 function get_static_gatherv_data(rank, n_ranks, aux_basis_length, basis_length, basis_sets) :: Tuple{Int64, Int64, Int64, Int64, Int64}
