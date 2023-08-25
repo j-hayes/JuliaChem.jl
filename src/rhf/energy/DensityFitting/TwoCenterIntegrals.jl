@@ -77,13 +77,15 @@ end
     start_index = MPI.Comm_rank(comm)*batch_size + 1
     rank_shell_indicies = get_df_static_shell_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
 
-    @sync for batch_index in start_index:stride:number_of_indices
+    nthreads = Threads.nthreads()
+
+    @sync for thread in 1:nthreads
         Threads.@spawn begin
-            thread_id = Threads.threadid()
+            batch_index = start_index + (thread - 1)*stride
             for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
                 cartesian_index = cartesian_indices[view_index]
-                engine = jeri_engine_thread[thread_id]
-                integral_buffer = thead_integral_buffer[thread_id]
+                engine = jeri_engine_thread[thread]
+                integral_buffer = thead_integral_buffer[thread]
                 calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
             end
         end

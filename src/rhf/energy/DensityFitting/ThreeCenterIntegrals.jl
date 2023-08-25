@@ -31,26 +31,15 @@ three_center_integral_tag = 3000
     communication_buffer_lock = Base.Threads.ReentrantLock()
 
     if scf_options.load == "sequential"
-        calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets, communication_buffer, communication_buffer_lock)
+        calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets)
     elseif scf_options.load == "static"
-        calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer, communication_buffer, communication_buffer_lock)
+        calculate_three_center_integrals_static_scatter(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     elseif scf_options.load == "dynamic"
-        calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer, communication_buffer, communication_buffer_lock)
+        calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
-    if rank > 0
-        if length(keys(communication_buffer)) > 0
-            MPI.Send(communication_buffer, 0, three_center_integral_tag, comm)
-            communication_buffer = Dict{CartesianIndex, Array{Float64, 1}}()
-        end
-        MPI.Send(communication_buffer, 0, three_center_integral_tag, comm)
-    end
-    # if n_ranks > 1
-    #     MPI.Barrier(comm)    
-    #     MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
-    #     MPI.Barrier(comm)   
-    # end
+
 
 
     return three_center_integrals
@@ -78,10 +67,7 @@ end
     return s1, s2, s3, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos, number_of_integrals #todo make this a struct
 end
 
-@inline function calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer,
-    communication_buffer, communication_buffer_lock)
-    comm = MPI.COMM_WORLD
-
+@inline function calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     s1, s2, s3,
     shell_1, shell_2, shell_3,
     shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
@@ -89,19 +75,9 @@ end
     number_of_integrals = get_indexes_eri_block(cartesian_index, basis_sets)
     
     JERI.compute_eri_block_df(engine, integral_buffer, s1, s2, s3, number_of_integrals, 0)
+    copy_integral_result!(three_center_integrals, integral_buffer, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
+    axial_normalization_factor(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
 
-    if MPI.Comm_rank(comm) > 0
-        lock(communication_buffer_lock) 
-        communication_buffer[cartesian_index] = deepcopy(integral_buffer[1:number_of_integrals])    
-        if length(keys(communication_buffer, communication_buffer_lock)) > 10
-            MPI.ISend(communication_buffer, 0, three_center_integral_tag, comm)
-            communication_buffer = Dict{CartesianIndex, Array{Float64, 1}}()
-        end
-        unlock(communication_buffer_lock)        
-    else
-        copy_integral_result!(three_center_integrals, integral_buffer, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
-        axial_normalization_factor(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos)
-    end
 end
 
 @inline function recieve_messages(three_center_integrals, basis_sets)
@@ -138,57 +114,129 @@ end
 end
 
 
-@inline function calculate_three_center_integrals_sequential!(three_center_integrals, integral_buffer, cartesian_indices, engine, basis_sets, communication_buffer, communication_buffer_lock)
+@inline function calculate_three_center_integrals_sequential!(three_center_integrals, integral_buffer, cartesian_indices, engine, basis_sets)
     for cartesian_index in cartesian_indices
-        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, communication_buffer, communication_buffer_lock)
+        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
 end
 
-@inline function calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer, communication_buffer, communication_buffer_lock)
+@inline function calculate_three_center_integrals_static(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
     comm = MPI.COMM_WORLD
     n_ranks = MPI.Comm_size(comm)
     rank = MPI.Comm_rank(comm)
     
+    rank_shell_indicies = get_df_static_shell_indices(basis_sets,  n_ranks, rank)
+    nthreads = Threads.nthreads()
 
-    this_rank_processes_messages = rank == 0 && n_ranks > 1 
-    println("static load: rank: $rank, n_ranks: $n_ranks, this_rank_processes_messages: $this_rank_processes_messages")
-
-    rank_shell_indicies = get_df_static_shell_indices(basis_sets,  n_ranks, rank )
-
-    outer_loop_max = length(rank_shell_indicies)
-    if  this_rank_processes_messages
-        outer_loop_max += 1
-    end
-
-    Threads.@sync for thread in 1:outer_loop_max
+    basis_legth = length(basis_sets.primary)
+    Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin
-            if thread == 1 && this_rank_processes_messages
-                println("recieving messages for three center intergrals")
-                recieve_messages(three_center_integrals, basis_sets)
-            else
-                threadid = Threads.threadid()
-                aux_indicies_index = this_rank_processes_messages ?
-                    thread - 1 : # if there is a thread processing messages
-                    thread # if there is no thread processing messages on this rank
-                aux_index = rank_shell_indicies[aux_indicies_index]
-            
-                for μ in 1:length(basis_sets.primary)
-                    for ν in 1:length(basis_sets.primary)
+                aux_index = rank_shell_indicies[thread]
+                for μ in 1:basis_legth
+                    for ν in 1:basis_legth
                         cartesian_index = CartesianIndex(aux_index, μ, ν)
-                        engine = jeri_engine_thread[threadid]
-                        integral_buffer = thead_integral_buffer[threadid]
-                        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, communication_buffer, communication_buffer_lock)
+                        engine = jeri_engine_thread[thread]
+                        integral_buffer = thead_integral_buffer[thread]
+                        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
                     end
-                end         
-            end
-                    
+                end    
         end
     end
 end
 
 
+@inline function calculate_three_center_integrals_static_scatter(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
+    comm = MPI.COMM_WORLD
+    n_ranks = MPI.Comm_size(comm)
+    rank = MPI.Comm_rank(comm)
+    nthreads = Threads.nthreads()
+    aux_basis_legth = length( basis_sets.auxillary)
+    basis_legth = length(basis_sets.primary)
+
+    gatherv_data = [get_static_gatherv_data(x, n_ranks, aux_basis_legth, basis_legth, basis_sets) for x in 0:n_ranks-1]
+    indicies_per_rank = [x[5] for x in gatherv_data]
+    begin_index = gatherv_data[rank+1][1]
+    end_index = gatherv_data[rank+1][2]
+    begin_aux_basis_func_index =  gatherv_data[rank+1][3]
+    end_aux_basis_func_index = gatherv_data[rank+1][4]
+    
+
+    n_indicies_per_thread = (end_index - begin_index + 1)÷nthreads    
+
+    println("rank: $rank, begin_index: $begin_index, end_index: $end_index, n_indicies_per_thread: $n_indicies_per_thread, aux_basis_legth $aux_basis_legth, begin_aux_basis_func_index: $begin_aux_basis_func_index, end_aux_basis_func_index: $end_aux_basis_func_index: total indicies = $(sum(indicies_per_rank)) ")
+
+
+    three_center_integral_buff = VBuffer(nothing) # output VBuffer for gather
+    if rank == 0
+        println("indicies_per_rank: $indicies_per_rank")
+        println("length of 3CI: $(length(three_center_integrals))")
+        three_center_integral_buff = VBuffer(three_center_integrals, indicies_per_rank) # setup the root with the actual buffer to recieve data
+    end
+    
+
+    Threads.@sync for thread in 1:nthreads
+        Threads.@spawn begin                
+
+            thread_begin_index = begin_index + (thread - 1) * n_indicies_per_thread
+            thread_end_index = thread_begin_index + n_indicies_per_thread - 1
+            if thread == nthreads
+                thread_end_index = end_index
+            end
+            println("rank $rank, thread $thread, thread_begin_index: $thread_begin_index, thread_end_index: $thread_end_index")
+            for aux_index in thread_begin_index:thread_end_index
+                for μ in 1:basis_legth
+                    for ν in 1:basis_legth
+                        cartesian_index = CartesianIndex(aux_index, μ, ν)
+                        engine = jeri_engine_thread[thread]
+                        integral_buffer = thead_integral_buffer[thread]
+                        calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+                    end
+                end    
+            end
+        end
+    end
+
+    root = 0
+    if n_ranks > 1
+        # if root == MPI.Comm_rank(comm)
+        #     MPI.Gatherv!(MPI.IN_PLACE, VBuffer(three_center_integrals, indicies_per_rank), comm; root=root)
+        # else
+        #     MPI.Gatherv!(three_center_integrals[begin_index:end_index], nothing, comm; root=root)
+        # end
+        # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
+        MPI.Gatherv!(three_center_integrals[:,:,begin_aux_basis_func_index:end_aux_basis_func_index], three_center_integral_buff, root, comm)
+        MPI.Barrier(comm)
+        # println("doing bcast")
+        MPI.Bcast!(three_center_integrals, comm; root=root)
+    end
+    if rank == 0
+        for index in CartesianIndices(three_center_integrals)
+            println("three_center_integrals[$index]: $(three_center_integrals[index])")
+        end
+    end
+
+
+end
+
+function get_static_gatherv_data(rank, n_ranks, aux_basis_length, basis_length, basis_sets) :: Tuple{Int64, Int64, Int64, Int64, Int64}
+    begin_index = aux_basis_length÷n_ranks * rank + 1
+    end_index = begin_index + aux_basis_length÷n_ranks - 1
+    if rank == n_ranks - 1
+        end_index = aux_basis_length
+    end
+
+    begin_aux_basis_func_index = basis_sets.auxillary[begin_index].pos
+    end_aux_basis_func_index = basis_sets.auxillary[end_index].pos + basis_sets.auxillary[end_index].nbas-1
+    
+    number_of_indicies = end_aux_basis_func_index - begin_aux_basis_func_index + 1
+    number_of_indicies *= (basis_sets.primary.norb)^2
+
+    return begin_index, end_index, begin_aux_basis_func_index, end_aux_basis_func_index, number_of_indicies
+end
+
+
 @inline function calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, 
-    jeri_engine_thread, basis_sets, thead_integral_buffer, communication_buffer, communication_buffer_lock)
+    jeri_engine_thread, basis_sets, thead_integral_buffer)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
     n_indicies = length(cartesian_indices)
@@ -211,7 +259,7 @@ end
                 cartesian_indices,
                 batch_size,
                 jeri_engine_thread,
-                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies, thread, communication_buffer, communication_buffer_lock)
+                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies, thread)
             end
         end
     end
@@ -223,7 +271,7 @@ function run_three_center_integrals_worker(three_center_integrals,
     cartesian_indices,
     batch_size,
     jeri_engine_thread,
-    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread, communication_buffer, communication_buffer_lock)
+    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread)
 
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
@@ -242,7 +290,7 @@ function run_three_center_integrals_worker(three_center_integrals,
         batch_size,
         cartesian_indices,
         jeri_engine_thread[thread],
-        thead_integral_buffer[thread], basis_sets, communication_buffer, communication_buffer_lock)
+        thead_integral_buffer[thread], basis_sets)
         ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
     end
 end
@@ -253,10 +301,10 @@ end
     batch_size,
     cartesian_indices,
     engine,
-    integral_buffer, basis_sets, communication_buffer, communication_buffer_lock)
+    integral_buffer, basis_sets)
     for ij in top_index:-1:(max(1, top_index - batch_size))
         shell_index = cartesian_indices[ij]
-        calculate_three_center_integrals_kernel!(three_center_integrals, engine, shell_index, basis_sets, integral_buffer, communication_buffer, communication_buffer_lock)
+        calculate_three_center_integrals_kernel!(three_center_integrals, engine, shell_index, basis_sets, integral_buffer)
     end
 end
 
