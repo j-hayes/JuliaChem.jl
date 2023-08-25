@@ -4,6 +4,7 @@ using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 
+two_center_integral_tag = 2000
 
 @inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
     comm = MPI.COMM_WORLD
@@ -27,11 +28,6 @@ using JuliaChem.Shared
         error("integral threading load type: $(scf_options.load) not supported")
     end
 
-    if n_ranks > 1
-        MPI.Barrier(comm)    
-        MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
-        MPI.Barrier(comm)   
-    end
     
     return two_center_integrals
 end
@@ -69,6 +65,7 @@ end
 
 @inline function calculate_two_center_integrals_static!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     comm = MPI.COMM_WORLD
+    n_ranks = MPI.Comm_size(comm)
     number_of_indices = length(cartesian_indices)
     comm_size = MPI.Comm_size(comm)
     batch_size = ceil(Int, number_of_indices / (Threads.nthreads()*comm_size))
@@ -89,6 +86,13 @@ end
                 calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
             end
         end
+    end
+
+
+    if n_ranks > 1
+        MPI.Barrier(comm)    
+        MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
+        MPI.Barrier(comm)   
     end
 end
 
@@ -118,8 +122,8 @@ end
     mutex_mpi_worker = Base.Threads.ReentrantLock()
     @sync for thread in 1:Threads.nthreads()
         Threads.@spawn begin
-            if rank == 0 && Threads.threadid() == 1 && n_ranks > 1
-                setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker)
+            if rank == 0 && thread == 1 && n_ranks > 1
+                setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker, two_center_integral_tag)
             else
                 run_two_center_integrals_worker(two_center_integrals,
                     cartesian_indices,
@@ -130,9 +134,12 @@ end
         end
     end
 
-    cleanup_messages()
 
 
+    if n_ranks > 1
+        MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
+        cleanup_messages(two_center_integral_tag) #todo figure out why there are extra messages and remove this
+    end
 end
 
 
@@ -161,7 +168,7 @@ end
         cartesian_indices,
         jeri_engine_thread[thread],
         thead_integral_buffer[thread], basis_sets)
-        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size)
+        ij_index = get_next_task(mutex_mpi_worker, top_index, batch_size, thread, two_center_integral_tag)
     end
 end
 

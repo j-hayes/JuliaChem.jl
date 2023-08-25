@@ -1,67 +1,72 @@
 using MPI 
-more_work_tag = 100
 
-@inline function setup_integral_coordinator(top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker)
+@inline function setup_integral_coordinator(top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker, more_work_tag)
     comm = MPI.COMM_WORLD
     send_msg = [1]
     
     if n_ranks == 1
         return 
     end
-    recv_mesg = [0,0,0]
+    recv_mesg = [0,0]
+    rank_thread_has_ended = zeros(Int64, n_ranks, n_threads)
+   
     while top_index[1] > 0
-        status = MPI.Probe(-2, more_work_tag, comm)
-        rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm)
-        send_msg = [get_next_task(mutex_mpi_worker, top_index, batch_size)]
-        MPI.Send(send_msg, recv_mesg[1], recv_mesg[2], comm)
+        status = MPI.Probe(comm, MPI.Status; source=MPI.ANY_SOURCE, tag=more_work_tag)
+        MPI.Recv!(recv_mesg, comm; source=status.source, tag=status.tag)
+        send_msg = [get_next_task(mutex_mpi_worker, top_index, batch_size, 1, more_work_tag)]
+        if send_msg[1] < 1
+            rank_thread_has_ended[recv_mesg[1], recv_mesg[2]] = 1
+        end 
+        MPI.Send(send_msg, comm; dest=recv_mesg[1], tag=recv_mesg[2])
     end
-
+    
     for rank in 1:n_ranks-1
         for thread in 1:n_threads
-            sreq = MPI.Send([-1], rank, thread, comm)
+            if rank_thread_has_ended[rank, thread] == 1
+                continue
+            end
+            MPI.Send([-1], comm; dest=rank, tag=thread)
         end       
     end
 end
 
-@inline function get_next_task(mutex_mpi_worker, top_index, batch_size)
+@inline function get_next_task(mutex_mpi_worker, top_index, batch_size, threadid, more_work_tag)
     lock(mutex_mpi_worker) do 
         comm = MPI.COMM_WORLD
         rank = MPI.Comm_rank(comm)
         new_index = 0
         if rank == 0
-            # lock(mutex_mpi_worker)
             new_index = top_index[1]
             top_index[1] -= batch_size + 1
-            # unlock(mutex_mpi_worker)
         else
-            # lock(mutex_mpi_worker)
-            threadid =  Threads.threadid()
             send_mesg = [MPI.Comm_rank(comm),threadid]
-            MPI.Send(send_mesg, 0, more_work_tag, comm)
+            MPI.Send(send_mesg, comm; dest=0, tag=more_work_tag)
             recv_mesg = [0]
-            MPI.Recv!(recv_mesg, 0, threadid, comm)
+            MPI.Recv!(recv_mesg, comm; source=0, tag=threadid)
             new_index = recv_mesg[1]
-            # unlock(mutex_mpi_worker)
         end
-
         return new_index
     end
 end
 
-@inline function cleanup_messages()
+@inline function cleanup_messages(more_work_tag)
     comm = MPI.COMM_WORLD
     n_ranks = MPI.Comm_size(comm)
+    rank = MPI.Comm_rank(comm)
     if n_ranks == 1
         return 
     end
     #clean up any outstanding requests for work
     ismessage = true
     recv_mesg = [0]
-        if rank == 0
-        recv_mesg = [0,0,0]    
+    tag_to_search = MPI.ANY_TAG
+    if rank == 0
+        tag_to_search = more_work_tag
+        recv_mesg = [0,0]    
     end
+    
     while ismessage
-        ismessage, status = MPI.Iprobe(-2, -1, comm)
+        ismessage, status = MPI.Iprobe(comm, MPI.Status; source=MPI.ANY_SOURCE, tag=tag_to_search)
         if ismessage
             rreq = MPI.Recv!(recv_mesg, status.source, status.tag, comm) 
         end

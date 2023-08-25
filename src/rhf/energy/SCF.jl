@@ -801,7 +801,7 @@ end
   end # end sync
   #== reduce into Fock matrix ==#
   
-  cleanup_messages(n_ranks)
+  cleanup_messages_scf(n_ranks)
   MPI.Barrier(comm)
 
   for ithread_fock in F_thread 
@@ -809,7 +809,7 @@ end
   end
 end
 
-function cleanup_messages(n_ranks)
+function cleanup_messages_scf(n_ranks)
   comm = MPI.COMM_WORLD
   if n_ranks > 1 
     ismessage = true 

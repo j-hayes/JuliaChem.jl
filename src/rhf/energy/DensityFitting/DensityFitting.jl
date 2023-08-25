@@ -100,6 +100,8 @@ end
 
   if iteration == 1
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+    MPI.Barrier(comm)
+    # println("get two two_center_integrals\n")
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
   end  
