@@ -133,3 +133,19 @@ end
     return indicies
   end
   
+  function get_static_gatherv_data(rank, n_ranks, basis_sets, inner_basis_function_length) :: Tuple{Int64, Int64, Int64, Int64, Int64}
+    aux_basis_length = length(basis_sets.auxillary)
+    begin_index = aux_basis_length÷n_ranks * rank + 1
+    end_index = begin_index + aux_basis_length÷n_ranks - 1
+    if rank == n_ranks - 1
+        end_index = aux_basis_length
+    end
+
+    begin_aux_basis_func_index = basis_sets.auxillary[begin_index].pos
+    end_aux_basis_func_index = basis_sets.auxillary[end_index].pos + basis_sets.auxillary[end_index].nbas-1
+    
+    thread_number_of_basis_functions = end_aux_basis_func_index - begin_aux_basis_func_index + 1
+    thread_number_of_basis_functions *= inner_basis_function_length
+
+    return begin_index, end_index, begin_aux_basis_func_index, end_aux_basis_func_index, thread_number_of_basis_functions
+end

@@ -115,10 +115,8 @@ end
     n_ranks = MPI.Comm_size(comm)
     rank = MPI.Comm_rank(comm)
     nthreads = Threads.nthreads()
-    aux_basis_legth = length( basis_sets.auxillary)
-    basis_legth = length(basis_sets.primary)
-
-    gatherv_data = [get_static_gatherv_data(x, n_ranks, aux_basis_legth, basis_legth, basis_sets) for x in 0:n_ranks-1]
+    basis_length = length(basis_sets.primary)
+    gatherv_data = [get_static_gatherv_data(x, n_ranks, basis_sets, (basis_sets.primary.norb)^2) for x in 0:n_ranks-1]
     indicies_per_rank = [x[5] for x in gatherv_data]
     begin_index = gatherv_data[rank+1][1]
     end_index = gatherv_data[rank+1][2]
@@ -127,15 +125,9 @@ end
     
 
     n_indicies_per_thread = (end_index - begin_index + 1)÷nthreads    
+    println("rank $(rank) begin: $(begin_index) end: $(end_index) aux begin: $(begin_aux_basis_func_index) aux end: $(end_aux_basis_func_index)")
 
-    println("rank: $rank, begin_index: $begin_index, end_index: $end_index, n_indicies_per_thread: $n_indicies_per_thread, aux_basis_legth $aux_basis_legth, begin_aux_basis_func_index: $begin_aux_basis_func_index, end_aux_basis_func_index: $end_aux_basis_func_index: total indicies = $(sum(indicies_per_rank)) ")
-    three_center_integral_buff = VBuffer(nothing) # output VBuffer for gather
-    # if rank == 0
-    #     println("indicies_per_rank: $indicies_per_rank")
-    #     println("length of 3CI: $(length(three_center_integrals))")
-    # end
-    three_center_integral_buff = VBuffer(three_center_integrals, indicies_per_rank) # setup the root with the actual buffer to recieve data
-
+    println("aux shell count = $(length(basis_sets.auxillary))")
 
     Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin                
@@ -145,9 +137,11 @@ end
             if thread == nthreads
                 thread_end_index = end_index
             end
+            println("thread: $(thread) begin: $(thread_begin_index) end: $(thread_end_index)")
+
             for aux_index in thread_begin_index:thread_end_index
-                for μ in 1:basis_legth
-                    for ν in 1:basis_legth
+                for μ in 1:basis_length
+                    for ν in 1:basis_length
                         cartesian_index = CartesianIndex(aux_index, μ, ν)
                         engine = jeri_engine_thread[thread]
                         integral_buffer = thead_integral_buffer[thread]
@@ -157,28 +151,14 @@ end
             end
         end
     end
-    root = 0
     if n_ranks > 1
+        three_center_integral_buff = MPI.VBuffer(three_center_integrals, indicies_per_rank) # setup the root with the actual buffer to recieve data
         # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
         MPI.Allgatherv!(three_center_integrals[:,:,begin_aux_basis_func_index:end_aux_basis_func_index], three_center_integral_buff, comm)
     end
 end
 
-function get_static_gatherv_data(rank, n_ranks, aux_basis_length, basis_length, basis_sets) :: Tuple{Int64, Int64, Int64, Int64, Int64}
-    begin_index = aux_basis_length÷n_ranks * rank + 1
-    end_index = begin_index + aux_basis_length÷n_ranks - 1
-    if rank == n_ranks - 1
-        end_index = aux_basis_length
-    end
 
-    begin_aux_basis_func_index = basis_sets.auxillary[begin_index].pos
-    end_aux_basis_func_index = basis_sets.auxillary[end_index].pos + basis_sets.auxillary[end_index].nbas-1
-    
-    number_of_indicies = end_aux_basis_func_index - begin_aux_basis_func_index + 1
-    number_of_indicies *= (basis_sets.primary.norb)^2
-
-    return begin_index, end_index, begin_aux_basis_func_index, end_aux_basis_func_index, number_of_indicies
-end
 
 
 @inline function calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, 

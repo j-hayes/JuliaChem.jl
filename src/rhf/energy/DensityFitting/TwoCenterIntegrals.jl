@@ -28,6 +28,10 @@ two_center_integral_tag = 2000
         error("integral threading load type: $(scf_options.load) not supported")
     end
 
+
+    # for index in CartesianIndices(two_center_integrals)
+    #     println("TCI[$(index[1]), $(index[2])] = $(two_center_integrals[index])")
+    # end
     
     return two_center_integrals
 end
@@ -65,34 +69,67 @@ end
 
 @inline function calculate_two_center_integrals_static!(two_center_integrals, cartesian_indices, jeri_engine_thread, thead_integral_buffer, basis_sets)
     comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    number_of_indices = length(cartesian_indices)
     comm_size = MPI.Comm_size(comm)
-    batch_size = ceil(Int, number_of_indices / (Threads.nthreads()*comm_size))
-
-    stride =  comm_size*batch_size
-    start_index = MPI.Comm_rank(comm)*batch_size + 1
-    rank_shell_indicies = get_df_static_shell_indices(basis_sets,  MPI.Comm_size(comm), MPI.Comm_rank(comm))
-
     nthreads = Threads.nthreads()
+    aux_basis_length = length(basis_sets.auxillary)
+    # number_of_indices = length(cartesian_indices)
+    # batch_size = ceil(Int, number_of_indices / (Threads.nthreads()*comm_size))
+    # stride =  comm_size*batch_size
+    # start_index = MPI.Comm_rank(comm)*batch_size + 1
 
-    @sync for thread in 1:nthreads
-        Threads.@spawn begin
-            batch_index = start_index + (thread - 1)*stride
-            for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
-                cartesian_index = cartesian_indices[view_index]
-                engine = jeri_engine_thread[thread]
-                integral_buffer = thead_integral_buffer[thread]
-                calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+    # @sync for thread in 1:nthreads
+    #     Threads.@spawn begin
+    #         batch_index = start_index + (thread - 1)*stride
+    #         for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
+    #             cartesian_index = cartesian_indices[view_index]
+    #             engine = jeri_engine_thread[thread]
+    #             integral_buffer = thead_integral_buffer[thread]
+    #             calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+    #         end
+    #     end
+    # end
+
+    gatherv_data = [get_static_gatherv_data(x, n_ranks, basis_sets, basis_sets.auxillary.norb) for x in 0:n_ranks-1]
+    indicies_per_rank = [x[5] for x in gatherv_data]
+    begin_index = gatherv_data[rank+1][1]
+    end_index = gatherv_data[rank+1][2]
+    begin_aux_basis_func_index =  gatherv_data[rank+1][3]
+    end_aux_basis_func_index = gatherv_data[rank+1][4]
+   
+    n_indicies_per_thread = (end_index - begin_index + 1)÷nthreads   
+
+
+
+
+
+    println("rank $(rank) begin: $(begin_index) end: $(end_index) aux begin: $(begin_aux_basis_func_index) aux end: $(end_aux_basis_func_index)")
+
+    println("aux shell count = $(length(basis_sets.auxillary))")
+    Threads.@sync for thread in 1:nthreads
+        Threads.@spawn begin     
+            thread_begin_index = begin_index + (thread - 1) * n_indicies_per_thread
+            thread_end_index = thread_begin_index + n_indicies_per_thread - 1
+            if thread == nthreads
+                thread_end_index = end_index
             end
+            # println("thread: $(thread) begin: $(thread_begin_index) end: $(thread_end_index)")
+
+            for B in thread_begin_index:thread_end_index
+                for A in 1:aux_basis_length
+                    cartesian_index = CartesianIndex(A, B)
+                    engine = jeri_engine_thread[thread]
+                    integral_buffer = thead_integral_buffer[thread]
+                    calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+                end
+            end    
         end
     end
 
-
     if n_ranks > 1
-        MPI.Barrier(comm)    
-        MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
-        MPI.Barrier(comm)   
+        two_center_integral_buff = MPI.VBuffer(two_center_integral_buff, indicies_per_rank) # setup the root with the actual buffer to recieve data
+        MPI.Allgatherv!(two_center_integrals[:,:,begin_aux_basis_func_index:end_aux_basis_func_index], two_center_integral_buff, comm)
     end
 end
 
@@ -133,7 +170,6 @@ end
             end
         end
     end
-
 
 
     if n_ranks > 1
