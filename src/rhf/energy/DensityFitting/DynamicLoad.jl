@@ -170,5 +170,5 @@ function static_load_thread_index_offset(thread, n_indicies_per_thread)
 end
 
 function static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
-    return thread == nthreads ? n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
+    return thread != nthreads ?   n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
 end
