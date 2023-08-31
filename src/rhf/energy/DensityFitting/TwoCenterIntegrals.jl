@@ -13,7 +13,7 @@ two_center_integral_tag = 2000
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
     cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
     n_ranks = MPI.Comm_size(comm)
-
+    
     max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     n_threads = Threads.nthreads()
     thead_integral_buffer = [zeros(Float64, max_nbas^2) for i in 1:n_threads]
@@ -28,11 +28,6 @@ two_center_integral_tag = 2000
         error("integral threading load type: $(scf_options.load) not supported")
     end
 
-
-    # for index in CartesianIndices(two_center_integrals)
-    #     println("TCI[$(index[1]), $(index[2])] = $(two_center_integrals[index])")
-    # end
-    
     return two_center_integrals
 end
 
@@ -71,52 +66,23 @@ end
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    comm_size = MPI.Comm_size(comm)
     nthreads = Threads.nthreads()
     aux_basis_length = length(basis_sets.auxillary)
-    # number_of_indices = length(cartesian_indices)
-    # batch_size = ceil(Int, number_of_indices / (Threads.nthreads()*comm_size))
-    # stride =  comm_size*batch_size
-    # start_index = MPI.Comm_rank(comm)*batch_size + 1
+    
 
-    # @sync for thread in 1:nthreads
-    #     Threads.@spawn begin
-    #         batch_index = start_index + (thread - 1)*stride
-    #         for view_index in batch_index:min(number_of_indices, batch_index + batch_size - 1)
-    #             cartesian_index = cartesian_indices[view_index]
-    #             engine = jeri_engine_thread[thread]
-    #             integral_buffer = thead_integral_buffer[thread]
-    #             calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
-    #         end
-    #     end
-    # end
+    load_balance_indicies = [static_load_rank_indicies(rank_index, n_ranks, basis_sets) for rank_index in 0:n_ranks-1]
+    rank_shell_indicies = load_balance_indicies[rank+1][1] 
+    rank_basis_indicies = load_balance_indicies[rank+1][2] 
 
-    gatherv_data = [get_static_gatherv_data(x, n_ranks, basis_sets, basis_sets.auxillary.norb) for x in 0:n_ranks-1]
-    indicies_per_rank = [x[5] for x in gatherv_data]
-    begin_index = gatherv_data[rank+1][1]
-    end_index = gatherv_data[rank+1][2]
-    begin_aux_basis_func_index =  gatherv_data[rank+1][3]
-    end_aux_basis_func_index = gatherv_data[rank+1][4]
-   
-    n_indicies_per_thread = (end_index - begin_index + 1)÷nthreads   
+    rank_number_of_shells = length(rank_shell_indicies)
+    n_indicies_per_thread = rank_number_of_shells÷nthreads
 
-
-
-
-
-    println("rank $(rank) begin: $(begin_index) end: $(end_index) aux begin: $(begin_aux_basis_func_index) aux end: $(end_aux_basis_func_index)")
-
-    println("aux shell count = $(length(basis_sets.auxillary))")
     Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin     
-            thread_begin_index = begin_index + (thread - 1) * n_indicies_per_thread
-            thread_end_index = thread_begin_index + n_indicies_per_thread - 1
-            if thread == nthreads
-                thread_end_index = end_index
-            end
-            # println("thread: $(thread) begin: $(thread_begin_index) end: $(thread_end_index)")
-
-            for B in thread_begin_index:thread_end_index
+            thread_index_offset = static_load_thread_index_offset(thread, n_indicies_per_thread)
+            n_shells_to_process = static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
+            for shell_index in 1:n_shells_to_process
+                B = rank_shell_indicies[shell_index + thread_index_offset]
                 for A in 1:aux_basis_length
                     cartesian_index = CartesianIndex(A, B)
                     engine = jeri_engine_thread[thread]
@@ -128,9 +94,20 @@ end
     end
 
     if n_ranks > 1
-        two_center_integral_buff = MPI.VBuffer(two_center_integral_buff, indicies_per_rank) # setup the root with the actual buffer to recieve data
-        MPI.Allgatherv!(two_center_integrals[:,:,begin_aux_basis_func_index:end_aux_basis_func_index], two_center_integral_buff, comm)
+        # MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
+        number_of_aux_basis_funtions = size(two_center_integrals, 1)
+        aux_basis_indicies_per_rank = [length(x[2]) for x in load_balance_indicies] # number of basis functions calculated on each 
+        rank_indicies = [x[2] ::Array{Int} for x in load_balance_indicies] #basis function indicies calculated on each 
+        indicies_per_rank = aux_basis_indicies_per_rank.*number_of_aux_basis_funtions
+        two_center_integral_buff = MPI.VBuffer(two_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
+        MPI.Allgatherv!(two_center_integrals[ :,rank_basis_indicies], two_center_integral_buff, comm) # gather the data from each rank into the buffer
+        reorder_mpi_gathered_matrix(two_center_integrals, rank_indicies, set_data_2D!, set_temp_2D!, zeros(Float64, number_of_aux_basis_funtions))
     end
+end
+
+function check_static_load_balancing_parameters(n_ranks, nthreads, aux_basis_length, n_indicies_per_thread)
+
+
 end
 
 # Dynamic load balancing

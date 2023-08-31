@@ -125,9 +125,6 @@ end
     
 
     n_indicies_per_thread = (end_index - begin_index + 1)÷nthreads    
-    println("rank $(rank) begin: $(begin_index) end: $(end_index) aux begin: $(begin_aux_basis_func_index) aux end: $(end_aux_basis_func_index)")
-
-    println("aux shell count = $(length(basis_sets.auxillary))")
 
     Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin                
@@ -137,7 +134,6 @@ end
             if thread == nthreads
                 thread_end_index = end_index
             end
-            println("thread: $(thread) begin: $(thread_begin_index) end: $(thread_end_index)")
 
             for aux_index in thread_begin_index:thread_end_index
                 for μ in 1:basis_length

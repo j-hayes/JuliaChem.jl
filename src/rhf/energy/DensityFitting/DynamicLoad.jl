@@ -124,7 +124,7 @@ end
   
   @inline function get_df_static_shell_indices(basis_sets, comm_size, rank)
     number_of_shells = length(basis_sets.auxillary)
-    indicies = []
+    indicies = zeros(Int64, 0)
     i = rank+1
     while i <= number_of_shells
       push!(indicies, i)
@@ -133,6 +133,21 @@ end
     return indicies
   end
   
+  function static_load_rank_indicies(rank, n_ranks, basis_sets)
+    shell_aux_indicies = get_df_static_shell_indices(basis_sets, n_ranks, rank)
+
+    basis_indicies = zeros(Int64, 0)
+    for shell_index in shell_aux_indicies
+        pos = basis_sets.auxillary[shell_index].pos
+        end_index = pos + basis_sets.auxillary[shell_index].nbas-1
+        for index in pos:end_index
+            push!(basis_indicies, index)
+        end
+    end
+    return shell_aux_indicies, basis_indicies    
+
+  end
+
   function get_static_gatherv_data(rank, n_ranks, basis_sets, inner_basis_function_length) :: Tuple{Int64, Int64, Int64, Int64, Int64}
     aux_basis_length = length(basis_sets.auxillary)
     begin_index = aux_basis_length÷n_ranks * rank + 1
@@ -148,4 +163,12 @@ end
     thread_number_of_basis_functions *= inner_basis_function_length
 
     return begin_index, end_index, begin_aux_basis_func_index, end_aux_basis_func_index, thread_number_of_basis_functions
+end
+
+function static_load_thread_index_offset(thread, n_indicies_per_thread)
+    return (thread - 1) * n_indicies_per_thread
+end
+
+function static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
+    return thread == nthreads ? n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
 end
