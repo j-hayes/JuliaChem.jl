@@ -19,7 +19,7 @@ function reorder_mpi_gathered_matrix(array_to_reorder ::Array{Float64}, rank_ind
     
     where_indicies_are_stored = similar(index_list)
 
-    for index in 1:length(index_list)
+    for index in eachindex(index_list)
         where_indicies_are_stored[index_list[index]] = index
     end       
 

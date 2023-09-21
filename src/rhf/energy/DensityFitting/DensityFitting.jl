@@ -31,9 +31,7 @@ indices for all tensor contractions
 
   comm = MPI.COMM_WORLD
   if MPI.Comm_size(comm) > 1
-    MPI.Barrier(comm)
     MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
-    MPI.Barrier(comm)
   end
   
 end
@@ -79,8 +77,8 @@ end
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
   if iteration == 1
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     J_AB_invt = inv(cholesky(Hermitian(two_center_integrals, :L)).L)
     indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
     @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[indicies,:][A,BB]
@@ -100,8 +98,6 @@ end
 
   if iteration == 1
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-    MPI.Barrier(comm)
-    # println("get two two_center_integrals\n")
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
   end  
@@ -111,16 +107,14 @@ end
 end
 
 @inline function calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options::SCFOptions)
-  comm = MPI.COMM_WORLD
   μμ = scf_data.μ
   νν = scf_data.μ
   AA = length(indicies)
-
   LAPACK.potrf!('L', two_center_integrals)
   J_AB_INV = inv(two_center_integrals)[ indicies,:]
   BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
   scf_data.D = reshape(scf_data.D, (μμ, νν,AA))
-
+ 
 end
 
 
@@ -137,8 +131,6 @@ end
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ
-  
   BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
   BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock)
-
 end

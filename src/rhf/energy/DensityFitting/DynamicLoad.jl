@@ -1,4 +1,43 @@
 using MPI 
+using Base.Threads
+
+
+@inline function setup_integral_coordinator_aux(more_work_tag, mutex_mpi_worker, top_aux_index, aux_indicies_processed)
+    comm = MPI.COMM_WORLD
+    if MPI.Comm_size(comm) == 1
+        return 
+    end
+    recieve_msg = [0] # the rank asking for work
+    while top_aux_index[1] > 0
+        status = MPI.Probe(comm, MPI.Status; source=MPI.ANY_SOURCE, tag=more_work_tag)
+        MPI.Recv!(recieve_msg, comm; source=status.source, tag=status.tag)
+        get_next_task_aux!(top_aux_index, mutex_mpi_worker, more_work_tag, aux_indicies_processed, recieve_msg[1])
+        send_msg = top_aux_index
+        MPI.Send(send_msg, comm; dest=recieve_msg[1], tag=more_work_tag)
+    end 
+end
+
+
+@inline function get_next_task_aux!(top_index, mutex_mpi_worker, more_work_tag, aux_indicies_processed, rank_processing_work)
+    lock(mutex_mpi_worker) do 
+
+        comm = MPI.COMM_WORLD
+        rank = MPI.Comm_rank(comm)
+        if rank == 0
+            top_index[1] -= 1
+            if top_index[1] > 0
+                pushfirst!(aux_indicies_processed[rank_processing_work+1], top_index[1])
+            end
+        else
+            send_mesg = [MPI.Comm_rank(comm)]
+            MPI.Send(send_mesg, comm; dest=0, tag=more_work_tag)
+            recv_mesg = [0]
+            MPI.Recv!(recv_mesg, comm; source=0, tag=more_work_tag)
+            top_index[1] = recv_mesg[1]
+        end
+
+    end
+end
 
 @inline function setup_integral_coordinator(top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker, more_work_tag)
     comm = MPI.COMM_WORLD
@@ -29,6 +68,9 @@ using MPI
         end       
     end
 end
+
+
+
 
 @inline function get_next_task(mutex_mpi_worker, top_index, batch_size, threadid, more_work_tag)
     lock(mutex_mpi_worker) do 
@@ -133,9 +175,16 @@ end
     return indicies
   end
   
+#   todo replace this with returning a list of ranges? https://stackoverflow.com/questions/40196070/index-array-with-multiple-ranges? probably won't do anything from a performance standpoint
   function static_load_rank_indicies(rank, n_ranks, basis_sets)
     shell_aux_indicies = get_df_static_shell_indices(basis_sets, n_ranks, rank)
+    basis_indicies = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
+    
+    return shell_aux_indicies, basis_indicies    
 
+  end
+
+  function get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
     basis_indicies = zeros(Int64, 0)
     for shell_index in shell_aux_indicies
         pos = basis_sets.auxillary[shell_index].pos
@@ -143,11 +192,11 @@ end
         for index in pos:end_index
             push!(basis_indicies, index)
         end
-    end
-    return shell_aux_indicies, basis_indicies    
-
+    end  
+    return basis_indicies
   end
 
+  
   function get_static_gatherv_data(rank, n_ranks, basis_sets, inner_basis_function_length) :: Tuple{Int64, Int64, Int64, Int64, Int64}
     aux_basis_length = length(basis_sets.auxillary)
     begin_index = aux_basis_length÷n_ranks * rank + 1
@@ -171,4 +220,14 @@ end
 
 function static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
     return thread != nthreads ?   n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
+end
+
+function get_number_of_dynamic_worker_threads()
+    n_worker_threads = Threads.nthreads()
+    if rank == 0 && n_ranks == 1
+        n_worker_threads = Threads.nthreads()
+    elseif rank == 0
+        n_worker_threads -= 1
+    end
+    return n_worker_threads
 end
