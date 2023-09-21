@@ -97,8 +97,13 @@ end
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
 
   if iteration == 1
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+    
+    println("Calculating two center")
+
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
+    println("Calculating threecenter")
+    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
+
     calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
   end  
   calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)

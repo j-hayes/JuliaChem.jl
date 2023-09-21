@@ -222,7 +222,7 @@ function static_load_thread_shell_to_process_count(thread, nthreads, rank_number
     return thread != nthreads ?   n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
 end
 
-function get_number_of_dynamic_worker_threads()
+function get_number_of_dynamic_worker_threads(rank, n_ranks)
     n_worker_threads = Threads.nthreads()
     if rank == 0 && n_ranks == 1
         n_worker_threads = Threads.nthreads()
@@ -230,4 +230,19 @@ function get_number_of_dynamic_worker_threads()
         n_worker_threads -= 1
     end
     return n_worker_threads
+end
+
+function setup_dynamic_load_indicies(n_aux_shells, n_ranks)
+    top_index = [n_aux_shells]
+    aux_indicies_processed = [[] for i in 1:n_ranks]
+    i=1
+    while true
+        push!(aux_indicies_processed[i], top_index[1])    
+        if i == n_ranks || top_index[1] < 1
+            break
+        end
+        top_index[1] -= 1  
+        i += 1
+    end
+    return top_index, aux_indicies_processed
 end

@@ -13,7 +13,6 @@ two_center_integral_tag = 2000
     two_center_integrals = zeros(Float64, aux_basis_function_count, aux_basis_function_count)
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
     cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, auxilliary_basis_shell_count))
-    n_ranks = MPI.Comm_size(comm)
     
     max_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     n_threads = Threads.nthreads()
@@ -31,7 +30,7 @@ two_center_integral_tag = 2000
     return two_center_integrals
 end
 
-@inline function calculate_two_center_intgrals_kernel!(two_center_integrals,
+@inline function calculate_two_center_integrals_kernel!(two_center_integrals,
     engine,
     cartesian_index,
     basis_sets,
@@ -58,7 +57,7 @@ end
 
 @inline function calculate_two_center_integrals_sequential!(two_center_integrals, cartesian_indices, engine, integral_buffer, basis_sets)
     for cartesian_index in cartesian_indices
-        calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+        calculate_two_center_integrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
 end
 
@@ -87,7 +86,7 @@ end
                     cartesian_index = CartesianIndex(A, B)
                     engine = jeri_engine_thread[thread]
                     integral_buffer = thead_integral_buffer[thread]
-                    calculate_two_center_intgrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
+                    calculate_two_center_integrals_kernel!(two_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
                 end
             end    
         end
@@ -130,19 +129,11 @@ end
     number_of_aux_basis_funtions = size(two_center_integrals, 1)
     
 
-    # setup the initial index to process for each rank
-    top_index = [n_aux_shells] 
-    aux_indicies_processed = [[] for i in 1:n_ranks]
-    i=1
-    while true
-        push!(aux_indicies_processed[i], top_index[1])    
-        top_index[1] -= 1       
-        if i == n_ranks
-            break
-        end
-    end
-    index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
-    n_worker_threads = get_number_of_dynamic_worker_threads()
+    # setup the initial index to process for each rank_basis_indices
+    top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
+    println("rank: $rank aux_indicies_processed at start: $(aux_indicies_processed)")
+    aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
+    n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
     mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the index_to_process variable
     @sync begin 
         if rank == 0 && n_ranks > 1
@@ -162,45 +153,40 @@ end
                         integral_buffer = thead_integral_buffer[thread]
                         engine = jeri_engine_thread[thread]
                         for i_index in start_index:end_index
-                            shell_index = CartesianIndex(i_index, index_to_process)
-                            calculate_two_center_intgrals_kernel!(two_center_integrals, engine, shell_index, basis_sets, integral_buffer)
+                            shell_index = CartesianIndex(i_index, aux_shell_index_to_process)
+                            calculate_two_center_integrals_kernel!(two_center_integrals, engine, shell_index, basis_sets, integral_buffer)
                         end
                     end
                 end
             end
             get_next_task_aux!(top_index, mutex_mpi_worker, two_center_integral_tag, aux_indicies_processed, rank)
-            index_to_process = top_index[1]
-            if index_to_process[1] < 1
+            aux_shell_index_to_process = top_index[1]
+            if aux_shell_index_to_process < 1
                 break
             end
         end
     end
-    
+
     if n_ranks > 1
-
-        broadcast_process_index_processed_list(aux_indicies_processed, n_ranks, n_aux_shells)
-        get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets)       
-
+        aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
+        rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_aux_basis_funtions)       
         two_center_integral_buff = MPI.VBuffer(two_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
         MPI.Allgatherv!(two_center_integrals[ :,rank_basis_indices[rank+1]], two_center_integral_buff, comm) # gather the data from each rank into the buffer
         reorder_mpi_gathered_matrix(two_center_integrals, rank_basis_indices, set_data_2D!, set_temp_2D!, zeros(Float64, number_of_aux_basis_funtions))
-
-        MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
-    end
-    if rank == 0
-        print_two_center_integrals(two_center_integrals)
     end
 end
 
-function get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks, basis_sets)
+function get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks, basis_sets, number_of_aux_basis_funtions)
     rank_basis_indices = Vector{Vector{Int64}}(undef, 0)
-        indicies_per_rank = zeros(Int64, n_ranks) # number of basis functions calculated on each
-        for i in 1:n_ranks
-            basis_indicies = get_basis_indicies_for_shell_indicies(aux_indicies_processed[i], basis_sets)
-            indicies_per_rank[i] = length(basis_indicies)*number_of_aux_basis_funtions
-            push!(rank_basis_indices, basis_indicies)
-        end
+    
+    indicies_per_rank = zeros(Int64, n_ranks) # number of basis functions calculated on each
+    for i in 1:n_ranks
+        basis_indicies = get_basis_indicies_for_shell_indicies(aux_indicies_processed[i], basis_sets)
+        indicies_per_rank[i] = length(basis_indicies)*number_of_aux_basis_funtions
+        push!(rank_basis_indices, basis_indicies)
     end
+    return rank_basis_indices, indicies_per_rank
+end
 
 function broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
     comm = MPI.COMM_WORLD
@@ -224,6 +210,7 @@ function broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_s
         end
         push!(aux_indicies_processed[rank_index+1], index)
     end
+    return aux_indicies_processed
 end
 
 @inline function run_two_center_integrals_worker(two_center_integrals,
@@ -262,7 +249,7 @@ end
     integral_buffer, basis_sets)
     for ij in top_index:-1:(max(1, top_index - batch_size))
         shell_index = cartesian_indices[ij]
-        calculate_two_center_intgrals_kernel!(two_center_integrals, engine, shell_index, basis_sets, integral_buffer)
+        calculate_two_center_integrals_kernel!(two_center_integrals, engine, shell_index, basis_sets, integral_buffer)
     end
 end
 
