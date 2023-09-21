@@ -14,7 +14,6 @@ three_center_integral_tag = 3000
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
     basis_shell_count = length(basis_sets.primary)
 
-    cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
     n_threads = Threads.nthreads()
 
     max_primary_nbas = max_number_of_basis_functions(basis_sets.primary)
@@ -23,11 +22,12 @@ three_center_integral_tag = 3000
 
 
     if scf_options.load == "sequential"
+        cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
         calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets)
     elseif scf_options.load == "static"
         calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     elseif scf_options.load == "dynamic"
-        calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, jeri_engine_thread, basis_sets, thead_integral_buffer)
+        calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
@@ -51,6 +51,8 @@ end
     shell_3 = basis_sets.primary.shells[s3]
     shell_3_nbasis = shell_3.nbas
     bf_3_pos = shell_3.pos
+
+    #todo make the cartesian index match how the array is stored (μ ,ν, A)
 
     number_of_integrals = n12 * shell_3_nbasis
     return s1, s2, s3, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos, number_of_integrals #todo make this a struct
@@ -141,33 +143,6 @@ end
             end
         end
     end
-
-    # Threads.@sync for thread in 1:nthreads
-    #     Threads.@spawn begin                
-
-    #         thread_begin_index = begin_index + (thread - 1) * n_indicies_per_thread
-    #         thread_end_index = thread_begin_index + n_indicies_per_thread - 1
-    #         if thread == nthreads
-    #             thread_end_index = end_index
-    #         end
-
-    #         for aux_index in thread_begin_index:thread_end_index
-    #             for μ in 1:basis_length
-    #                 for ν in 1:basis_length
-    #                     cartesian_index = CartesianIndex(aux_index, μ, ν)
-    #                     engine = jeri_engine_thread[thread]
-    #                     integral_buffer = thead_integral_buffer[thread]
-    #                     calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
-    #                 end
-    #             end    
-    #         end
-    #     end
-    # end
-    # if n_ranks > 1
-    #     three_center_integral_buff = MPI.VBuffer(three_center_integrals, indicies_per_rank) # setup the root with the actual buffer to recieve data
-    #     # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
-    #     MPI.Allgatherv!(three_center_integrals[:,:,begin_aux_basis_func_index:end_aux_basis_func_index], three_center_integral_buff, comm)
-    # end
     if n_ranks > 1
         # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
         gather_and_reduce_three_center_integrals(three_center_integrals, load_balance_indicies, rank_basis_indicies, comm)
@@ -189,37 +164,67 @@ end
 
 
 
-@inline function calculate_three_center_integrals_dynamic!(three_center_integrals, cartesian_indices, 
+@inline function calculate_three_center_integrals_dynamic!(three_center_integrals, 
     jeri_engine_thread, basis_sets, thead_integral_buffer)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
-    n_indicies = length(cartesian_indices)
-    batch_size = size(cartesian_indices, 1)
-
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-
+    n_aux_shells = length(basis_sets.auxillary)
+    n_primary_shells = length(basis_sets.primary)
+    number_of_primary_basis_functions = size(three_center_integrals, 1)
+    number_of_aux_basis_funtions = size(three_center_integrals, 3)
+    
     # all threads get pre determined first index to process this is the next lowest index for processing
-    task_top_index = [get_top_task_index(n_indicies, batch_size, n_ranks, n_threads)]
-
+    top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
+    aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (aux_shell_index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
+    n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
     mutex_mpi_worker = Base.Threads.ReentrantLock()
-    @sync for thread in 1:Threads.nthreads()
-        Threads.@spawn begin
-            if rank == 0 && thread == 1 && n_ranks > 1
-                setup_integral_coordinator(task_top_index, batch_size, n_ranks, n_threads, mutex_mpi_worker, three_center_integral_tag)
-            else
-                run_three_center_integrals_worker(three_center_integrals,
-                cartesian_indices,
-                batch_size,
-                jeri_engine_thread,
-                thead_integral_buffer, basis_sets, task_top_index, mutex_mpi_worker, n_indicies, thread)
+
+
+    @sync begin 
+        if rank == 0 && n_ranks > 1
+            Threads.@spawn setup_integral_coordinator_aux(three_center_integral_tag,
+                mutex_mpi_worker, top_index, aux_indicies_processed)
+        end
+        while true
+            @sync begin
+                for thread in 1:n_worker_threads
+                    Threads.@spawn begin
+                        number_of_indicies_to_process = n_primary_shells ÷ n_threads
+                        start_index = (thread - 1) * number_of_indicies_to_process + 1
+                        end_index = start_index + number_of_indicies_to_process - 1
+                        if thread == n_worker_threads
+                            end_index = n_primary_shells
+                        end
+                        integral_buffer = thead_integral_buffer[thread]
+                        engine = jeri_engine_thread[thread]
+                        for j_index in start_index:end_index # proecess the threads portion of the second index
+                            for i_index in 1:n_primary_shells # process all of the first index for (j_index,aux_shell_index_to_process) pair
+                                shell_index = CartesianIndex(aux_shell_index_to_process, i_index, j_index)
+                                calculate_three_center_integrals_kernel!(three_center_integrals, engine, shell_index, basis_sets, integral_buffer)
+                            end
+                        end
+                    end
+                end
+            end
+            get_next_task_aux!(top_index, mutex_mpi_worker, three_center_integral_tag, aux_indicies_processed, rank)
+            aux_shell_index_to_process = top_index[1]
+            if aux_shell_index_to_process < 1
+                break
             end
         end
     end
    
     if n_ranks > 1
-        MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
-        cleanup_messages(three_center_integral_tag) #todo figure out why there are extra messages and remove this
+        aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
+        rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_primary_basis_functions^2)       
+        three_center_integral_buff = MPI.VBuffer(three_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
+        MPI.Allgatherv!(three_center_integrals[ :,:,rank_basis_indices[rank+1]], three_center_integral_buff, comm) # gather the data from each rank into the buffer
+        reorder_mpi_gathered_matrix(three_center_integrals, rank_basis_indices, set_data_3D!, set_temp_3D!, zeros(Float64, number_of_primary_basis_functions , number_of_primary_basis_functions))
+
+        # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
+        # cleanup_messages(three_center_integral_tag) #todo figure out why there are extra messages and remove this
     end
 end
 
@@ -249,6 +254,8 @@ function run_three_center_integrals_worker(three_center_integrals,
         ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size, thread, three_center_integral_tag)
     end
 end
+
+
 
 
 @inline function do_three_center_integral_batch!(three_center_integrals,

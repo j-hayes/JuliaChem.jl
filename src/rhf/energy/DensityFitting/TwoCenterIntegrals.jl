@@ -131,7 +131,6 @@ end
 
     # setup the initial index to process for each rank_basis_indices
     top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
-    println("rank: $rank aux_indicies_processed at start: $(aux_indicies_processed)")
     aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
     n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
     mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the index_to_process variable
@@ -174,43 +173,6 @@ end
         MPI.Allgatherv!(two_center_integrals[ :,rank_basis_indices[rank+1]], two_center_integral_buff, comm) # gather the data from each rank into the buffer
         reorder_mpi_gathered_matrix(two_center_integrals, rank_basis_indices, set_data_2D!, set_temp_2D!, zeros(Float64, number_of_aux_basis_funtions))
     end
-end
-
-function get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks, basis_sets, number_of_aux_basis_funtions)
-    rank_basis_indices = Vector{Vector{Int64}}(undef, 0)
-    
-    indicies_per_rank = zeros(Int64, n_ranks) # number of basis functions calculated on each
-    for i in 1:n_ranks
-        basis_indicies = get_basis_indicies_for_shell_indicies(aux_indicies_processed[i], basis_sets)
-        indicies_per_rank[i] = length(basis_indicies)*number_of_aux_basis_funtions
-        push!(rank_basis_indices, basis_indicies)
-    end
-    return rank_basis_indices, indicies_per_rank
-end
-
-function broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
-    comm = MPI.COMM_WORLD
-    aux_indicies_mpi = zeros(Int64, n_aux_shells+n_ranks)
-    i = 1
-    for r in 1:n_ranks
-        for index in aux_indicies_processed[r]
-            aux_indicies_mpi[i] = index
-            i+=1
-        end
-        aux_indicies_mpi[i] = 0
-        i+=1
-    end
-    MPI.Bcast!(aux_indicies_mpi, 0, comm)
-    aux_indicies_processed = [[] for i in 1:n_ranks]
-    rank_index = 0
-    for index in aux_indicies_mpi
-        if index == 0
-            rank_index += 1
-            continue
-        end
-        push!(aux_indicies_processed[rank_index+1], index)
-    end
-    return aux_indicies_processed
 end
 
 @inline function run_two_center_integrals_worker(two_center_integrals,
