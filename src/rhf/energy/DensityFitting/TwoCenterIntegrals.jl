@@ -27,6 +27,9 @@ two_center_integral_tag = 2000
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+    # if rank == 0
+    #     print_two_center_integrals(two_center_integrals)
+    # end
     return two_center_integrals
 end
 
@@ -133,10 +136,25 @@ end
     top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
     aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
     n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
+    
+        
+    if n_worker_threads > n_aux_shells
+        n_worker_threads = n_aux_shells
+    end
+    random_num = [0]
+    # if rank == 0 
+    #     random_num = [rand(1:10000)]
+    # end
+
+    MPI.Bcast!(random_num, 0, comm)
+
+    two_center_integral_tag_rand = two_center_integral_tag + random_num[1]
+    println("two_center_integral_tag_rand = $(two_center_integral_tag_rand)")
+
     mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the index_to_process variable
     @sync begin 
         if rank == 0 && n_ranks > 1
-            Threads.@spawn setup_integral_coordinator_aux(two_center_integral_tag,
+            Threads.@spawn setup_integral_coordinator_aux(two_center_integral_tag_rand,
                 mutex_mpi_worker, top_index, aux_indicies_processed)
         end
         while true
@@ -158,20 +176,19 @@ end
                     end
                 end
             end
-            get_next_task_aux!(top_index, mutex_mpi_worker, two_center_integral_tag, aux_indicies_processed, rank)
+            get_next_task_aux!(top_index, mutex_mpi_worker, two_center_integral_tag_rand, aux_indicies_processed, rank)
             aux_shell_index_to_process = top_index[1]
             if aux_shell_index_to_process < 1
                 break
             end
         end
     end
-
     if n_ranks > 1
         aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
         rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_aux_basis_funtions)       
         two_center_integral_buff = MPI.VBuffer(two_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
-        MPI.Allgatherv!(two_center_integrals[ :,rank_basis_indices[rank+1]], two_center_integral_buff, comm) # gather the data from each rank into the buffer
         reorder_mpi_gathered_matrix(two_center_integrals, rank_basis_indices, set_data_2D!, set_temp_2D!, zeros(Float64, number_of_aux_basis_funtions))
+        cleanup_messages(two_center_integral_tag)
     end
 end
 
@@ -232,9 +249,14 @@ end
 end
 
 function print_two_center_integrals(two_center_integrals)
-    println("two_center_integrals:")
-    cartesian_indices = CartesianIndices(two_center_integrals)
-    for index in cartesian_indices
-        println("2ERI[$(index[1]), $(index[2])] = $(two_center_integrals[index])") 
+    println("two center integrals\n")
+    io = open("/home/ac.jhayes/source/JuliaChem.jl/testoutputs/two_center_integrals-4-ranks.txt", "w")
+    i=1
+    for index in CartesianIndices(two_center_integrals)
+        write(io,"2-ERI[$(index[1]),$(index[2]))] = $(two_center_integrals[index])\n")
+        if i > 5000 
+            break
+        end
     end
+    close(io)
 end

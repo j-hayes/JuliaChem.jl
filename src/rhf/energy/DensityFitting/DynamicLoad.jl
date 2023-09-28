@@ -8,12 +8,18 @@ using Base.Threads
         return 
     end
     recieve_msg = [0] # the rank asking for work
-    while top_aux_index[1] > 0
+    
+    ranks_done = 0
+
+    while top_aux_index[1] > 0 || ranks_done < MPI.Comm_size(comm)-1
         status = MPI.Probe(comm, MPI.Status; source=MPI.ANY_SOURCE, tag=more_work_tag)
         MPI.Recv!(recieve_msg, comm; source=status.source, tag=status.tag)
         get_next_task_aux!(top_aux_index, mutex_mpi_worker, more_work_tag, aux_indicies_processed, recieve_msg[1])
         send_msg = top_aux_index
         MPI.Send(send_msg, comm; dest=recieve_msg[1], tag=more_work_tag)
+        if top_aux_index[1] < 1
+            ranks_done += 1
+        end
     end 
 end
 

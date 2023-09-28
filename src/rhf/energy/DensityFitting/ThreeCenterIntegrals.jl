@@ -27,7 +27,7 @@ three_center_integral_tag = 3000
     elseif scf_options.load == "static"
         calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     elseif scf_options.load == "dynamic"
-        calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
+        calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
@@ -179,16 +179,30 @@ end
     top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
     aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (aux_shell_index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
     n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
+    
+    if n_worker_threads > n_primary_shells
+        n_worker_threads = n_primary_shells
+    end
     mutex_mpi_worker = Base.Threads.ReentrantLock()
 
+    random_num = [0]
+    # if rank == 0 
+    #     random_num = [rand(1:10000)]
+    # end
 
+    # MPI.Bcast!(random_num, 0, comm)
+
+    three_center_integral_tag_rand = three_center_integral_tag  #+ random_num[1]
+
+    println("three_center_integral_tag_rand = $(three_center_integral_tag_rand)")
     @sync begin 
         if rank == 0 && n_ranks > 1
-            Threads.@spawn setup_integral_coordinator_aux(three_center_integral_tag,
+            Threads.@spawn setup_integral_coordinator_aux(three_center_integral_tag_rand,
                 mutex_mpi_worker, top_index, aux_indicies_processed)
         end
         while true
             @sync begin
+
                 for thread in 1:n_worker_threads
                     Threads.@spawn begin
                         number_of_indicies_to_process = n_primary_shells ÷ n_threads
@@ -208,52 +222,53 @@ end
                     end
                 end
             end
-            get_next_task_aux!(top_index, mutex_mpi_worker, three_center_integral_tag, aux_indicies_processed, rank)
+            get_next_task_aux!(top_index, mutex_mpi_worker, three_center_integral_tag_rand, aux_indicies_processed, rank)
             aux_shell_index_to_process = top_index[1]
             if aux_shell_index_to_process < 1
                 break
             end
         end
     end
-   
     if n_ranks > 1
+        MPI.Barrier(comm)
         aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
         rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_primary_basis_functions^2)       
+        MPI.Barrier(comm)
         three_center_integral_buff = MPI.VBuffer(three_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
         MPI.Allgatherv!(three_center_integrals[ :,:,rank_basis_indices[rank+1]], three_center_integral_buff, comm) # gather the data from each rank into the buffer
+        MPI.Barrier(comm)
+
         reorder_mpi_gathered_matrix(three_center_integrals, rank_basis_indices, set_data_3D!, set_temp_3D!, zeros(Float64, number_of_primary_basis_functions , number_of_primary_basis_functions))
-
-        # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
-        # cleanup_messages(three_center_integral_tag) #todo figure out why there are extra messages and remove this
+        cleanup_messages(three_center_integral_tag_rand)
     end
 end
 
 
-function run_three_center_integrals_worker(three_center_integrals,
-    cartesian_indices,
-    batch_size,
-    jeri_engine_thread,
-    thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread)
+# function run_three_center_integrals_worker(three_center_integrals,
+#     cartesian_indices,
+#     batch_size,
+#     jeri_engine_thread,
+#     thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread)
 
-    comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    n_threads = Threads.nthreads()
-    n_ranks = MPI.Comm_size(comm)
+#     comm = MPI.COMM_WORLD
+#     rank = MPI.Comm_rank(comm)
+#     n_threads = Threads.nthreads()
+#     n_ranks = MPI.Comm_size(comm)
    
-    lock(mutex_mpi_worker)
-        worker_thread_number = get_worker_thread_number(thread, rank, n_threads, n_ranks)
-        ijk_index = get_first_task(n_indicies, batch_size, worker_thread_number)
-    unlock(mutex_mpi_worker)
-    while ijk_index > 0
-        do_three_center_integral_batch!(three_center_integrals,
-        ijk_index,
-        batch_size,
-        cartesian_indices,
-        jeri_engine_thread[thread],
-        thead_integral_buffer[thread], basis_sets)
-        ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size, thread, three_center_integral_tag)
-    end
-end
+#     lock(mutex_mpi_worker)
+#         worker_thread_number = get_worker_thread_number(thread, rank, n_threads, n_ranks)
+#         ijk_index = get_first_task(n_indicies, batch_size, worker_thread_number)
+#     unlock(mutex_mpi_worker)
+#     while ijk_index > 0
+#         do_three_center_integral_batch!(three_center_integrals,
+#         ijk_index,
+#         batch_size,
+#         cartesian_indices,
+#         jeri_engine_thread[thread],
+#         thead_integral_buffer[thread], basis_sets)
+#         ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size, thread, three_center_integral_tag)
+#     end
+# end
 
 
 
@@ -280,4 +295,18 @@ end
             end
         end
     end
+end
+
+function print_three_center_integrals(three_center_integrals)
+    println("three center integrals\n")
+    i = 0
+    io = open("/home/ac.jhayes/source/JuliaChem.jl/testoutputs/three_center_integrals-4-ranks.txt", "w")
+    for index in CartesianIndices(three_center_integrals)
+        write(io,"3-ERI[$(index[1]),$(index[2]),$(index[3])] = $(three_center_integrals[index])\n")
+        i += 1
+        if i > 5000 
+            break
+        end
+    end
+    close(io)
 end
