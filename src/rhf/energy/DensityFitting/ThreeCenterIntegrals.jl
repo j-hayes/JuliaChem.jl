@@ -27,7 +27,7 @@ three_center_integral_tag = 3000
     elseif scf_options.load == "static"
         calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     elseif scf_options.load == "dynamic"
-        calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
+        calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
