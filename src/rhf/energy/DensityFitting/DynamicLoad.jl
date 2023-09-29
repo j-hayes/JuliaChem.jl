@@ -18,20 +18,18 @@ using Base.Threads
         send_msg = [0]
         rank_processing_work = recieve_msg[1]
         lock(mutex_mpi_worker) do
-            get_next_task_aux!(top_aux_index, more_work_tag, aux_indicies_processed, rank_processing_work, rank)
+            get_next_task_aux!(top_aux_index, more_work_tag, aux_indicies_processed, rank_processing_work)
             send_msg[1] = top_aux_index[1]
         end
         MPI.Send(send_msg, comm; dest=recieve_msg[1], tag=more_work_tag)
         if send_msg[1] < 1 
-            println("sent done signal to rank: $(recieve_msg[1]) mesg: $(send_msg)")
             ranks_done += 1
         end
     end 
-    println("done on the coordinator")
 end
 
 
-@inline function get_next_task_aux!(top_index, more_work_tag, aux_indicies_processed, rank_processing_work, rank)
+@inline function get_next_task_aux!(top_index, more_work_tag, aux_indicies_processed, rank_processing_work)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     if rank == 0
@@ -40,7 +38,6 @@ end
             pushfirst!(aux_indicies_processed[rank_processing_work+1], top_index[1])
         end
     else
-        comm = MPI.COMM_WORLD
         send_mesg = [MPI.Comm_rank(comm)]
         MPI.Send(send_mesg, comm; dest=0, tag=more_work_tag)
         recv_mesg = [0]

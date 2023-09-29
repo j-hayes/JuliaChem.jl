@@ -17,9 +17,10 @@ function print_xyz(mol::Molecule)
     println("            in xyz format...                      ")
     println("----------------------------------------          ")
     println(" ")
+    println(natoms) 
+    println() 
   end
-  println(natoms) 
-  println() 
+
 
   for iatom in mol
     #fac = 0.52917724924 #switch from bohr to ang
