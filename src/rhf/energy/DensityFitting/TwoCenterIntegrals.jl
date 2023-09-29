@@ -3,10 +3,9 @@ using LinearAlgebra
 using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
-
 two_center_integral_tag = 2000
 
-@inline function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
+function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     aux_basis_function_count = basis_sets.auxillary.norb
@@ -27,9 +26,6 @@ two_center_integral_tag = 2000
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
-    # if rank == 0
-    #     print_two_center_integrals(two_center_integrals)
-    # end
     return two_center_integrals
 end
 
@@ -136,25 +132,17 @@ end
     top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
     aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
     n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
-    
         
     if n_worker_threads > n_aux_shells
         n_worker_threads = n_aux_shells
     end
-    random_num = [0]
-    # if rank == 0 
-    #     random_num = [rand(1:10000)]
-    # end
 
-    MPI.Bcast!(random_num, 0, comm)
 
-    two_center_integral_tag_rand = two_center_integral_tag + random_num[1]
-    println("two_center_integral_tag_rand = $(two_center_integral_tag_rand)")
-
-    mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the index_to_process variable
     @sync begin 
+        mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the top_index variable
+
         if rank == 0 && n_ranks > 1
-            Threads.@spawn setup_integral_coordinator_aux(two_center_integral_tag_rand,
+            Threads.@spawn setup_integral_coordinator_aux(two_center_integral_tag,
                 mutex_mpi_worker, top_index, aux_indicies_processed)
         end
         while true
@@ -169,6 +157,7 @@ end
                         end
                         integral_buffer = thead_integral_buffer[thread]
                         engine = jeri_engine_thread[thread]
+                        
                         for i_index in start_index:end_index
                             shell_index = CartesianIndex(i_index, aux_shell_index_to_process)
                             calculate_two_center_integrals_kernel!(two_center_integrals, engine, shell_index, basis_sets, integral_buffer)
@@ -176,20 +165,21 @@ end
                     end
                 end
             end
-            get_next_task_aux!(top_index, mutex_mpi_worker, two_center_integral_tag_rand, aux_indicies_processed, rank)
-            aux_shell_index_to_process = top_index[1]
+            lock(mutex_mpi_worker) do #todo should we lock things not on root rank? will this effect performance enough to matter
+                aux_shell_index_to_process = get_next_task_aux!(top_index, two_center_integral_tag, aux_indicies_processed, rank, rank)
+            end
             if aux_shell_index_to_process < 1
                 break
             end
         end
     end
+
     if n_ranks > 1
         aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
         rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_aux_basis_funtions)       
         two_center_integral_buff = MPI.VBuffer(two_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
         MPI.Allgatherv!(two_center_integrals[ :,rank_basis_indices[rank+1]], two_center_integral_buff, comm) # gather the data from each rank into the buffer
         reorder_mpi_gathered_matrix(two_center_integrals, rank_basis_indices, set_data_2D!, set_temp_2D!, zeros(Float64, number_of_aux_basis_funtions))
-        cleanup_messages(two_center_integral_tag)
     end
 end
 
@@ -250,14 +240,20 @@ end
 end
 
 function print_two_center_integrals(two_center_integrals)
-    println("two center integrals\n")
-    io = open("/home/ac.jhayes/source/JuliaChem.jl/testoutputs/two_center_integrals-4-ranks.txt", "w")
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    random_num = [0]
+    if rank == 0 
+        random_num = [rand(1:100000)]
+    end
+    MPI.Bcast!(random_num, 0, comm)
+
+    path = "/home/jackson/source/JuliaChem.jl/testoutputs/twocenterintegrals/$(random_num[1])-rank-$rank.txt"
+    io = open(path, "w")
     i=1
     for index in CartesianIndices(two_center_integrals)
-        write(io,"2-ERI[$(index[1]),$(index[2]))] = $(two_center_integrals[index])\n")
-        if i > 5000 
-            break
-        end
+        write(io,"2ERI[$(index[1]),$(index[2])] = $(two_center_integrals[index])\n")
     end
     close(io)
+    println("two center integrals wrote 2ERI to $path ")
 end

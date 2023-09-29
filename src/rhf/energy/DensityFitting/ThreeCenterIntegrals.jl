@@ -173,7 +173,6 @@ end
     n_aux_shells = length(basis_sets.auxillary)
     n_primary_shells = length(basis_sets.primary)
     number_of_primary_basis_functions = size(three_center_integrals, 1)
-    number_of_aux_basis_funtions = size(three_center_integrals, 3)
     
     # all threads get pre determined first index to process this is the next lowest index for processing
     top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
@@ -183,26 +182,15 @@ end
     if n_worker_threads > n_primary_shells
         n_worker_threads = n_primary_shells
     end
-    mutex_mpi_worker = Base.Threads.ReentrantLock()
 
-    random_num = [0]
-    # if rank == 0 
-    #     random_num = [rand(1:10000)]
-    # end
-
-    # MPI.Bcast!(random_num, 0, comm)
-
-    three_center_integral_tag_rand = three_center_integral_tag  #+ random_num[1]
-
-    println("three_center_integral_tag_rand = $(three_center_integral_tag_rand)")
     @sync begin 
+        mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the top_index variable
         if rank == 0 && n_ranks > 1
-            Threads.@spawn setup_integral_coordinator_aux(three_center_integral_tag_rand,
+            Threads.@spawn setup_integral_coordinator_aux(three_center_integral_tag,
                 mutex_mpi_worker, top_index, aux_indicies_processed)
         end
         while true
             @sync begin
-
                 for thread in 1:n_worker_threads
                     Threads.@spawn begin
                         number_of_indicies_to_process = n_primary_shells ÷ n_threads
@@ -222,55 +210,22 @@ end
                     end
                 end
             end
-            get_next_task_aux!(top_index, mutex_mpi_worker, three_center_integral_tag_rand, aux_indicies_processed, rank)
-            aux_shell_index_to_process = top_index[1]
+            lock(mutex_mpi_worker) do 
+                aux_shell_index_to_process = get_next_task_aux!(top_index, three_center_integral_tag, aux_indicies_processed, rank, rank)
+            end
             if aux_shell_index_to_process < 1
                 break
             end
         end
     end
     if n_ranks > 1
-        MPI.Barrier(comm)
         aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
         rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_primary_basis_functions^2)       
-        MPI.Barrier(comm)
         three_center_integral_buff = MPI.VBuffer(three_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
         MPI.Allgatherv!(three_center_integrals[ :,:,rank_basis_indices[rank+1]], three_center_integral_buff, comm) # gather the data from each rank into the buffer
-        MPI.Barrier(comm)
-
         reorder_mpi_gathered_matrix(three_center_integrals, rank_basis_indices, set_data_3D!, set_temp_3D!, zeros(Float64, number_of_primary_basis_functions , number_of_primary_basis_functions))
-        cleanup_messages(three_center_integral_tag_rand)
     end
 end
-
-
-# function run_three_center_integrals_worker(three_center_integrals,
-#     cartesian_indices,
-#     batch_size,
-#     jeri_engine_thread,
-#     thead_integral_buffer, basis_sets, top_index, mutex_mpi_worker, n_indicies, thread)
-
-#     comm = MPI.COMM_WORLD
-#     rank = MPI.Comm_rank(comm)
-#     n_threads = Threads.nthreads()
-#     n_ranks = MPI.Comm_size(comm)
-   
-#     lock(mutex_mpi_worker)
-#         worker_thread_number = get_worker_thread_number(thread, rank, n_threads, n_ranks)
-#         ijk_index = get_first_task(n_indicies, batch_size, worker_thread_number)
-#     unlock(mutex_mpi_worker)
-#     while ijk_index > 0
-#         do_three_center_integral_batch!(three_center_integrals,
-#         ijk_index,
-#         batch_size,
-#         cartesian_indices,
-#         jeri_engine_thread[thread],
-#         thead_integral_buffer[thread], basis_sets)
-#         ijk_index = get_next_task(mutex_mpi_worker, top_index, batch_size, thread, three_center_integral_tag)
-#     end
-# end
-
-
 
 
 @inline function do_three_center_integral_batch!(three_center_integrals,
