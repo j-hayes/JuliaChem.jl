@@ -9,7 +9,7 @@ module SCF_Keywords
 
     module Guess
         const guess = "guess"
-        const default = "default"
+        const default = "hcore"
         const hcore = "hcore"
         const density_fitting = "df" # density fitting with hcore guess before using full rhf 
         const sad = "sad"
