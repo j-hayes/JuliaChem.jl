@@ -26,11 +26,14 @@ three_center_integral_tag = 3000
         calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], cartesian_indices, jeri_engine_thread[1], basis_sets)
     elseif scf_options.load == "static"
         calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
-    elseif scf_options.load == "dynamic"
-        calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
+    # elseif scf_options.load == "dynamic"
+    #     calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+    
+    
+
     return three_center_integrals
 end
 
@@ -253,15 +256,17 @@ end
 end
 
 function print_three_center_integrals(three_center_integrals)
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
+
     println("three center integrals\n")
     i = 0
-    io = open("/home/ac.jhayes/source/JuliaChem.jl/testoutputs/three_center_integrals-4-ranks.txt", "w")
+    io = open(joinpath(@__DIR__,  "./three_center_integrals_out-rank-$rank.txt"), "w+")
     for index in CartesianIndices(three_center_integrals)
         write(io,"3-ERI[$(index[1]),$(index[2]),$(index[3])] = $(three_center_integrals[index])\n")
         i += 1
-        if i > 5000 
-            break
-        end
+        # if i > 10000 
+        #     break
+        # end
     end
     close(io)
 end

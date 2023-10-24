@@ -48,12 +48,15 @@ end
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
 
     cu_three_center_integrals =  CUDA.CuArray{Float64}(undef, (scf_data.μ, scf_data.μ, scf_data.A))
-    J_AB_invt = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).L))
+    J_AB_invt = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
+
+
+    
     cu_J_AB_invt =  CUDA.CuArray{Float64}(undef, (scf_data.A, scf_data.A))
 
     copyto!(cu_three_center_integrals, three_center_integrals)
     copyto!(cu_J_AB_invt, J_AB_invt)    
-    @tensor scf_data.D[μ, ν, A] = cu_three_center_integrals[μ, ν, BB] * cu_J_AB_invt[A,BB]
+    @tensor scf_data.D[μ, ν, A] = cu_three_center_integrals[μ, ν, BB] * cu_J_AB_invt[BB,A]
     cu_three_center_integrals = nothing 
     cu_J_AB_invt = nothing
   end  
@@ -76,12 +79,13 @@ end
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
+  rank = 
   if iteration == 1
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
-    J_AB_invt = inv(cholesky(Hermitian(two_center_integrals, :L)).L)
+    J_AB_invt = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
     indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-    @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[indicies,:][A,BB]
+    @tensor scf_data.D[μ, ν, A] = three_center_integrals[μ, ν, BB] * J_AB_invt[:,indicies][BB,A]
   end  
   @tensor scf_data.density[μ, ν] = occupied_orbital_coefficients[μ,i]*occupied_orbital_coefficients[ν,i]
   @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*scf_data.density[μ,ν]
@@ -110,9 +114,8 @@ end
   μμ = scf_data.μ
   νν = scf_data.μ
   AA = length(indicies)
-  LAPACK.potrf!('L', two_center_integrals)
-  J_AB_INV = inv(two_center_integrals)[ indicies,:]
-  BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
+  J_AB_INV = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))[:,indicies]
+  BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
   scf_data.D = reshape(scf_data.D, (μμ, νν,AA))
  
 end

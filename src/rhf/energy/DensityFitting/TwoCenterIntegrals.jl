@@ -26,6 +26,7 @@ function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
+    # print_two_center_integrals(two_center_integrals)
     return two_center_integrals
 end
 
@@ -90,7 +91,6 @@ end
             end    
         end
     end
-
     if n_ranks > 1
         # MPI.Allreduce!(two_center_integrals, MPI.SUM, comm)
         gather_and_reduce_two_center_integrals(two_center_integrals, load_balance_indicies, rank_basis_indicies, comm)
@@ -240,20 +240,17 @@ end
 end
 
 function print_two_center_integrals(two_center_integrals)
-    comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    random_num = [0]
-    if rank == 0 
-        random_num = [rand(1:100000)]
-    end
-    MPI.Bcast!(random_num, 0, comm)
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
 
-    path = "/home/jackson/source/JuliaChem.jl/testoutputs/twocenterintegrals/$(random_num[1])-rank-$rank.txt"
-    io = open(path, "w")
-    i=1
+    println("two center integrals\n")
+    i = 0
+    io = open(joinpath(@__DIR__,  "./two_center_integrals_out-rank-$rank.txt"), "w+")
     for index in CartesianIndices(two_center_integrals)
-        write(io,"2ERI[$(index[1]),$(index[2])] = $(two_center_integrals[index])\n")
+        write(io,"2-ERI[$(index[1]),$(index[2])] = $(two_center_integrals[index])\n")
+        i += 1
+        # if i > 10000 
+        #     break
+        # end
     end
     close(io)
-    println("two center integrals wrote 2ERI to $path ")
 end
