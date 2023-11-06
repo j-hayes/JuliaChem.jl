@@ -5,6 +5,7 @@ mutable struct SCFData
     D_tilde_permuted 
     two_electron_fock
     two_electron_fock_GPU
+    thread_two_electron_fock 
     coulomb_intermediate
     density
     occupied_orbital_coefficients
@@ -15,7 +16,7 @@ end
 
 function SCFData()
    
-    return SCFData([], [], [], [], [], [], [], [],[] , 0, 0, 0)
+    return SCFData([], [], [], [], [],[], [], [], [],[] , 0, 0, 0)
 end
 
 export SCFData

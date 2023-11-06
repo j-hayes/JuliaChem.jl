@@ -13,7 +13,7 @@ indices for all tensor contractions
   i = occupied orbitals
 ==#
 
-@inline function df_rhf_fock_build!(scf_data, jeri_engine_thread::Vector{T},
+function df_rhf_fock_build!(scf_data, jeri_engine_thread::Vector{T},
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
 
@@ -36,7 +36,7 @@ indices for all tensor contractions
   
 end
 
-@inline function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread::Vector{T},
+function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread::Vector{T},
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
@@ -65,17 +65,17 @@ end
 
   @tensor scf_data.density[μ, ν] = scf_data.occupied_orbital_coefficients[μ,i]*scf_data.occupied_orbital_coefficients[ν,i]
   @tensor scf_data.coulomb_intermediate[A] = scf_data.D[μ,ν,A]*scf_data.density[μ,ν]
-  @tensor scf_data.D_tilde[ν,i,A] = scf_data.D[ν, μμ, A]*scf_data.occupied_orbital_coefficients[μμ, i]
+  @tensor scf_data.D_tilde[i,A,ν] = scf_data.D[ν, μμ, A]*scf_data.occupied_orbital_coefficients[μμ, i]
 
   @tensor scf_data.two_electron_fock_GPU[μ, ν] = 2.0*scf_data.coulomb_intermediate[A]*scf_data.D[μ,ν,A]
-  @tensor scf_data.two_electron_fock_GPU[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
+  @tensor scf_data.two_electron_fock_GPU[μ, ν] -= scf_data.D_tilde[i, A,μ]*scf_data.D_tilde[ i, A, ν]
   
   copyto!(scf_data.two_electron_fock, scf_data.two_electron_fock_GPU)
 
 
 end
 
-@inline function df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread::Vector{T},
+function df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread::Vector{T},
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
@@ -104,36 +104,73 @@ end
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options)
     calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
+    scf_data.thread_two_electron_fock = [zeros(scf_data.μ, scf_data.μ) for i in 1:Threads.nthreads()]
   end  
   calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
   calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
 
 end
 
-@inline function calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options::SCFOptions)
+function calculate_D_BLAS!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options::SCFOptions)
   μμ = scf_data.μ
   νν = scf_data.μ
-  AA = length(indicies)
-  J_AB_INV = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))[:,indicies]
-  BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
-  scf_data.D = reshape(scf_data.D, (μμ, νν,AA))
- 
+  comm = MPI.COMM_WORLD
+  J_AB_INV = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
+  if MPI.Comm_size(comm) > 1
+    J_AB_INV = J_AB_INV[:,indicies]
+  end
+  Threads.@threads for ν in 1:μμ
+    BLAS.gemm!('N', 'N', 1.0, view(three_center_integrals, :,ν,:), J_AB_INV, 0.0, view(scf_data.D, :,ν,:)) 
+  end
+  # BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA))) # old single gemm version
 end
 
 
-@inline function calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
+function calculate_coulomb_BLAS!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
   AA = length(indicies)
+
+
   BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-  BLAS.gemm!('N', 'N', 1.0,  reshape(scf_data.density, (1,scf_data.μ*scf_data.μ)), reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), 
-    0.0, reshape(scf_data.coulomb_intermediate, (1,AA)))
-  BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0,
-    reshape(scf_data.two_electron_fock,(scf_data.μ*scf_data.μ, 1)))
+  
+  Threads.@threads for A in 1:AA
+    BLAS.gemm!('N', 'N', 1.0, reshape(view(scf_data.D,:,:,A), (1,scf_data.μ*scf_data.μ)), reshape(scf_data.density, (scf_data.μ*scf_data.μ,1)), 0.0, view(scf_data.coulomb_intermediate, A:A))
+  end
+
+  Threads.@threads for ν in 1:scf_data.μ
+    BLAS.gemm!('N', 'N', 2.0, view(scf_data.D, :,ν,:), scf_data.coulomb_intermediate, 0.0, view(scf_data.two_electron_fock, :,ν))
+  end
+  
+  # BLAS.gemm!('N', 'N', 1.0,  reshape(scf_data.density, (1,scf_data.μ*scf_data.μ)), reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)),  0.0, reshape(scf_data.coulomb_intermediate, (1,AA))) old single blas call
+  # BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0, reshape(scf_data.two_electron_fock,(scf_data.μ*scf_data.μ, 1))) old single call blas
 end
 
-@inline function calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
+function calculate_exchange_BLAS!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ
-  BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
-  BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock)
+  n_threads = Threads.nthreads()
+
+  Threads.@threads for A in 1:AA
+    BLAS.gemm!('N', 'N', 1.0, view(scf_data.D,:,:, A), occupied_orbital_coefficients,0.0, view(scf_data.D_tilde, :, :,A))
+  end  
+
+  for thread in 1:n_threads
+    scf_data.thread_two_electron_fock[thread] .= 0.0
+  end  
+
+  # @tensor scf_data.two_electron_fock[μ, ν] -= scf_data.D_tilde[μ, i, A]*scf_data.D_tilde[ν, i, A]
+
+  Threads.@threads for thread in 1:n_threads
+    for A in thread:n_threads:AA
+      BLAS.gemm!('N', 'T', -1.0,  view(scf_data.D_tilde, :,:,A), view(scf_data.D_tilde, :,:,A),  1.0, scf_data.thread_two_electron_fock[thread])
+    end
+  end 
+ 
+  for thread in 1:n_threads
+    BLAS.axpy!(1.0, scf_data.thread_two_electron_fock[thread], scf_data.two_electron_fock)
+  end  
+
+  #old single call blas 
+  # BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
+  # BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock)
 end
