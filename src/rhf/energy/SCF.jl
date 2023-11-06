@@ -467,8 +467,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
           scf_data.occupied_orbital_coefficients = CUDA.CuArray{Float64}(undef, (basis_function_count, scf_data.occ))
         else
           scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
-          # scf_data.D_tilde = zeros(Float64, (occupied_orbital_count, node_indicie_count, basis_function_count))
+          if scf_options.contraction_mode == "BLAS_NoThread"
+           scf_data.D_tilde = zeros(Float64, (occupied_orbital_count, node_indicie_count, basis_function_count))
+          else
+            scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
+          end
           scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
           scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
         end
