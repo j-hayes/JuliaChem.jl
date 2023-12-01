@@ -209,14 +209,52 @@ function calculate_D_BLAS_NoThread!(scf_data, two_center_integrals, three_center
   end
   BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
  
+
 end
 
 
 function calculate_coulomb_BLAS_NoThread!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
   AA = length(indicies)
+  # BLAS.symm!('L', 'L', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+
+
   BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-  BLAS.gemm!('N', 'N', 1.0,  reshape(scf_data.density, (1,scf_data.μ*scf_data.μ)), reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), 
-    0.0, reshape(scf_data.coulomb_intermediate, (1,AA)))
+
+  # BLAS.gemm!('N', 'N', 1.0,  reshape(scf_data.density, (1,scf_data.μ*scf_data.μ)), reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), 
+  # 0.0, reshape(scf_data.coulomb_intermediate, (1,AA)))
+
+
+  # denden = zeros(Float64, (scf_data.μ, scf_data.μ))
+  # for i in 1:scf_data.μ
+  #   for j in 1:scf_data.μ-1
+  #       denden[i,j] = scf_data.density[i,j] * 2.0
+  #       denden[j,i] = scf_data.density[j,i] * 2.0
+  #   end
+  #   denden[i,i] = scf_data.density[i,i]
+  # end
+
+  
+  # #number of elements in the lower triangle of scf_data.density
+  # lower_count = scf_data.μ*(scf_data.μ+1)÷2
+
+  den = vec_triu_loop_double(scf_data.density)
+  DD = zeros(Float64, (length(den), AA))
+  # scf_data.D[1,2,1]
+  for A in 1:AA
+    DD[:,A] = vec_triu_loop(view(scf_data.D, :,:,A))
+  end
+
+  BLAS_number_of_threads = BLAS.get_num_threads()
+  # BLAS.set_num_threads(1)
+  # Threads.@threads for A in 1:AA
+  #   BLAS.gemm!('T', 'N', 1.0,  den, view(DD, :,A), 0.0, view(scf_data.coulomb_intermediate, A:A))
+  # end
+
+  BLAS.gemm!('T', 'N', 1.0,  den, DD, 0.0, reshape(scf_data.coulomb_intermediate, (1,AA)))
+
+
+  # BLAS.set_num_threads(BLAS_number_of_threads)
+
   BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0,
     reshape(scf_data.two_electron_fock,(scf_data.μ*scf_data.μ, 1)))
 end
@@ -227,4 +265,45 @@ function calculate_exchange_BLAS_NoThread!(scf_data, occupied_orbital_coefficien
   ii = scf_data.occ
   BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
   BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock)
+end
+#https://discourse.julialang.org/t/half-vectorization/7399/4
+function vech(A::AbstractMatrix{T}) where T
+  m = LinearAlgebra.checksquare(A)
+  v = Vector{T}(undef, (m*(m+1))>>1)
+  k = 0
+  for j = 1:m, i = j:m
+      @inbounds v[k += 1] = A[i,j]
+  end
+  return v
+end
+
+# https://gist.github.com/tpapp/87e5675b87dbdd7a9a840e546eb20fae
+function vec_triu_loop(M::AbstractMatrix{T}) where T
+  m, n = size(M)
+  m == n || throw(error("not square"))
+  l = n*(n+1) ÷ 2
+  v = Vector{T}(undef,l)
+  k = 0
+  @inbounds for i in 1:n
+      for j in 1:i
+          v[k + j] = M[j, i]
+      end
+      k += i
+  end
+  return v
+end
+
+function vec_triu_loop_double(M::AbstractMatrix{T}) where T
+  m, n = size(M)
+  m == n || throw(error("not square"))
+  l = n*(n+1) ÷ 2
+  v = Vector{T}(undef,l)
+  k = 0
+  @inbounds for i in 1:n
+      for j in 1:i
+          v[k + j] = M[j, i] * (i == j ? 1.0 : 2.0)
+      end
+      k += i
+  end
+  return v
 end
