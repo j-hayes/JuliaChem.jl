@@ -369,9 +369,12 @@ end
         λnorm = get_axial_normalization_factor(λsize+1,amλ)
         normalization_factor = μνnorm*λnorm        
         if amμ < 3 && amν < 3 && amλ < 3 
-          normalization_factor = 1
+          normalization_factor = 1.0
         end
         eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize] *= normalization_factor # moved AUX to third index
+        if ν+νsize > λ+λsize
+          eri_quartet_batch[λ+λsize,ν+νsize,μ+μsize] = eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
+        end
       end 
     end
   end 

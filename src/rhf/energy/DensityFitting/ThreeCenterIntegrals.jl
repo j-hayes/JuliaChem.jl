@@ -136,7 +136,7 @@ end
             for shell_index in 1:n_shells_to_process
                 aux_index = rank_shell_indicies[shell_index + thread_index_offset]
                 for μ in 1:basis_length
-                    for ν in 1:basis_length
+                    for ν in 1:μ 
                         cartesian_index = CartesianIndex(aux_index, μ, ν)
                         engine = jeri_engine_thread[thread]
                         integral_buffer = thead_integral_buffer[thread]
@@ -150,6 +150,8 @@ end
         # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
         gather_and_reduce_three_center_integrals(three_center_integrals, load_balance_indicies, rank_basis_indicies, comm)
     end
+
+    
 end
 
 
@@ -249,6 +251,12 @@ end
         for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
             for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
                 three_center_integrals[j, k, i] = values[values_index]
+
+                if j >= k
+                    three_center_integrals[j, k, i] = values[values_index]
+                else
+                    three_center_integrals[j, k, i] = 0.0
+                end
                 values_index += 1
             end
         end
