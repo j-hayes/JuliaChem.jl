@@ -1,8 +1,8 @@
 mutable struct SCFData
     D 
-    D_permuted
+    D_triangle
     D_tilde 
-    D_tilde_permuted 
+    two_electron_fock_triangle 
     two_electron_fock
     two_electron_fock_GPU
     thread_two_electron_fock 

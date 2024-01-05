@@ -21,6 +21,7 @@ Base.include(@__MODULE__,"./DensityFitting/TwoCenterIntegrals.jl")
 Base.include(@__MODULE__,"./DensityFitting/ThreeCenterIntegrals.jl")
 Base.include(@__MODULE__,"./DensityFitting/ReorderMatrix.jl")
 Base.include(@__MODULE__,"./DensityFitting/DynamicLoad.jl")
+Base.include(@__MODULE__,"./DensityFitting/SchwarzScreening.jl")
 
 """
   overload to allow old mehtods that don't use auxillary basis sets to not need to be changed

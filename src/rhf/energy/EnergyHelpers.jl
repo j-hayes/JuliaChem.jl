@@ -1,40 +1,6 @@
 using Base.Threads
 
-#=
-"""
-	 index(a::Int64,b::Int64)
-Summary
-======
-Triangular indexing determination.
 
-Arguments
-======
-a = row index
-
-b = column index
-"""
-=#
-@inline function triangular_index(a::Int,b::Int)
-  return (muladd(a,a,-a) >> 1) + b
-end
-
-@inline function triangular_index(a::Int)
-  return muladd(a,a,-a) >> 1
-end
-
-@inline function decompose(input::Int)
-  #return ceil(Int,(-1.0+√(1+8*input))/2.0)
-  return Base.fptosi(
-    Int, 
-    Base.ceil_llvm(
-      0.5*( 
-        Base.Math.sqrt_llvm(
-          Base.sitofp(Float64, muladd(8,input,1))
-        ) - 1.0
-      )
-    )
-  )
-end
 
 function compute_enuc(mol::Molecule)
   E_nuc = 0.0

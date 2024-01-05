@@ -377,9 +377,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
   do_density_fitting = scf_options.density_fitting || scf_options.guess == Guess.density_fitting
 
-  jeri_engine_thread = do_density_fitting ? 
-    [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] :
-    [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
+  jeri_engine_thread_df = do_density_fitting ? [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] : []
+  jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
     
   scf_data = SCFData()
 
@@ -436,7 +435,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   
     #== build new Fock matrix ==#
     if !do_density_fitting
-      rfh_fock_build(workspace_a, workspace_b, F, 
+      @time rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
       schwarz_bounds, Dsh,
@@ -457,7 +456,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         scf_data.μ = basis_function_count
         scf_data.A = aux_basis_function_count
         scf_data.occ = occupied_orbital_count
-        
+        triangle_size = (basis_function_count*(basis_function_count+1))÷2
         if scf_options.contraction_mode == "GPU"
           scf_data.D = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count, node_indicie_count))
           scf_data.D_tilde =  CUDA.CuArray{Float64}(undef, (basis_function_count, occupied_orbital_count, node_indicie_count))
@@ -467,6 +466,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
           scf_data.occupied_orbital_coefficients = CUDA.CuArray{Float64}(undef, (basis_function_count, scf_data.occ))
         else
           scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
+          scf_data.D_triangle = zeros(Float64, (triangle_size, node_indicie_count))
           if scf_options.contraction_mode == "BLAS_NoThread"
            scf_data.D_tilde = zeros(Float64, (occupied_orbital_count, node_indicie_count, basis_function_count))
           else
@@ -476,13 +476,16 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
           scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
         end
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
-
+        scf_data.two_electron_fock_triangle = zeros(Float64, triangle_size)
       end
 
 
       MPI.Bcast!(C, 0, comm)
-      df_rhf_fock_build!(scf_data, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
+      @time begin 
+      
+      df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
       F .= H .+ scf_data.two_electron_fock
+      end
     end
     
     if debug && MPI.Comm_rank(comm) == 0
@@ -693,7 +696,7 @@ H = One-electron Hamiltonian Matrix
   end
 
   nsh = length(basis)
-  nindices = (muladd(nsh,nsh,nsh)*(muladd(nsh,nsh,nsh) + 2)) >> 3
+  nindices = get_n_shell_indicies(nsh)
   n_threads = Threads.nthreads()
   batches_per_thread = nsh 
   batch_size = ceil(Int,nindices/(MPI.Comm_size(comm)* n_threads*batches_per_thread))
@@ -911,22 +914,7 @@ end
   comm=MPI.COMM_WORLD
   
   #== determine shells==# 
-  bra_pair = decompose(ijkl_index)
-  ket_pair = ijkl_index - triangular_index(bra_pair)
-
-  #quartet.bra = basis.shpair_ordering[bra_pair]
-  #quartet.ket = basis.shpair_ordering[ket_pair]
- 
-  #ish = μsh.shell_id 
-  #jsh = νsh.shell_id 
-  #ksh = λsh.shell_id 
-  #lsh = σsh.shell_id 
-  
-  ish = decompose(bra_pair)
-  jsh = bra_pair - triangular_index(ish)
-
-  ksh = decompose(ket_pair)
-  lsh = ket_pair - triangular_index(ksh)
+  bra_pair, ket_pair, ish,jsh,ksh,lsh = decompose_shell_index_ijkl(ijkl_index)
 
   μsh = basis[ish] 
   νsh = basis[jsh] 
@@ -957,7 +945,7 @@ end
   bound *= maxden
 
   #== fock build for significant shell quartets ==# 
-  if Base.abs_float(bound) >= cutoff 
+  if Base.abs_float(bound) >= 0 
     #= set up some variables =#
     nμ = μsh.nbas
     nν = νsh.nbas
