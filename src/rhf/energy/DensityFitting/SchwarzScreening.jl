@@ -12,7 +12,6 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     basis_set_length = length(basis)
     shell_screen_matrix = trues(basis_set_length, basis_set_length) # true means keep the shell pair, false means it is screened
     basis_function_screen_matrix = trues(scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
-    basis_function_screen_matrix_2 = trues(scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
 
     n_shell_indicies = get_n_shell_indicies(basis_set_length)
     max_am = max_ang_mom(basis) 
@@ -28,6 +27,8 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
         if ish != ksh || jsh != lsh || jsh > ish 
             continue
         end
+
+
 
         μ_shell = basis[ish] 
         ν_shell = basis[jsh] 
@@ -48,22 +49,28 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
 
         axial_normalization_factor(eri_quartet_batch_thread[1], μ_shell, ν_shell, λ_shell, σ_shell, nμ, nν, nλ, nσ)
 
-        shell_pair_contracted = sum(eri_quartet_batch_thread[1])
+        shell_pair_contracted = sum(abs.(eri_quartet_batch_thread[1]))
 
         shell_screen_matrix[ish,jsh] = !(shell_pair_contracted <  σ_squared / max_P_P)
         shell_screen_matrix[jsh,ish] = shell_screen_matrix[ish,jsh]
 
         if shell_screen_matrix[ish,jsh] == false # if the shell pair is screened, then screen all the basis function pairs
-            view(basis_function_screen_matrix, μ_position:μ_position+nμ-1, ν_position:ν_position+nν-1) .= false
-            view(basis_function_screen_matrix_2, μ_position:μ_position+nμ-1, ν_position:ν_position+nν-1) .= false
+            # println("shell pair ($(ish), $(jsh)) screened size $(nμ) * $(nν) = $(nμ*nν)")
+            for μμ::Int64 in μ_position:(μ_position+nμ-1) 
+                for νν::Int64 in ν_position:(ν_position+nν-1) 
+                    basis_function_screen_matrix[μμ,νν] = false
+                    basis_function_screen_matrix[νν,μμ] = false
+                end
+            end
         else
+            # println("shell pair ($(ish) $(jsh)) not screened")
             #screen individual basis functions pairs within the shell pair
             for μμ::Int64 in μ_position:(μ_position+nμ-1) 
                 for νν::Int64 in ν_position:(ν_position+nν-1) 
                     μνμν = 1 + (νν-ν_position) + nν*(μμ-μ_position) + nν*nμ*(νν-ν_position) + nν*nμ*nν*(μμ-μ_position)
-
                     eri = eri_quartet_batch_thread[1][μνμν] 
-                    basis_function_screen_matrix[μμ,νν] = !(eri <  σ_squared / max_P_P)
+                    basis_function_screen_matrix[μμ,νν] = !(abs(eri) <  σ_squared / max_P_P)
+                    basis_function_screen_matrix[νν,μμ] = basis_function_screen_matrix[μμ,νν]
                 end
             end
         end
@@ -71,10 +78,23 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
 
     display(shell_screen_matrix)
     display(basis_function_screen_matrix)
-    return shell_screen_matrix
 
+    sparse_pq_index_map = zeros(Int64, scf_data.μ, scf_data.μ)
+    index = 1
+    for μμ::Int64 in 1:scf_data.μ
+        for νν::Int64 in 1:scf_data.μ
+            if basis_function_screen_matrix[μμ,νν] == true
+                sparse_pq_index_map[μμ,νν] = index
+                index += 1                
+            end
+        end
+    end
 
-
+    shells_screened = sum(@. !shell_screen_matrix)
+    basis_functions_screened =sum(@. !basis_function_screen_matrix)
+    println("shells_screened: ", shells_screened)
+    println("basis_functions_screened: ", basis_functions_screened)
+    return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 
 
@@ -82,7 +102,7 @@ function get_max_P_P(two_center_integrals)
     P = size(two_center_integrals)[1]
     maxP = floatmin(Float64) # smallest possible float
     for p in 1:P
-        if two_center_integrals[p,p] > maxP
+        if abs(two_center_integrals[p,p]) > maxP
             maxP = two_center_integrals[p,p]
         end
     end

@@ -315,6 +315,44 @@ end
 end
 
 
+
+@inline function axial_normalization_factor_screened!(eri_quartet_batch::Array{Float64},
+  μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
+  nμ::Int, nν::Int, nλ::Int,
+  μ::Int,ν::Int,λ::Int, sparse_pq_index_map) 
+
+  amμ = μsh.am
+  amν = νsh.am
+  amλ = λsh.am  
+  
+  for μsize::Int64 in 0:(nμ-1) 
+    μnorm = get_axial_normalization_factor(μsize+1,amμ)
+    for νsize::Int64 in 0:(nν-1)
+      νnorm = get_axial_normalization_factor(νsize+1,amν)
+      μνnorm = μnorm*νnorm
+      for λsize::Int64 in 0:(nλ-1)
+        
+        screened_index = sparse_pq_index_map[ν+νsize,λ+λsize] 
+        if screened_index == 0
+          continue
+        end
+        
+        λnorm = get_axial_normalization_factor(λsize+1,amλ)
+        normalization_factor = μνnorm*λnorm        
+        if amμ < 3 && amν < 3 && amλ < 3 
+          normalization_factor = 1.0
+        end
+        
+        eri_quartet_batch[screened_index,μ+μsize] *= normalization_factor # moved AUX to third index
+        if ν+νsize > λ+λsize
+          inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
+          eri_quartet_batch[inverted_screened_index,μ+μsize] = eri_quartet_batch[screened_index,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
+        end
+      end 
+    end
+  end 
+end
+
 @inline function axial_normalization_factor(eri_quartet_batch::Array{Float64},
   μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
   nμ::Int, nν::Int, nλ::Int,
@@ -327,8 +365,8 @@ end
   
   
   for μsize::Int64 in 0:(nμ-1) 
+    μnorm = get_axial_normalization_factor(μsize+1,amμ)
     for νsize::Int64 in 0:(nν-1)
-      μnorm = get_axial_normalization_factor(μsize+1,amμ)
       νnorm = get_axial_normalization_factor(νsize+1,amν)
       μνnorm = μnorm*νnorm
       for λsize::Int64 in 0:(nλ-1)
@@ -339,7 +377,7 @@ end
         end
         eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize] *= normalization_factor # moved AUX to third index
         if ν+νsize > λ+λsize
-          eri_quartet_batch[λ+λsize,ν+νsize,μ+μsize] = eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
+          eri_quartet_batch[λ+λsize,ν+νsize,μ+μsize] =  eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
         end
       end 
     end

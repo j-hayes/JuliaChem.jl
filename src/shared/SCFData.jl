@@ -9,6 +9,7 @@ mutable struct SCFData
     coulomb_intermediate
     density
     occupied_orbital_coefficients
+    J
     μ :: Int
     occ :: Int
     A :: Int
@@ -16,7 +17,7 @@ end
 
 function SCFData()
    
-    return SCFData([], [], [], [], [],[], [], [], [],[] , 0, 0, 0)
+    return SCFData([], [], [], [], [],[], [], [], [],[] ,[] , 0, 0, 0)
 end
 
 export SCFData

@@ -6,8 +6,7 @@ using JuliaChem.Shared
 
 three_center_integral_tag = 3000
 
-
-@inline function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, shell_screen_matrix :: BitMatrix)
+function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, shell_screen_matrix :: BitMatrix, basis_screen_matrix, sparse_pq_index_map)
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     three_center_integrals = zeros(Float64, (basis_function_count, basis_function_count, aux_basis_function_count))
@@ -19,22 +18,31 @@ three_center_integral_tag = 3000
     max_primary_nbas = max_number_of_basis_functions(basis_sets.primary)
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
-
-
+    three_center_integrals_screened = []
+    if length(sparse_pq_index_map) == 0
+    else
+        number_of_non_screened_basis_pairs = sum(basis_screen_matrix)
+        three_center_integrals_screened = zeros(Float64, (number_of_non_screened_basis_pairs, aux_basis_function_count)) # [unscreened pq, P]
+    
+        calculate_three_center_integrals_screened!(three_center_integrals_screened, 
+            jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, sparse_pq_index_map)
+    end
+ 
+        
     if scf_options.load == "sequential"
         cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
-        calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], shell_screen_matrix, basis_screen_matrix, cartesian_indices, jeri_engine_thread[1], basis_sets)
+        calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], shell_screen_matrix, sparse_pq_index_map, cartesian_indices, jeri_engine_thread[1], basis_sets)
     elseif scf_options.load == "static"
-        calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, basis_screen_matrix)
+        calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, sparse_pq_index_map)
     elseif scf_options.load == "dynamic"
-        calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, basis_screen_matrix)
+        calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, sparse_pq_index_map)
     else
         error("integral threading load type: $(scf_options.load) not supported")
     end
     
     
 
-    return three_center_integrals
+    return three_center_integrals, three_center_integrals_screened
 end
 
 @inline function get_indexes_eri_block(cartesian_index :: CartesianIndex, basis_sets :: CalculationBasisSets)
@@ -74,6 +82,19 @@ end
 
 end
 
+@inline function calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, sparse_pq_index_map)
+    s1, s2, s3,
+    shell_1, shell_2, shell_3,
+    shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
+    bf_1_pos, bf_2_pos, bf_3_pos, 
+    number_of_integrals = get_indexes_eri_block(cartesian_index, basis_sets)
+    
+    JERI.compute_eri_block_df(engine, integral_buffer, s1, s2, s3, number_of_integrals, 0)
+    copy_integral_result_screened!(three_center_integrals, integral_buffer, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, sparse_pq_index_map)
+    axial_normalization_factor_screened!(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos, sparse_pq_index_map)
+
+end
+
 @inline function recieve_messages(three_center_integrals, basis_sets)
     comm = MPI.COMM_WORLD
     n_ranks_still_working = MPI.Comm_size(comm) - 1 # this process is not responsible for the worker threads on rank 0
@@ -108,14 +129,14 @@ end
 end
 
 
-@inline function calculate_three_center_integrals_sequential!(three_center_integrals, integral_buffer, shell_screen_matrix, basis_screen_matrix, cartesian_indices, engine, basis_sets)
+function calculate_three_center_integrals_sequential!(three_center_integrals, integral_buffer, shell_screen_matrix, basis_screen_matrix, cartesian_indices, engine, basis_sets)
     for cartesian_index in cartesian_indices
         calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
     end
 end
 
 
-@inline function calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, basis_screen_matrix)
+function calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, basis_screen_matrix)
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
@@ -154,8 +175,6 @@ end
         # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
         gather_and_reduce_three_center_integrals(three_center_integrals, load_balance_indicies, rank_basis_indicies, comm)
     end
-
-    
 end
 
 
@@ -173,7 +192,7 @@ end
 
 
 
-@inline function calculate_three_center_integrals_dynamic!(three_center_integrals, 
+function calculate_three_center_integrals_dynamic!(three_center_integrals, 
     jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, basis_screen_matrix)
     comm = MPI.COMM_WORLD
     n_threads = Threads.nthreads()
@@ -237,17 +256,55 @@ end
 end
 
 
-@inline function do_three_center_integral_batch!(three_center_integrals,
-    top_index,
-    batch_size,
-    cartesian_indices,
-    engine,
-    integral_buffer, basis_sets)
-    for ij in top_index:-1:(max(1, top_index - batch_size))
-        shell_index = cartesian_indices[ij]
-        calculate_three_center_integrals_kernel!(three_center_integrals, engine, shell_index, basis_sets, integral_buffer)
+
+
+function calculate_three_center_integrals_screened!(three_center_integrals, 
+    jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, sparse_pq_index_map)
+    
+
+    comm = MPI.COMM_WORLD
+    rank = MPI.Comm_rank(comm)
+    n_ranks = MPI.Comm_size(comm)
+    nthreads = Threads.nthreads()
+    basis_length = length(basis_sets.primary)
+    
+    load_balance_indicies = [static_load_rank_indicies(rank_index, n_ranks, basis_sets) for rank_index in 0:n_ranks-1]
+    rank_shell_indicies = load_balance_indicies[rank+1][1] 
+    rank_basis_indicies = load_balance_indicies[rank+1][2] 
+
+    rank_number_of_shells = length(rank_shell_indicies)
+    n_indicies_per_thread = rank_number_of_shells÷nthreads
+
+
+
+    Threads.@sync for thread in 1:nthreads
+        Threads.@spawn begin     
+            thread_index_offset = static_load_thread_index_offset(thread, n_indicies_per_thread)
+            n_shells_to_process = static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
+
+            for shell_index in 1:n_shells_to_process
+                aux_index = rank_shell_indicies[shell_index + thread_index_offset]
+                for μ in 1:basis_length
+                    for ν in 1:μ 
+                        if shell_screen_matrix[μ, ν] == false
+                            continue 
+                        end
+                        cartesian_index = CartesianIndex(aux_index, μ, ν)
+                        engine = jeri_engine_thread[thread]
+                        integral_buffer = thead_integral_buffer[thread]
+                        calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, sparse_pq_index_map)
+                    end
+                end    
+            end
+        end
     end
+    if n_ranks > 1
+        # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
+        gather_and_reduce_three_center_integrals(three_center_integrals, load_balance_indicies, rank_basis_indicies, comm)
+    end
+
 end
+
 
 @inline function copy_integral_result!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
     values_index = 1
@@ -260,6 +317,29 @@ end
                     three_center_integrals[j, k, i] = values[values_index]
                 else
                     three_center_integrals[j, k, i] = 0.0
+                end
+                values_index += 1
+            end
+        end
+    end
+end
+
+@inline function copy_integral_result_screened!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, screen_index_matrix)
+    values_index = 1
+
+    for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1 #auxiliary_basis index
+        for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
+            for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
+                screened_index = screen_index_matrix[j,k]
+                if screened_index == 0 
+                    continue
+                end
+                three_center_integrals[screened_index, i] = values[values_index]
+                if j >= k
+                    inverted_screened_index = screen_index_matrix[k,j]
+                    three_center_integrals[inverted_screened_index, i] = values[values_index]
+                else
+                    three_center_integrals[screened_index, i] = 0.0
                 end
                 values_index += 1
             end
