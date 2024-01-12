@@ -481,11 +481,9 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
 
       MPI.Bcast!(C, 0, comm)
-      @time begin 
       
       df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
       F .= H .+ scf_data.two_electron_fock
-      end
     end
     
     if debug && MPI.Comm_rank(comm) == 0

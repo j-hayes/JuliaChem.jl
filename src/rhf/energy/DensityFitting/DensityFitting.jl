@@ -382,99 +382,89 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   comm = MPI.COMM_WORLD
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
 
-  D_screened = []
+ 
   if iteration == 1
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     max_P_P = get_max_P_P(two_center_integrals)
     shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map = 
       schwarz_screen_itegrals_df(scf_data, 0, max_P_P, basis_sets, jeri_engine_thread)
   
-      three_center_integrals, three_center_integrals_screened = 
-      calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
-      shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map)
-   
+    scf_data.sparse_pq_index_map = sparse_pq_index_map
+    scf_data.basis_function_screen_matrix = basis_function_screen_matrix
 
-     calculate_D_BLAS_NoThread!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
 
-    D_screened = zeros(size(three_center_integrals_screened))
+    three_center_integrals, three_center_integrals_screened = 
+    calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
+    shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map)
+    #  calculate_D_BLAS_NoThread!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
+
+    scf_data.D = zeros(size(three_center_integrals_screened))
     J_AB_INV = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
     if MPI.Comm_size(MPI.COMM_WORLD) > 1
       J_AB_INV = J_AB_INV[:,indicies]
     end
-    BLAS.gemm!('N', 'N', 1.0, three_center_integrals_screened, J_AB_INV, 0.0, D_screened)
+    BLAS.gemm!('N', 'N', 1.0, three_center_integrals_screened, J_AB_INV, 0.0, scf_data.D)
+    scf_data.J = zeros(Float64, size(three_center_integrals_screened)[1])
+
   end  
   
 
   # coulomb    
-  calculate_coulomb_BLAS_NoThread!(scf_data, occupied_orbital_coefficients, basis_sets, indicies,scf_options)
-
-  scf_data.J = zeros(size(three_center_integrals_screened)[1])
+  # calculate_coulomb_BLAS_NoThread!(scf_data, occupied_orbital_coefficients, basis_sets, indicies,scf_options)
   AA = length(indicies)
   BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-  density_array = zeros(Float64, (1, size(three_center_integrals_screened)[1]))
+ 
+  density_array = zeros(Float64, 1, size(scf_data.J)[1])
   for index in CartesianIndices(scf_data.density)
-    pq_index = sparse_pq_index_map[index]
+    pq_index = scf_data.sparse_pq_index_map[index]
     if pq_index == 0
       continue
     end
     density_array[1, pq_index] = scf_data.density[index]
   end
 
-  coulomb_intermediate = zeros(Float64, (1,AA))
-  BLAS.gemm!('N', 'N', 1.0, density_array, D_screened, 0.0, coulomb_intermediate)
-  BLAS.gemm!('N', 'T', 2.0, D_screened, coulomb_intermediate, 0.0, scf_data.J)
+  BLAS.gemm!('N', 'N', 1.0, density_array, scf_data.D, 0.0, reshape(scf_data.coulomb_intermediate, 1, AA))
+  BLAS.gemm!('N', 'N', 2.0, scf_data.D, scf_data.coulomb_intermediate, 0.0, scf_data.J)
 
 
   #exchange 
-  calculate_exchange_BLAS_NoThread!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
+  # calculate_exchange_BLAS_NoThread!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ
-  max_diff = 0.0
-  D_tilde = zeros(Float64, (μμ, ii, AA))
   for p in 1:scf_data.μ 
-    number_of_pq_non_screened = sum(basis_function_screen_matrix[p,:]) 
+    number_of_pq_non_screened = sum(scf_data.basis_function_screen_matrix[p,:]) 
     C_p = zeros(number_of_pq_non_screened, ii) # non-zero C rows for a given p
     non_zero_r_index = 1
     for r in 1:scf_data.μ
-      if basis_function_screen_matrix[p,r] != 0
+      if scf_data.basis_function_screen_matrix[p,r] != 0
         C_p[non_zero_r_index,:] .= occupied_orbital_coefficients[r,:]
         non_zero_r_index += 1
       end
     end
-    max_diff = 0.0
 
     first_index = 0
     i = 1
     while first_index == 0
-      first_index = sparse_pq_index_map[p,i]
+      first_index = scf_data.sparse_pq_index_map[p,i]
       i+=1
     end
-    D_tilde[p,:,:] .= BLAS.gemm('T', 'N', 1.0, C_p, D_screened[first_index:first_index+number_of_pq_non_screened-1,:])
+    scf_data.D_tilde[p,:,:] .= BLAS.gemm('T', 'N', 1.0, C_p, scf_data.D[first_index:first_index+number_of_pq_non_screened-1,:])
   end
 
 
-  two_electron_fock = zeros(Float64, (μμ, μμ))
   # BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
-  BLAS.gemm!('N', 'T', -1.0, reshape(D_tilde, (μμ, ii*AA)), reshape(D_tilde, (μμ, ii*AA)), 1.0, two_electron_fock)
+  BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 0.0, scf_data.two_electron_fock)
 
   for p in 1:scf_data.μ
     for q in 1:scf_data.μ
-      index = sparse_pq_index_map[p,q]
+      index = scf_data.sparse_pq_index_map[p,q]
       if index == 0
         continue
       end
-      two_electron_fock[p,q] += scf_data.J[index]
-      diff = abs(two_electron_fock[p,q] - scf_data.two_electron_fock[p,q])
-      if diff > max_diff
-        max_diff = diff
-      end
+      scf_data.two_electron_fock[p,q] += scf_data.J[index]
     end  
   end
-
-  println("max_diff = $max_diff")
-  exit()
-
 end
 
 
@@ -505,7 +495,7 @@ function calculate_D_BLAS_NoThread!(scf_data, two_center_integrals, three_center
   if MPI.Comm_size(MPI.COMM_WORLD) > 1
     J_AB_INV = J_AB_INV[:,indicies]
   end
-  @time BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
+  BLAS.gemm!('N', 'N', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), J_AB_INV, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
  
 end
 
