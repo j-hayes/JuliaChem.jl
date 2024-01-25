@@ -11,6 +11,7 @@ mutable struct SCFData
     occupied_orbital_coefficients
     sparse_pq_index_map
     basis_function_screen_matrix
+    density_array
     J
     μ :: Int
     occ :: Int
@@ -19,7 +20,7 @@ end
 
 function SCFData()
    
-    return SCFData([], [], [], [], [],[], [], [], [],[] ,[],[],[] , 0, 0, 0)
+    return SCFData([], [], [], [], [],[], [], [], [],[] ,[],[],[],[] , 0, 0, 0)
 end
 
 export SCFData
