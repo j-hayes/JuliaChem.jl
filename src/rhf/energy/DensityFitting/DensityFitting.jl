@@ -390,13 +390,13 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   Q = scf_data.A
   occ = scf_data.occ
   
-  
+  occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2,1))
 
   if iteration == 1
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     max_P_P = get_max_P_P(two_center_integrals)
     shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map = 
-      schwarz_screen_itegrals_df(scf_data, 10^-12, max_P_P, basis_sets, jeri_engine_thread)
+      schwarz_screen_itegrals_df(scf_data, 0, max_P_P, basis_sets, jeri_engine_thread)
   
     scf_data.sparse_pq_index_map = sparse_pq_index_map
     scf_data.basis_function_screen_matrix = basis_function_screen_matrix
@@ -435,31 +435,43 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     p_start+= non_screened_p_indices[pp]
   end
 
+  C_p = []
+  for pp in 1:scf_data.μ 
+    push!(C_p, zeros(non_screened_p_indices[pp], scf_data.occ))
+  end
+  #todo move the screening indexes to iteration 1 and save them in scf_data
+
 
   println("exchange")
   n_threads = BLAS.get_num_threads()
   BLAS.set_num_threads(1)
   @time begin 
-  Threads.@threads for pp in 1:scf_data.μ
-    non_zero_r_index = 1
-    C_p = zeros(non_screened_p_indices[pp], scf_data.occ)
-    for r in 1:scf_data.μ
-      if scf_data.basis_function_screen_matrix[r,pp]
-        C_p[non_zero_r_index,:] .= occupied_orbital_coefficients[r,:]
-        non_zero_r_index += 1
+    Threads.@threads for pp in 1:scf_data.μ
+      non_zero_r_index = 1
+      for r in 1:scf_data.μ
+        if scf_data.basis_function_screen_matrix[r,pp]
+          C_p[pp][non_zero_r_index,:] .= occupied_orbital_coefficients[:,r]
+          non_zero_r_index += 1
+        end
+      end 
+    end
+
+    @time begin 
+      Threads.@threads for pp in 1:scf_data.μ
+        D_view = view(scf_data.D, :, sparse_p_start_indices[pp]:sparse_p_start_indices[pp]+non_screened_p_indices[pp]-1) 
+        BLAS.gemm!('N', 'N', 1.0, D_view, C_p[pp], 0.0, view(scf_data.D_tilde, :,:,pp))       
       end
     end
-    non_zero_r_index -= 1
-    D_view = view(scf_data.D, :, sparse_p_start_indices[pp]:sparse_p_start_indices[pp]+non_screened_p_indices[pp]-1) 
-    BLAS.gemm!('N', 'N', 1.0, D_view, C_p, 0.0, view(scf_data.D_tilde, :,:,pp))        
-  end
-  BLAS.set_num_threads(n_threads)
 
-  BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ,p), reshape(scf_data.D_tilde, Q*occ,p), 0.0, scf_data.two_electron_fock)
+    @time begin
+      BLAS.set_num_threads(n_threads)
+      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ, p), reshape(scf_data.D_tilde, Q*occ,p), 0.0, scf_data.two_electron_fock)
+    end
   end 
+
   println("coulomb")
   @time begin 
-  @time BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+  BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
 
   Threads.@threads for index in CartesianIndices(scf_data.density)
     if scf_data.basis_function_screen_matrix[index[1], index[2]] == 0
@@ -468,17 +480,16 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     scf_data.density_array[scf_data.sparse_pq_index_map[index[1], index[2]]] = scf_data.density[index]
   end
 
-
   @time BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
-  @time BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.coulomb_intermediate, (1,Q)), scf_data.D, 0.0, reshape(scf_data.J, (1,length(scf_data.J))))
-  @time begin 
+  @time BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)
+  
+
   Threads.@threads for index in CartesianIndices(scf_data.sparse_pq_index_map)
       if scf_data.sparse_pq_index_map[index] == 0
         continue
       end
       scf_data.two_electron_fock[index[1],index[2]] += scf_data.J[scf_data.sparse_pq_index_map[index]]
     end
-  end
   end
 end
 
