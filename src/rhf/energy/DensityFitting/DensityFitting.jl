@@ -395,20 +395,19 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   if iteration == 1
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     max_P_P = get_max_P_P(two_center_integrals)
-    shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map = 
-      schwarz_screen_itegrals_df(scf_data, 0, max_P_P, basis_sets, jeri_engine_thread)
+    shell_screen_matrix, 
+    scf_data.screening_data.basis_function_screen_matrix, 
+    scf_data.screening_data.sparse_pq_index_map = 
+      schwarz_screen_itegrals_df(scf_data, 10^-12, max_P_P, basis_sets, jeri_engine_thread)
   
-    scf_data.sparse_pq_index_map = sparse_pq_index_map
-    scf_data.basis_function_screen_matrix = basis_function_screen_matrix
 
     scf_options.load = "screened"
     three_center_integrals = 
     calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
-    shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map)
-    println("size(three_center_integrals) = $(size(three_center_integrals))")
-    three_center_integrals = permutedims(three_center_integrals, (2,1))
+    shell_screen_matrix, scf_data.screening_data.basis_function_screen_matrix,  scf_data.screening_data.sparse_pq_index_map)
+    
+    three_center_integrals = permutedims(three_center_integrals, (2,1)) #todo put this in correct order in calulation step
     scf_data.D = zeros(size(three_center_integrals))
-    println("size(three_center_integrals) = $(size(three_center_integrals))")
 
     J_AB_INV = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
     # if MPI.Comm_size(MPI.COMM_WORLD) > 1
@@ -416,31 +415,52 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     # end
 
     BLAS.gemm!('T', 'N', 1.0, J_AB_INV, three_center_integrals, 0.0, scf_data.D)
+
     scf_data.D_tilde = zeros(Float64, (scf_data.A, scf_data.occ, scf_data.μ))
 
     scf_data.J =  zeros(Float64, size(three_center_integrals)[2])
     scf_data.coulomb_intermediate = zeros(Float64, scf_data.A)
     scf_data.density_array = zeros(Float64, size(three_center_integrals)[2])
 
+    scf_data.screening_data.sparse_p_start_indices = zeros(Int64, scf_data.μ)
+    scf_data.screening_data.non_screened_p_indices = zeros(Int64, scf_data.μ)
+    p_start = 1
+    for pp in 1:scf_data.μ
+      scf_data.screening_data.non_screened_p_indices[pp] = sum(scf_data.screening_data.basis_function_screen_matrix[:,pp]) 
+      scf_data.screening_data.sparse_p_start_indices[pp] = p_start
+      p_start+= scf_data.screening_data.non_screened_p_indices[pp]
+      push!(scf_data.screening_data.non_zero_coefficients, zeros(scf_data.screening_data.non_screened_p_indices[pp], scf_data.occ))
+    end
 
   end  
 
 
-  sparse_p_start_indices = zeros(Int64, scf_data.μ)
-  non_screened_p_indices = zeros(Int64, scf_data.μ)
-  p_start = 1
-  for pp in 1:scf_data.μ
-    non_screened_p_indices[pp] = sum(scf_data.basis_function_screen_matrix[:,pp]) 
-    sparse_p_start_indices[pp] = p_start
-    p_start+= non_screened_p_indices[pp]
-  end
 
-  C_p = []
-  for pp in 1:scf_data.μ 
-    push!(C_p, zeros(non_screened_p_indices[pp], scf_data.occ))
-  end
+
+
   #todo move the screening indexes to iteration 1 and save them in scf_data
+  println("coulomb")
+  @time begin 
+  BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
 
+  Threads.@threads for index in CartesianIndices(scf_data.density)
+    if scf_data.screening_data.basis_function_screen_matrix[index[1], index[2]] == 0
+      continue
+    end
+    scf_data.density_array[scf_data.screening_data.sparse_pq_index_map[index[1], index[2]]] = scf_data.density[index]
+  end
+
+  @time BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
+  @time BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)
+  
+
+  Threads.@threads for index in CartesianIndices(scf_data.screening_data.sparse_pq_index_map)
+      if scf_data.screening_data.sparse_pq_index_map[index] == 0
+        continue
+      end
+      scf_data.two_electron_fock[index[1],index[2]] = scf_data.J[scf_data.screening_data.sparse_pq_index_map[index]]
+    end
+  end
 
   println("exchange")
   n_threads = BLAS.get_num_threads()
@@ -449,48 +469,22 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     Threads.@threads for pp in 1:scf_data.μ
       non_zero_r_index = 1
       for r in 1:scf_data.μ
-        if scf_data.basis_function_screen_matrix[r,pp]
-          C_p[pp][non_zero_r_index,:] .= occupied_orbital_coefficients[:,r]
+        if scf_data.screening_data.basis_function_screen_matrix[r,pp]
+          scf_data.screening_data.non_zero_coefficients[pp][non_zero_r_index,:] .= occupied_orbital_coefficients[:,r]
           non_zero_r_index += 1
         end
       end 
-    end
-
-    @time begin 
-      Threads.@threads for pp in 1:scf_data.μ
-        D_view = view(scf_data.D, :, sparse_p_start_indices[pp]:sparse_p_start_indices[pp]+non_screened_p_indices[pp]-1) 
-        BLAS.gemm!('N', 'N', 1.0, D_view, C_p[pp], 0.0, view(scf_data.D_tilde, :,:,pp))       
-      end
+      D_view = view(scf_data.D, :, scf_data.screening_data.sparse_p_start_indices[pp]:scf_data.screening_data.sparse_p_start_indices[pp]+scf_data.screening_data.non_screened_p_indices[pp]-1) 
+      BLAS.gemm!('N', 'N', 1.0, D_view, scf_data.screening_data.non_zero_coefficients[pp], 0.0, view(scf_data.D_tilde, :,:,pp))       
     end
 
     @time begin
       BLAS.set_num_threads(n_threads)
-      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ, p), reshape(scf_data.D_tilde, Q*occ,p), 0.0, scf_data.two_electron_fock)
+      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ, p), reshape(scf_data.D_tilde, Q*occ,p), 1.0, scf_data.two_electron_fock)
     end
   end 
 
-  println("coulomb")
-  @time begin 
-  BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-
-  Threads.@threads for index in CartesianIndices(scf_data.density)
-    if scf_data.basis_function_screen_matrix[index[1], index[2]] == 0
-      continue
-    end
-    scf_data.density_array[scf_data.sparse_pq_index_map[index[1], index[2]]] = scf_data.density[index]
-  end
-
-  @time BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
-  @time BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)
   
-
-  Threads.@threads for index in CartesianIndices(scf_data.sparse_pq_index_map)
-      if scf_data.sparse_pq_index_map[index] == 0
-        continue
-      end
-      scf_data.two_electron_fock[index[1],index[2]] += scf_data.J[scf_data.sparse_pq_index_map[index]]
-    end
-  end
 end
 
 
@@ -526,10 +520,16 @@ end
 function calculate_coulomb_BLAS_NoThread!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
   AA = length(indicies)
   BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-  BLAS.gemm!('N', 'N', 1.0,  reshape(scf_data.density, (1,scf_data.μ*scf_data.μ)), reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), 
-    0.0, reshape(scf_data.coulomb_intermediate, (1,AA)))
-  BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0,
-    reshape(scf_data.two_electron_fock,(scf_data.μ*scf_data.μ, 1)))
+  
+
+  BLAS.gemv!('T', 1.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), reshape(scf_data.density, scf_data.μ*scf_data.μ), 0.0, scf_data.coulomb_intermediate)
+  BLAS.gemv!('N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), scf_data.coulomb_intermediate , 0.0, reshape(scf_data.two_electron_fock, scf_data.μ^2))
+
+  
+  # BLAS.gemm!('N', 'N', 1.0,  reshape(scf_data.density, (1,scf_data.μ*scf_data.μ)), reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), 
+  #   0.0, reshape(scf_data.coulomb_intermediate, (1,AA)))
+  # BLAS.gemm!('N', 'N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ, AA)), scf_data.coulomb_intermediate, 0.0,
+  #   reshape(scf_data.two_electron_fock,(scf_data.μ*scf_data.μ, 1)))
 end
 
 function calculate_exchange_BLAS_NoThread!(scf_data, occupied_orbital_coefficients,  basis_sets, indicies, scf_options :: SCFOptions)
