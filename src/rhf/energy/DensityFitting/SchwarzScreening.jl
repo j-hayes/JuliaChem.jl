@@ -55,16 +55,13 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
         shell_screen_matrix[jsh,ish] = shell_screen_matrix[ish,jsh]
 
         if shell_screen_matrix[ish,jsh] == false # if the shell pair is screened, then screen all the basis function pairs
-            # println("shell pair ($(ish), $(jsh)) screened size $(nμ) * $(nν) = $(nμ*nν)")
             for μμ::Int64 in μ_position:(μ_position+nμ-1) 
                 for νν::Int64 in ν_position:(ν_position+nν-1) 
                     basis_function_screen_matrix[μμ,νν] = false
                     basis_function_screen_matrix[νν,μμ] = false
                 end
             end
-        else
-            # println("shell pair ($(ish) $(jsh)) not screened")
-            #screen individual basis functions pairs within the shell pair
+        else #screen individual basis functions pairs within the shell pair
             for μμ::Int64 in μ_position:(μ_position+nμ-1) 
                 for νν::Int64 in ν_position:(ν_position+nν-1) 
                     μνμν = 1 + (νν-ν_position) + nν*(μμ-μ_position) + nν*nμ*(νν-ν_position) + nν*nμ*nν*(μμ-μ_position)
@@ -76,9 +73,6 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
         end
     end
 
-    display(shell_screen_matrix)
-    display(basis_function_screen_matrix)
-
     sparse_pq_index_map = zeros(Int64, scf_data.μ, scf_data.μ)
     index = 1
     for μμ::Int64 in 1:scf_data.μ
@@ -89,11 +83,6 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
             end
         end
     end
-
-    shells_screened = sum(@. !shell_screen_matrix)
-    basis_functions_screened =sum(@. !basis_function_screen_matrix)
-    println("shells_screened: ", shells_screened)
-    println("basis_functions_screened: ", basis_functions_screened)
     return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 
