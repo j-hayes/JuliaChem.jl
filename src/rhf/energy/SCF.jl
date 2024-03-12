@@ -435,7 +435,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   
     #== build new Fock matrix ==#
     if !do_density_fitting
-      @time rfh_fock_build(workspace_a, workspace_b, F, 
+      rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
       schwarz_bounds, Dsh,
@@ -467,11 +467,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         else
           scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
           scf_data.D_triangle = zeros(Float64, (triangle_size, node_indicie_count))
-          if scf_options.contraction_mode == "BLAS_NoThread"
-           scf_data.D_tilde = zeros(Float64, (occupied_orbital_count, node_indicie_count, basis_function_count))
-          else
-            scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
-          end
+          scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
           scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
           scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
         end
@@ -481,9 +477,10 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
 
       MPI.Bcast!(C, 0, comm)
-      
-      df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
-      F .= H .+ scf_data.two_electron_fock
+
+        df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
+        F .= H .+ scf_data.two_electron_fock
+
     end
     
     if debug && MPI.Comm_rank(comm) == 0

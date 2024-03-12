@@ -335,7 +335,7 @@ end
                     inverted_screened_index = screen_index_matrix[k,j]
                     three_center_integrals[inverted_screened_index, i] = values[values_index]
                 else
-                    three_center_integrals[screened_index, i] = 0.0
+                    three_center_integrals[screened_index, i] = 0.0 #I may want to put these in here instead of zero to avoid confusion
                 end
                 values_index += 1
             end

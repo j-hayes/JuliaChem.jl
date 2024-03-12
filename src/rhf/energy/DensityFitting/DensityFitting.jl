@@ -4,6 +4,9 @@ using CUDA
 using TensorOperations 
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
+using Serialization
+using HDF5
+
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 #== 
 indices for all tensor contractions 
@@ -47,7 +50,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine}
   comm = MPI.COMM_WORLD
 
-
+  
   if iteration == 1
 
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
@@ -378,6 +381,81 @@ end
   return (i-1)*p + j
 end 
 
+# function serialize_data(file_name, data, iteration)
+
+#   if iteration != 1
+#     return 
+#   end
+#   #get directory of current running script
+
+#   serialization_path = "$(pwd())/testoutputs/C20H42/screened_no_sym"
+
+#   try
+#     # run(`rm -rf $serialization_path`)
+#   catch
+#   end
+#   try
+#     mkpath(serialization_path)
+#   catch
+#   end
+ 
+#   io = open("$serialization_path/$file_name", "w")
+#   serialize(io, data)
+#   close(io)
+# end
+
+
+function serialize_data(file_name, data, iteration)
+
+  if iteration != 1
+    return 
+  end
+  #get directory of current running script
+
+  serialization_path = "$(pwd())/testoutputs/water/for_hackathon_hdf5"
+
+  try
+    # run(`rm -rf $serialization_path`)
+  catch
+  end
+  try
+    mkpath(serialization_path)
+  catch
+  end
+
+  data_size = size(data)
+
+
+ 
+  # io = open("$serialization_path/$file_name", "w+")
+
+  # write(io, length(data_size))
+  # #row major for c++ use
+  # if length(data_size) == 3
+  #   for i in 1:data_size[1]
+  #     for j in 1:data_size[2]
+  #       for k in 1:data_size[3]
+  #       write(io, "$(data[i,j,k])\n")
+  #       end 
+  #     end
+  #   end
+  # else
+  #   for i in 1:data_size[1]
+  #     for j in 1:data_size[2]
+  #       write(io, "$(data[i,j])\n")
+  #     end
+  #   end
+  # end
+  #close(io)
+  h5open("$serialization_path/$file_name", "w") do fid
+    g = create_group(fid, "data")
+    dset = create_dataset(g, "values", eltype(data), data_size)
+    write(dset,data)
+  end
+
+end
+
+
 
 function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread ::Vector{T2},
   basis_sets::CalculationBasisSets,
@@ -394,22 +472,52 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
   if iteration == 1
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+    
+ 
+    serialize_data("two_center_integrals.h5", two_center_integrals, iteration)
+
+
     max_P_P = get_max_P_P(two_center_integrals)
     shell_screen_matrix, 
     scf_data.screening_data.basis_function_screen_matrix, 
     scf_data.screening_data.sparse_pq_index_map = 
       schwarz_screen_itegrals_df(scf_data, 10^-12, max_P_P, basis_sets, jeri_engine_thread)
   
+    # serialize_data("shell_screen_matrix.h5", shell_screen_matrix, iteration)
 
+    basis_function_screen_int = zeros(Int64, (p, q))
+    for i in 1:p
+      for j in 1:q
+        basis_function_screen_int[i,j] = scf_data.screening_data.basis_function_screen_matrix[i,j]
+      end
+    end
+
+    serialize_data("basis_function_screen_matrix.h5",  basis_function_screen_int, iteration)
+
+    serialize_data("sparse_pq_index_map.h5", scf_data.screening_data.sparse_pq_index_map, iteration)
+    
     scf_options.load = "screened"
     three_center_integrals = 
     calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
     shell_screen_matrix, scf_data.screening_data.basis_function_screen_matrix,  scf_data.screening_data.sparse_pq_index_map)
     
+    serialize_data("three_center_integrals_Q_by_pq.h5", three_center_integrals, iteration)
+
+
     three_center_integrals = permutedims(three_center_integrals, (2,1)) #todo put this in correct order in calulation step
+    
+
+    scf_options.load = "static"
+    
+    three_center_integrals_non_screened = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
+    
+    serialize_data("three_center_integrals_non_screened.h5", three_center_integrals_non_screened, iteration)
+    
     scf_data.D = zeros(size(three_center_integrals))
 
     J_AB_INV = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
+    serialize_data("J_AB_INV.h5", J_AB_INV, iteration)
+
     # if MPI.Comm_size(MPI.COMM_WORLD) > 1
     #   J_AB_INV = J_AB_INV[:,indicies]
     # end
@@ -419,6 +527,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     scf_data.D_tilde = zeros(Float64, (scf_data.A, scf_data.occ, scf_data.μ))
 
     scf_data.J =  zeros(Float64, size(three_center_integrals)[2])
+    scf_data.K = similar(scf_data.two_electron_fock)
     scf_data.coulomb_intermediate = zeros(Float64, scf_data.A)
     scf_data.density_array = zeros(Float64, size(three_center_integrals)[2])
 
@@ -442,6 +551,8 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   println("coulomb")
   @time begin 
   BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+  
+  
 
   Threads.@threads for index in CartesianIndices(scf_data.density)
     if scf_data.screening_data.basis_function_screen_matrix[index[1], index[2]] == 0
@@ -480,9 +591,22 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
     @time begin
       BLAS.set_num_threads(n_threads)
-      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ, p), reshape(scf_data.D_tilde, Q*occ,p), 1.0, scf_data.two_electron_fock)
+      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ, p), reshape(scf_data.D_tilde, Q*occ,p), 0.0, scf_data.K)
+      scf_data.two_electron_fock += scf_data.K
     end
   end 
+  if iteration == 1 
+    serialize_data("two_electron_fock.h5", scf_data.two_electron_fock, iteration)
+    serialize_data("density_array.h5", scf_data.density_array, iteration)    
+    serialize_data("D.h5", permutedims(scf_data.D, (2,1)), iteration)
+    serialize_data("scf_data.density.h5", scf_data.density, iteration)
+    serialize_data("coulomb_intermediate.h5", scf_data.coulomb_intermediate, iteration)
+    serialize_data("D_tilde.h5", scf_data.D_tilde, iteration)
+    serialize_data("J.h5", scf_data.J, iteration)
+    serialize_data("K.h5", scf_data.K, iteration)
+    serialize_data("occupied_orbital_coefficients.h5", occupied_orbital_coefficients, iteration)    
+
+  end
 
   
 end
@@ -500,7 +624,17 @@ function df_rhf_fock_build_BLAS_NoThread!(scf_data, jeri_engine_thread_df::Vecto
   end  
   
   @time calculate_coulomb_BLAS_NoThread!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
+  serialize_data("J_non_screened.h5", scf_data.two_electron_fock, iteration)
+
   @time calculate_exchange_BLAS_NoThread!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
+
+
+  if iteration == 1 
+    serialize_data("D_non_screened.h5", scf_data.D, iteration)
+    println("serializing two electron fock data non screened")
+    serialize_data("two_electron_fock_non_screened.h5", scf_data.two_electron_fock, iteration)
+    serialize_data("two_electron_fock_non_screened.h5", scf_data.two_electron_fock, iteration)
+  end
 
 end
 
@@ -536,6 +670,7 @@ function calculate_exchange_BLAS_NoThread!(scf_data, occupied_orbital_coefficien
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ
+  println("size(scf_data.D_tilde) = $(size(scf_data.D_tilde))")
   BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
   BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock)
 end

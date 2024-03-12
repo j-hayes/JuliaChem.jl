@@ -19,6 +19,7 @@ mutable struct SCFData
     occupied_orbital_coefficients
     density_array
     J
+    K
     screening_data :: ScreeningData
     μ :: Int
     occ :: Int
@@ -28,7 +29,7 @@ end
 
 function SCFData()
     sd = ScreeningData([],[], [], [], [])
-    return SCFData([], [], [], [], [],[], [], [], [],[] ,[],[], sd, 0, 0, 0)
+    return SCFData([], [], [], [], [],[], [], [], [], [],[] ,[],[], sd, 0, 0, 0)
 end
 
 export SCFData
