@@ -54,7 +54,7 @@
       "df_rmsd":2.0E-5,
       "scf_type":"df",
       "load":"static",
-      "contraction_mode":"default"
+      "contraction_mode":"BLAS"
     },
     "prop":{
       "mo energies":true,

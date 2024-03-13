@@ -11,15 +11,15 @@
   "driver": "energy",
   "model": {   
     "method": "RHF",
-    "basis": "6-31G(2df,p)",
-    "auxiliary_basis": "cc-pVTZ-JKFIT"
+    "basis": "STO-3G",
+    "auxiliary_basis": "def2-universal-JKFIT"
   },
   "keywords": {
     "scf":{
       "scf_type":"df",
       "guess":"hcore", 
       "load":"static",
-      "contraction_mode":"BLAS",
+      "contraction_mode":"screened",
       "dele":1E-6,
       "rmsd":1E-6,
       "df_dele":1E-6,

@@ -460,52 +460,42 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   #todo move the screening indexes to iteration 1 and save them in scf_data
   println("coulomb")
   @time begin 
-  BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+    BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
 
-  Threads.@threads for index in CartesianIndices(scf_data.density)
-    if !basis_function_screen_matrix[index[1], index[2]] 
-      continue
+    Threads.@threads for index in CartesianIndices(scf_data.density)
+      if !basis_function_screen_matrix[index[1], index[2]] 
+        continue
+      end
+      if index[1] == index[2]
+        scf_data.density_array[screened_triangular_indices[index[1], index[2]]] = scf_data.density[index]
+      else
+        scf_data.density_array[screened_triangular_indices[index[1], index[2]]] = scf_data.density[index]*2.0 # trianglar symmetry necessitates doubling the value that is contracted into the coulomb intermediate
+      end
     end
-    if index[1] == index[2]
-      scf_data.density_array[screened_triangular_indices[index[1], index[2]]] = scf_data.density[index]
-    else
-      scf_data.density_array[screened_triangular_indices[index[1], index[2]]] = scf_data.density[index]*2.0 # trianglar symmetry necessitates doubling the value that is contracted into the coulomb intermediate
-    end
-  end
 
 
-  @time BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
-  @time BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)
+    BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
+    BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)    
   
   
-  
-
-  scf_data.two_electron_fock .= 0.0
-  
-  Threads.@threads for index in CartesianIndices(scf_data.two_electron_fock)
+    scf_data.two_electron_fock .= 0.0
+    Threads.@threads for index in CartesianIndices(scf_data.two_electron_fock)
       if !basis_function_screen_matrix[index] || index[2] > index[1]
         continue
       end
-
       scf_data.two_electron_fock[index] = scf_data.J[screened_triangular_indices[index]]
       scf_data.two_electron_fock[index[2], index[1]] = scf_data.two_electron_fock[index]
     end
   end
-
   #make the below code a bit more readable/shorter with a couple variable 
-  non_zero_coefficients = scf_data.screening_data.non_zero_coefficients
   println("exchange")
+  B_buffer = zeros(Float64, (Q, p, Threads.nthreads()))
   @time begin 
-    calculate_W_from_trianglular_screened(scf_data.D, p, occupied_orbital_coefficients, 
+    @time calculate_W_from_trianglular_screened(scf_data.D, B_buffer, p, occupied_orbital_coefficients, 
       basis_function_screen_matrix, 
       screened_triangular_indices, 
-      non_zero_coefficients, scf_data.D_tilde)
-
-    @time begin
-      # BLAS.gemm!('T', 'N', 1.0, reshape(scf_data.D_tilde, (Q*occ, p)), reshape(scf_data.D_tilde, (Q*occ, p)),
-      #  1.0, scf_data.two_electron_fock)
-      calculate_K_upper_diagonal_block(scf_data)  
-    end
+      scf_data.screening_data.non_zero_coefficients, scf_data.D_tilde)
+    @time calculate_K_upper_diagonal_block(scf_data)  
   end   
 end
 
@@ -557,7 +547,6 @@ function calculate_K_upper_diagonal_block(scf_data)
 
   blas_threads = BLAS.get_num_threads()
   BLAS.set_num_threads(1)
-  @time begin
     Threads.@threads for qq in 1:p÷block_size # iterate over column blocks
       for pp in 1:qq # iterate over row blocks
         if screened_blocks[pp, qq]
@@ -571,11 +560,9 @@ function calculate_K_upper_diagonal_block(scf_data)
           K_views[pp, qq])
       end
     end
-  end
   BLAS.set_num_threads(blas_threads)
 
   #non square part of K not include in the blocks above if any are non screened
-  @time begin
     q_range = p-(p%block_size-1):p
     p_range = 1:p
     if length(q_range) > 0
@@ -585,7 +572,6 @@ function calculate_K_upper_diagonal_block(scf_data)
           0.0, view(K, p_range, q_range))
       end
     end
-  end
 
   Threads.@threads for pp in 1:p
     for qq in 1:pp-1
@@ -596,10 +582,19 @@ function calculate_K_upper_diagonal_block(scf_data)
 end
 
 
-function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
-  blas_threads = BLAS.get_num_threads()
-  BLAS.set_num_threads(1)
-  Threads.@threads for pp in 1:p
+function calculate_W_from_trianglular_screened(B, B_buffer, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
+  # blas_threads = BLAS.get_num_threads()
+  # BLAS.set_num_threads(1)
+  #divide the pp indicies and process on different threads
+  indicies_per_thread = p÷Threads.nthreads()
+  Threads.@threads for thread in 1:Threads.nthreads()
+    # iterate over pp indicies for the thread
+    thread_pp_range = (thread-1)*indicies_per_thread+1:thread*indicies_per_thread
+    println("thread $(thread) thread_pp_range = ", thread_pp_range)
+    if thread == Threads.nthreads()
+        thread_pp_range = (thread-1)*indicies_per_thread+1:p
+    end
+    for pp in thread_pp_range
       non_zero_r_index = 1
       for r in eachindex(view(screened_triangular_indices, :, pp))
           if basis_function_screen_matrix[r,pp] 
@@ -608,9 +603,11 @@ function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficient
           end
       end
       indices = [x for x in view(screened_triangular_indices, :, pp) if x != 0]
-      BLAS.gemm!('N', 'N', 1.0,  B[:, indices], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
+      B_buffer[:, 1:length(indices), thread] .= view(B, :, indices)
+      BLAS.gemm!('N', 'N', 1.0,  B_buffer[:, 1:length(indices), thread], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
+    end 
   end
-  BLAS.set_num_threads(blas_threads)
+  # BLAS.set_num_threads(blas_threads)
 end
 
 

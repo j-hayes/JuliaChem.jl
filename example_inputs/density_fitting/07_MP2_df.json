@@ -46,8 +46,8 @@
     "scf":{
       "scf_type":"df",
       "guess":"hcore",
-      "load": "dynamic",
-      "contraction_mode": "BLAS"
+      "load": "static",
+      "contraction_mode": "screened"
 },
     "prop":{
       "mo energies":true,
