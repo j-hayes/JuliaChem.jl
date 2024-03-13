@@ -8,14 +8,17 @@ three_center_integral_tag = 3000
 
 #no screening
 function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions)
-    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, trues(1,1), [], [])
+    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, SCFData()) ##todo this should all be one interface after refactor
 end
 
-function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, shell_screen_matrix :: BitMatrix, basis_screen_matrix, sparse_pq_index_map)
+function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, 
+    scf_data::SCFData)
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
     basis_shell_count = length(basis_sets.primary)
+
+
 
     n_threads = Threads.nthreads()
     three_center_integrals = []
@@ -23,10 +26,11 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
     if scf_options.load == "screened"
-        number_of_non_screened_basis_pairs = sum(basis_screen_matrix)
-        three_center_integrals = zeros(Float64, (number_of_non_screened_basis_pairs, aux_basis_function_count)) # [unscreened pq, P]
+        three_center_integrals = zeros(Float64, (scf_data.screening_data.triangular_indices_count, aux_basis_function_count)) # [unscreened pq, P]
         calculate_three_center_integrals_screened!(three_center_integrals, 
-            jeri_engine_thread, basis_sets, thead_integral_buffer, shell_screen_matrix, sparse_pq_index_map)
+            jeri_engine_thread, basis_sets, thead_integral_buffer, 
+                scf_data.screening_data.shell_screen_matrix, 
+                scf_data.screening_data.screened_triangular_indicies)
     else
         three_center_integrals = zeros(Float64, (basis_function_count, basis_function_count, aux_basis_function_count))
         if scf_options.load == "sequential"
@@ -82,6 +86,8 @@ end
 
 end
 
+#calculate only the integrals that pass Schwarz screening
+#sparse_pq_index_map is a map of the non screened pq pairs to where in the screned matrix they should go in the 1D pq index, could be dense or triangular 
 @inline function calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, sparse_pq_index_map)
     s1, s2, s3,
     shell_1, shell_2, shell_3,
@@ -327,16 +333,11 @@ end
         for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
             for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
                 screened_index = screen_index_matrix[j,k]
-                if screened_index == 0 
+                if screened_index == 0
+                    values_index += 1
                     continue
                 end
                 three_center_integrals[screened_index, i] = values[values_index]
-                if j >= k
-                    inverted_screened_index = screen_index_matrix[k,j]
-                    three_center_integrals[inverted_screened_index, i] = values[values_index]
-                else
-                    three_center_integrals[screened_index, i] = 0.0 #I may want to put these in here instead of zero to avoid confusion
-                end
                 values_index += 1
             end
         end

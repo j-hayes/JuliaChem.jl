@@ -330,10 +330,10 @@ end
     for νsize::Int64 in 0:(nν-1)
       νnorm = get_axial_normalization_factor(νsize+1,amν)
       μνnorm = μnorm*νnorm
-      for λsize::Int64 in 0:(nλ-1)
+      for λsize::Int64 in 0:(nλ-1) 
         
         screened_index = sparse_pq_index_map[ν+νsize,λ+λsize] 
-        if screened_index == 0
+        if screened_index == 0 || ν+νsize < λ+λsize
           continue
         end
         
@@ -344,10 +344,10 @@ end
         end
         
         eri_quartet_batch[screened_index,μ+μsize] *= normalization_factor # moved AUX to third index
-        if ν+νsize > λ+λsize
-          inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
-          eri_quartet_batch[inverted_screened_index,μ+μsize] = eri_quartet_batch[screened_index,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
-        end
+        # if ν+νsize > λ+λsize
+        #   inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
+        #   eri_quartet_batch[inverted_screened_index,μ+μsize] = eri_quartet_batch[screened_index,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
+        # end not needed because we are using lower triangle 
       end 
     end
   end 
