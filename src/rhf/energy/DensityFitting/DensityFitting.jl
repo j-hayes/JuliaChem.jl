@@ -448,7 +448,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     BLAS.trmm!('L', 'U', 'T', 'N', 1.0, J_AB_invt, scf_data.D)
     scf_data.D_tilde = zeros(Float64, (scf_data.A, scf_data.occ, scf_data.μ))
     scf_data.J =  zeros(Float64, size(scf_data.D)[2])
-    scf_data.K = similar(scf_data.two_electron_fock)
+    scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
     scf_data.coulomb_intermediate = zeros(Float64, scf_data.A)
     scf_data.density_array = zeros(Float64, size(scf_data.D)[2])
 
@@ -502,9 +502,97 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
       non_zero_coefficients, scf_data.D_tilde)
 
     @time begin
-      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, Q*occ, p), reshape(scf_data.D_tilde, Q*occ,p), 1.0, scf_data.two_electron_fock)
+      # BLAS.gemm!('T', 'N', 1.0, reshape(scf_data.D_tilde, (Q*occ, p)), reshape(scf_data.D_tilde, (Q*occ, p)),
+      #  1.0, scf_data.two_electron_fock)
+      calculate_K_upper_diagonal_block(scf_data)  
     end
   end   
+end
+
+function calculate_K_upper_diagonal_block(scf_data)
+  W = scf_data.D_tilde
+  K = scf_data.K
+  p = scf_data.μ
+  Q = scf_data.A
+  occ = scf_data.occ
+  basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
+  W_view = reshape(W, Q * occ, p)
+
+
+
+  block_size = 0
+  for i in 20:-1:10
+      if p%i == 0
+          block_size = p÷i
+          break
+      end
+  end
+  if block_size == 0 # deal with numbers where block size to fit directly without unsquare section 
+      block_size = max(64, p÷10)
+  end
+  if p < block_size
+      block_size = p÷2 #small matrix just use half of the matrix dimension. 
+  end  
+
+  number_of_non_screened_blocks = zeros(Int, p ÷ block_size, p ÷ block_size)
+
+  p_views = Array{SubArray}(undef, p ÷ block_size)
+  K_views = Array{SubArray}(undef, p ÷ block_size, p ÷ block_size)
+  screened_blocks = zeros(Bool, p ÷ block_size, p ÷ block_size)
+
+  #todo do this once in iteration 1 only
+  Threads.@threads for qq in 1:p÷block_size
+    p_views[qq] = view(W_view, :, block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1)
+    for pp in 1:qq
+      screened_blocks[qq, pp] = 0 == sum(
+        view(basis_function_screen_matrix,
+          block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1,
+          block_size*(pp-1)+1:block_size*(pp-1)+1+block_size-1))
+      screened_blocks[pp, qq] = screened_blocks[qq, pp]
+
+      K_views[pp, qq] = view(K, block_size*(pp-1)+1:block_size*(pp-1)+1+block_size-1, block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1)
+    end
+  end
+
+
+  blas_threads = BLAS.get_num_threads()
+  BLAS.set_num_threads(1)
+  @time begin
+    Threads.@threads for qq in 1:p÷block_size # iterate over column blocks
+      for pp in 1:qq # iterate over row blocks
+        if screened_blocks[pp, qq]
+          continue
+        end
+        number_of_non_screened_blocks[pp, qq] = 1
+        BLAS.gemm!('T', 'N', -1.0,
+          p_views[pp],
+          p_views[qq],
+          0.0,
+          K_views[pp, qq])
+      end
+    end
+  end
+  BLAS.set_num_threads(blas_threads)
+
+  #non square part of K not include in the blocks above if any are non screened
+  @time begin
+    q_range = p-(p%block_size-1):p
+    p_range = 1:p
+    if length(q_range) > 0
+      number_of_non_screened_pq_pairs = sum(basis_function_screen_matrix[q_range,p_range])
+      if number_of_non_screened_pq_pairs != 0
+        BLAS.gemm!('T', 'N', -1.0, view(W_view, :, p_range), view(W_view, :, q_range),
+          0.0, view(K, p_range, q_range))
+      end
+    end
+  end
+
+  Threads.@threads for pp in 1:p
+    for qq in 1:pp-1
+      K[pp, qq] = K[qq, pp]
+    end
+  end
+  axpy!(1.0, K, scf_data.two_electron_fock )
 end
 
 
