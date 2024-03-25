@@ -6,6 +6,7 @@ using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
 using HDF5
+# using NNlib
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 #== 
@@ -380,9 +381,9 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
   scf_data.screening_data.sparse_p_start_indices = zeros(Int64, scf_data.μ)
   scf_data.screening_data.non_screened_p_indices_count = zeros(Int64, scf_data.μ)
   screened_triangular_indicies = zeros(Int64, (scf_data.μ,scf_data.μ))
-  non_zero_coefficients = []
   p_start = 1
-  triangular_indices_count = 0 #the number of indicies that are unscreened and make up the lower triangle
+
+  scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
 
   non_screened_p_indices_count = scf_data.screening_data.non_screened_p_indices_count
   sparse_p_start_indices = scf_data.screening_data.sparse_p_start_indices
@@ -390,17 +391,20 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
   scf_data.screening_data.screened_triangular_indicies = zeros(Int64, (scf_data.μ,scf_data.μ))
   screened_triangular_indicies = scf_data.screening_data.screened_triangular_indicies
 
-  for pp in 1:scf_data.μ
+  # triangular_indices_counts  = zeros(Int64, scf_data.μ) #the number of indicies that are unscreened and make up the lower triangle
+  triangular_indices_count = 0
+  @time Threads.@threads for pp in 1:scf_data.μ
     non_screened_p_indices_count[pp] = sum(basis_function_screen_matrix[:,pp]) 
-    sparse_p_start_indices[pp] = p_start
-    p_start+= non_screened_p_indices_count[pp]
-    push!(non_zero_coefficients, zeros(non_screened_p_indices_count[pp], scf_data.occ))
-
-    for qq in 1:scf_data.μ
-      if qq >= pp && basis_function_screen_matrix[qq,pp]
-          triangular_indices_count += 1
-          screened_triangular_indicies[qq,pp] = triangular_indices_count
-          screened_triangular_indicies[pp,qq] = triangular_indices_count
+    non_zero_coefficients[pp] = zeros(non_screened_p_indices_count[pp], scf_data.occ)
+  end
+  @time begin 
+    for pp in 1:scf_data.μ
+      for qq in 1:scf_data.μ
+        if qq >= pp && basis_function_screen_matrix[qq,pp]
+            triangular_indices_count += 1
+            screened_triangular_indicies[qq,pp] = triangular_indices_count
+            screened_triangular_indicies[pp,qq] = triangular_indices_count
+        end
       end
     end
   end
@@ -427,30 +431,48 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
   if iteration == 1
     println("doing triangular screening DF-RHF")
-    two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-    get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integrals, basis_sets)
+    println("two center integrals")
+    
+    @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+    println("screening metadata")
+    @time get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integrals, basis_sets)
 
 
     load = scf_options.load
     scf_options.load = "screened" #todo remove
-    
-    scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
-    scf_data.D = permutedims(scf_data.D, (2,1)) #todo put this in correct order in calulation step
+    println("three center integrals ")
+    @time scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+    @time scf_data.D = permutedims(scf_data.D, (2,1)) #todo put this in correct order in calulation step
     scf_options.load = load #todo remove
     
 
-    J_AB_invt = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
+    # J_AB_invt = convert(Array, inv(cholesky(Hermitian(two_center_integrals, :L)).U))
+    # invert two center integrals using blas  
+    # two_center_integrals = transpose(two_center_integrals)
 
+    display(two_center_integrals[1:10,1:10])
+    
+
+    @time begin
+    LAPACK.potrf!('L', two_center_integrals)
+    LAPACK.trtri!('L', 'N', two_center_integrals)
+    J_AB_invt = two_center_integrals
+    end
     # if MPI.Comm_size(MPI.COMM_WORLD) > 1
     #   J_AB_INV = J_AB_INV[:,indicies]
     # end
 
-    BLAS.trmm!('L', 'U', 'T', 'N', 1.0, J_AB_invt, scf_data.D)
-    scf_data.D_tilde = zeros(Float64, (scf_data.A, scf_data.occ, scf_data.μ))
-    scf_data.J =  zeros(Float64, size(scf_data.D)[2])
-    scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
-    scf_data.coulomb_intermediate = zeros(Float64, scf_data.A)
-    scf_data.density_array = zeros(Float64, size(scf_data.D)[2])
+    println("form B")
+    @time BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)
+    flush(stdout)
+    println("allocate memory")
+    @time begin
+      scf_data.D_tilde = zeros(Float64, (scf_data.A, scf_data.occ, scf_data.μ))
+      scf_data.J =  zeros(Float64, size(scf_data.D)[2])
+      scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
+      scf_data.coulomb_intermediate = zeros(Float64, scf_data.A)
+      scf_data.density_array = zeros(Float64, size(scf_data.D)[2])
+    end
 
   end  
 
@@ -495,8 +517,40 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
       basis_function_screen_matrix, 
       screened_triangular_indices, 
       scf_data.screening_data.non_zero_coefficients, scf_data.D_tilde)
-    @time calculate_K_upper_diagonal_block(scf_data)  
+    @time calculate_K_upper_diagonal_batched(scf_data)  
   end   
+end
+
+function calculate_K_upper_diagonal_batched(scf_data)
+  # W = scf_data.D_tilde
+  # K = scf_data.K
+  # p = scf_data.μ
+  # Q = scf_data.A
+  # occ = scf_data.occ
+
+  # number_of_blocks_wide = 10
+  # batch_size = p÷number_of_blocks_wide
+  
+  # batches_right = zeros(Float64, Q*occ,batch_size, number_of_blocks_wide^2}
+  # batches_left = zeros(Float64, Q*occ, batch_size, number_of_blocks_wide^2}
+
+  # Threads.@threads for j in 1:number_of_blocks_wide
+  #   for i in 1:number_of_blocks_wide
+  #     index = twoD_to1Dindex(i,j, number_of_blocks_wide)
+  #     batches_left[:,:,index] .= view(W, :, batch_size*(i-1)+1:batch_size*(i-1)+1+batch_size-1)
+  #     batches_right[:,:,index] .= view(W, :, batch_size*(j-1)+1:batch_size*(j-1)+1+batch_size-1)
+  #   end
+  # end
+  # K_blocks = zeros(Float64, batch_size, batch_size, number_of_blocks_wide^2)
+  # NNlib.batched_mul!(batches_left, NNlib.batched_transpose(batches_left), batches_right)
+
+  # Threads.@threads for j in 1:number_of_blocks_wide
+  #   for i in 1:j
+  #     index = twoD_to1Dindex(i,j, number_of_blocks_wide)
+  #     K[batch_size*(i-1)+1:batch_size*(i-1)+1+batch_size-1, batch_size*(j-1)+1:batch_size*(j-1)+1+batch_size-1] .= K_blocks[:,:,index]
+  #     K[batch_size*(j-1)+1:batch_size*(j-1)+1+batch_size-1, batch_size*(i-1)+1:batch_size*(i-1)+1+batch_size-1] .= K_blocks[:,:,index]
+  #   end
+  # end
 end
 
 function calculate_K_upper_diagonal_block(scf_data)
@@ -506,9 +560,7 @@ function calculate_K_upper_diagonal_block(scf_data)
   Q = scf_data.A
   occ = scf_data.occ
   basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
-  W_view = reshape(W, Q * occ, p)
-
-
+  # W_view = reshape(W, Q * occ, p)
 
   block_size = 0
   for i in 20:-1:10
@@ -532,7 +584,7 @@ function calculate_K_upper_diagonal_block(scf_data)
 
   #todo do this once in iteration 1 only
   Threads.@threads for qq in 1:p÷block_size
-    p_views[qq] = view(W_view, :, block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1)
+    p_views[qq] = view(W, :, block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1)
     for pp in 1:qq
       screened_blocks[qq, pp] = 0 == sum(
         view(basis_function_screen_matrix,
@@ -568,7 +620,7 @@ function calculate_K_upper_diagonal_block(scf_data)
     if length(q_range) > 0
       number_of_non_screened_pq_pairs = sum(basis_function_screen_matrix[q_range,p_range])
       if number_of_non_screened_pq_pairs != 0
-        BLAS.gemm!('T', 'N', -1.0, view(W_view, :, p_range), view(W_view, :, q_range),
+        BLAS.gemm!('T', 'N', -1.0, view(W, :, p_range), view(W, :, q_range),
           0.0, view(K, p_range, q_range))
       end
     end
@@ -590,7 +642,7 @@ function calculate_W_from_trianglular_screened(B, B_buffer, p,occupied_orbital_c
   Threads.@threads for thread in 1:Threads.nthreads()
     # iterate over pp indicies for the thread
     thread_pp_range = (thread-1)*indicies_per_thread+1:thread*indicies_per_thread
-    println("thread $(thread) thread_pp_range = ", thread_pp_range)
+    # println("thread $(thread) thread_pp_range = ", thread_pp_range)
     if thread == Threads.nthreads()
         thread_pp_range = (thread-1)*indicies_per_thread+1:p
     end
