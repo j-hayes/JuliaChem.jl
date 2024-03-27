@@ -6,7 +6,11 @@ using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
 using HDF5
-# using NNlib
+using NNlib
+
+
+const BlasInt = LinearAlgebra.BlasInt
+const libblastrampoline = LinearAlgebra.libblastrampoline
 
 #== Density Fitted Restricted Hartree-Fock, Fock build step ==#
 #== 
@@ -511,142 +515,151 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   end
   #make the below code a bit more readable/shorter with a couple variable 
   println("exchange")
-  B_buffer = zeros(Float64, (Q, p, Threads.nthreads()))
   @time begin 
-    @time calculate_W_from_trianglular_screened(scf_data.D, B_buffer, p, occupied_orbital_coefficients, 
+    @time calculate_W_from_trianglular_screened(scf_data.D, p, occupied_orbital_coefficients, 
       basis_function_screen_matrix, 
       screened_triangular_indices, 
       scf_data.screening_data.non_zero_coefficients, scf_data.D_tilde)
-    @time calculate_K_upper_diagonal_batched(scf_data)  
+
+    if scf_data.μ < 400
+      BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (Q*occ, p)), reshape(scf_data.D_tilde, (Q*occ, p)), 0.0, scf_data.K)
+      axpy!(1.0, scf_data.K, scf_data.two_electron_fock )
+    else
+      @time calculate_K_upper_diagonal_block(scf_data)   
+    end
   end   
 end
 
-function calculate_K_upper_diagonal_batched(scf_data)
-  # W = scf_data.D_tilde
-  # K = scf_data.K
-  # p = scf_data.μ
-  # Q = scf_data.A
-  # occ = scf_data.occ
 
-  # number_of_blocks_wide = 10
-  # batch_size = p÷number_of_blocks_wide
-  
-  # batches_right = zeros(Float64, Q*occ,batch_size, number_of_blocks_wide^2}
-  # batches_left = zeros(Float64, Q*occ, batch_size, number_of_blocks_wide^2}
-
-  # Threads.@threads for j in 1:number_of_blocks_wide
-  #   for i in 1:number_of_blocks_wide
-  #     index = twoD_to1Dindex(i,j, number_of_blocks_wide)
-  #     batches_left[:,:,index] .= view(W, :, batch_size*(i-1)+1:batch_size*(i-1)+1+batch_size-1)
-  #     batches_right[:,:,index] .= view(W, :, batch_size*(j-1)+1:batch_size*(j-1)+1+batch_size-1)
-  #   end
-  # end
-  # K_blocks = zeros(Float64, batch_size, batch_size, number_of_blocks_wide^2)
-  # NNlib.batched_mul!(batches_left, NNlib.batched_transpose(batches_left), batches_right)
-
-  # Threads.@threads for j in 1:number_of_blocks_wide
-  #   for i in 1:j
-  #     index = twoD_to1Dindex(i,j, number_of_blocks_wide)
-  #     K[batch_size*(i-1)+1:batch_size*(i-1)+1+batch_size-1, batch_size*(j-1)+1:batch_size*(j-1)+1+batch_size-1] .= K_blocks[:,:,index]
-  #     K[batch_size*(j-1)+1:batch_size*(j-1)+1+batch_size-1, batch_size*(i-1)+1:batch_size*(i-1)+1+batch_size-1] .= K_blocks[:,:,index]
-  #   end
-  # end
+function twoD_toLower_triangular(i,j, n)
+  if j <= i
+      i+(2*n-j)*(j-1)÷2
+  else
+      j+(2*n-i)*(i-1)÷2
+  end
 end
 
 function calculate_K_upper_diagonal_block(scf_data)
   W = scf_data.D_tilde
-  K = scf_data.K
   p = scf_data.μ
   Q = scf_data.A
   occ = scf_data.occ
-  basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
-  # W_view = reshape(W, Q * occ, p)
+  # basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
 
-  block_size = 0
-  for i in 20:-1:10
-      if p%i == 0
-          block_size = p÷i
-          break
-      end
-  end
-  if block_size == 0 # deal with numbers where block size to fit directly without unsquare section 
-      block_size = max(64, p÷10)
-  end
-  if p < block_size
-      block_size = p÷2 #small matrix just use half of the matrix dimension. 
-  end  
+  batch_width = 10
+  # for i in 20:-1:10
+  #     if p%i == 0
+  #         batch_width = p÷i
+  #         break
+  #     end
+  # end
+  batch_size = p ÷batch_width
+  p = size(W, 3)
+  occ = size(W, 2)
+  Q = size(W, 1)
+  number_of_batches = get_triangle_matrix_length(batch_width)
+    
+  exchange_blocks = zeros(Float64, batch_size, batch_size, number_of_batches)
+  transA = true
+  transB = false
+  alpha = -1.0
+  beta = 0.0
+  linear_indices = LinearIndices(W)
+  K_linear_indices = LinearIndices(exchange_blocks)
+    
+  M = batch_size
+  N = batch_size
+  K = Q*occ
 
-  number_of_non_screened_blocks = zeros(Int, p ÷ block_size, p ÷ block_size)
-
-  p_views = Array{SubArray}(undef, p ÷ block_size)
-  K_views = Array{SubArray}(undef, p ÷ block_size, p ÷ block_size)
-  screened_blocks = zeros(Bool, p ÷ block_size, p ÷ block_size)
-
-  #todo do this once in iteration 1 only
-  Threads.@threads for qq in 1:p÷block_size
-    p_views[qq] = view(W, :, block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1)
-    for pp in 1:qq
-      screened_blocks[qq, pp] = 0 == sum(
-        view(basis_function_screen_matrix,
-          block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1,
-          block_size*(pp-1)+1:block_size*(pp-1)+1+block_size-1))
-      screened_blocks[pp, qq] = screened_blocks[qq, pp]
-
-      K_views[pp, qq] = view(K, block_size*(pp-1)+1:block_size*(pp-1)+1+block_size-1, block_size*(qq-1)+1:block_size*(qq-1)+1+block_size-1)
-    end
-  end
-
-
+  batch_indexes = zeros(Int, batch_width, batch_width)
   blas_threads = BLAS.get_num_threads()
   BLAS.set_num_threads(1)
-    Threads.@threads for qq in 1:p÷block_size # iterate over column blocks
-      for pp in 1:qq # iterate over row blocks
-        if screened_blocks[pp, qq]
+    
+
+  Threads.@threads :static for index in CartesianIndices(batch_indexes)
+      i = index[1]
+      j = index[2]
+      if j > i
           continue
-        end
-        number_of_non_screened_blocks[pp, qq] = 1
-        BLAS.gemm!('T', 'N', -1.0,
-          p_views[pp],
-          p_views[qq],
-          0.0,
-          K_views[pp, qq])
       end
-    end
+
+      p_range = (i-1)*batch_size+1:i*batch_size  
+      p_start = (i-1)*batch_size+1      
+      
+      # for j in 1:i
+      q_range = (j-1)*batch_size+1:j*batch_size
+      q_start = (j-1)*batch_size+1
+      batch_index = twoD_toLower_triangular(i, j, batch_width)
+
+      A_ptr = pointer(W, linear_indices[1, 1, p_start])
+      B_ptr = pointer(W, linear_indices[1, 1, q_start])
+      C_ptr = pointer(exchange_blocks, K_linear_indices[1, 1, batch_index])
+      
+      call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
+
+      scf_data.K[p_range, q_range] .= exchange_blocks[:,:,batch_index]
+      if i != j
+          scf_data.K[q_range, p_range] .= transpose(exchange_blocks[:,:,batch_index])
+      end
+  end
+
   BLAS.set_num_threads(blas_threads)
 
-  #non square part of K not include in the blocks above if any are non screened
-    q_range = p-(p%block_size-1):p
-    p_range = 1:p
-    if length(q_range) > 0
-      number_of_non_screened_pq_pairs = sum(basis_function_screen_matrix[q_range,p_range])
-      if number_of_non_screened_pq_pairs != 0
-        BLAS.gemm!('T', 'N', -1.0, view(W, :, p_range), view(W, :, q_range),
-          0.0, view(K, p_range, q_range))
-      end
-    end
 
-  Threads.@threads for pp in 1:p
-    for qq in 1:pp-1
-      K[pp, qq] = K[qq, pp]
-    end
-  end
-  axpy!(1.0, K, scf_data.two_electron_fock )
+  #non square part of K not include in the blocks above if any are non screened put back after full block is working
+    # q_range = p-(p%block_size-1):p
+    # p_range = 1:p
+    # if length(q_range) > 0
+    #   number_of_non_screened_pq_pairs = sum(basis_function_screen_matrix[q_range,p_range])
+    #   if number_of_non_screened_pq_pairs != 0
+    #     BLAS.gemm!('T', 'N', -1.0, view(W, :, p_range), view(W, :, q_range),
+    #       0.0, view(K, p_range, q_range))
+    #   end
+    # end
+
+  # Threads.@threads for pp in 1:p
+  #   for qq in 1:pp-1
+  #     K[pp, qq] = K[qq, pp]
+  #   end
+  # end
+  axpy!(1.0, scf_data.K, scf_data.two_electron_fock )
 end
 
 
-function calculate_W_from_trianglular_screened(B, B_buffer, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
-  # blas_threads = BLAS.get_num_threads()
-  # BLAS.set_num_threads(1)
-  #divide the pp indicies and process on different threads
-  indicies_per_thread = p÷Threads.nthreads()
-  Threads.@threads for thread in 1:Threads.nthreads()
-    # iterate over pp indicies for the thread
-    thread_pp_range = (thread-1)*indicies_per_thread+1:thread*indicies_per_thread
-    # println("thread $(thread) thread_pp_range = ", thread_pp_range)
-    if thread == Threads.nthreads()
-        thread_pp_range = (thread-1)*indicies_per_thread+1:p
+function call_gemm!(transA::Val, transB::Val,
+  M::Int, N::Int, K::Int,
+  alpha::Float64, A::Ptr{Float64}, B::Ptr{Float64},
+  beta::Float64, C::Ptr{Float64})
+
+    # Convert our compile-time transpose marker to a char for BLAS
+    convtrans(V::Val{false}) = 'N'
+    convtrans(V::Val{true})  = 'T'
+
+    if transA == Val(false)
+      lda = M
+    else
+      lda = K
     end
-    for pp in thread_pp_range
+    if transB == Val(false)
+      ldb = K
+    else
+      ldb = N
+    end
+    ldc = M
+
+    ccall((:dgemm_64_, BLAS.libblas), Nothing,
+                (Ref{UInt8}, Ref{UInt8}, Ref{BlasInt}, Ref{BlasInt},
+                Ref{BlasInt}, Ref{Float64}, Ptr{Float64}, Ref{BlasInt},
+                Ptr{Float64}, Ref{BlasInt}, Ref{Float64}, Ptr{Float64},
+                Ref{BlasInt}),
+                convtrans(transA), convtrans(transB), M, N, K,
+                alpha, A, lda, B, ldb, beta, C, ldc)
+  end
+
+function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
+  blas_threads = BLAS.get_num_threads()
+  BLAS.set_num_threads(1)
+  Threads.@threads for pp in 1:p
       non_zero_r_index = 1
       for r in eachindex(view(screened_triangular_indices, :, pp))
           if basis_function_screen_matrix[r,pp] 
@@ -655,11 +668,9 @@ function calculate_W_from_trianglular_screened(B, B_buffer, p,occupied_orbital_c
           end
       end
       indices = [x for x in view(screened_triangular_indices, :, pp) if x != 0]
-      B_buffer[:, 1:length(indices), thread] .= view(B, :, indices)
-      BLAS.gemm!('N', 'N', 1.0,  B_buffer[:, 1:length(indices), thread], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
-    end 
+      BLAS.gemm!('N', 'N', 1.0,  B[:, indices], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
   end
-  # BLAS.set_num_threads(blas_threads)
+  BLAS.set_num_threads(blas_threads)
 end
 
 
