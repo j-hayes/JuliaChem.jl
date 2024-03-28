@@ -6,7 +6,6 @@ using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
 using HDF5
-using NNlib
 
 
 const BlasInt = LinearAlgebra.BlasInt
@@ -329,7 +328,7 @@ function serialize_data(file_name, data, iteration)
   end
   #get directory of current running script
 
-  serialization_path = "$(pwd())/testoutputs/water/for_hackathon_hdf5"
+  serialization_path = "$(pwd())/testoutputs/C20H42"
 
   try
     # run(`rm -rf $serialization_path`)
@@ -397,9 +396,9 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
 
   # triangular_indices_counts  = zeros(Int64, scf_data.μ) #the number of indicies that are unscreened and make up the lower triangle
   triangular_indices_count = 0
-  @time Threads.@threads for pp in 1:scf_data.μ
+  Threads.@threads for pp in 1:scf_data.μ
     non_screened_p_indices_count[pp] = sum(basis_function_screen_matrix[:,pp]) 
-    non_zero_coefficients[pp] = zeros(non_screened_p_indices_count[pp], scf_data.occ)
+    non_zero_coefficients[pp] = zeros(non_screened_p_indices_count[pp], scf_data.occ) #todo justm aket his a vector and use it based on indicies calculated
   end
   @time begin 
     for pp in 1:scf_data.μ
@@ -412,6 +411,15 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
       end
     end
   end
+
+  display(non_screened_p_indices_count)
+
+  # display(scf_data.screening_data.basis_function_screen_matrix)
+  # write the screened_triangular_indices matrix to a file 
+  # serialize_data("basis_function_screen_matrix2.h5", scf_data.screening_data.basis_function_screen_matrix, 1)
+  # serialize_data("screened_triangular_indices2.h5", screened_triangular_indicies, 1)
+  # exit()
+
   scf_data.screening_data.triangular_indices_count = triangular_indices_count
 end
 
@@ -525,6 +533,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
       BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (Q*occ, p)), reshape(scf_data.D_tilde, (Q*occ, p)), 0.0, scf_data.K)
       axpy!(1.0, scf_data.K, scf_data.two_electron_fock )
     else
+      println("calculate_K_upper_diagonal_block")
       @time calculate_K_upper_diagonal_block(scf_data)   
     end
   end   
@@ -659,7 +668,7 @@ function call_gemm!(transA::Val, transB::Val,
 function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
   blas_threads = BLAS.get_num_threads()
   BLAS.set_num_threads(1)
-  Threads.@threads for pp in 1:p
+  for pp in 1:p
       non_zero_r_index = 1
       for r in eachindex(view(screened_triangular_indices, :, pp))
           if basis_function_screen_matrix[r,pp] 
@@ -667,10 +676,19 @@ function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficient
               non_zero_r_index += 1
           end
       end
+      
       indices = [x for x in view(screened_triangular_indices, :, pp) if x != 0]
+      # println("pp = ", pp)
+      # println("indices = ", indices)
+      # println("length(indices) = ", length(indices))
+      # println("size(non_zero_coefficients[pp]) = ", size(non_zero_coefficients[pp]))
+      # if length(indices) != size(non_zero_coefficients[pp])[1]
+      #   println("length(indices) != size(non_zero_coefficients)[1]")
+      # end
       BLAS.gemm!('N', 'N', 1.0,  B[:, indices], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
   end
   BLAS.set_num_threads(blas_threads)
+  # exit()
 end
 
 

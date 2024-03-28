@@ -21,8 +21,11 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
 
     σ_squared = σ^2
     indicies_per_thread = n_shell_indicies ÷ nthreads
-    Threads.@threads for thread in 1:nthreads
-        for index in (thread-1)*indicies_per_thread+1:thread*indicies_per_thread
+    # Threads.@threads :static for t in 1:nthreads
+    #     thread = Threads.threadid()
+    #     for index in (thread-1)*indicies_per_thread+1:thread*indicies_per_thread
+    thread = 1
+    for index in 1:n_shell_indicies
             bra_pair, ket_pair, ish,jsh,ksh,lsh = decompose_shell_index_ijkl(index)
             # take only where (pq|pq) and p >= q 
             if ish != ksh || jsh != lsh || jsh > ish 
@@ -73,7 +76,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
                 end
             end
         end
-    end
+    # end
 
     sparse_pq_index_map = zeros(Int64, scf_data.μ, scf_data.μ)
     index = 1
