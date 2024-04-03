@@ -6,6 +6,7 @@ mutable struct ScreeningData
     non_zero_coefficients # GTFOCK paper equation 4 "In order to use optimized matrix multiplication library functions to compute W(i, Q), for each p, we need a dense matrix consisting of the nonzero rows of C(r, i)."
     screened_triangular_indicies
     shell_screen_matrix
+    screened_triangular_indicies_to_2d
     triangular_indices_count :: Int
 end
 
@@ -31,7 +32,7 @@ end
 
 
 function SCFData()
-    sd = ScreeningData([],[], [], [], [], [], [], 0)
+    sd = ScreeningData([],[], [], [], [], [], [], [], 0)
     return SCFData([], [], [], [], [],[], [], [], [], [],[] ,[],[], sd, 0, 0, 0)
 end
 

@@ -385,6 +385,7 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
   scf_data.screening_data.non_screened_p_indices_count = zeros(Int64, scf_data.μ)
   screened_triangular_indicies = zeros(Int64, (scf_data.μ,scf_data.μ))
   p_start = 1
+  screened_triangular_indicies_to_2d = Array{Tuple{Int,Int},1}(undef, get_triangle_matrix_length(scf_data.μ))
 
   scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
 
@@ -407,20 +408,13 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
             triangular_indices_count += 1
             screened_triangular_indicies[qq,pp] = triangular_indices_count
             screened_triangular_indicies[pp,qq] = triangular_indices_count
+            screened_triangular_indicies_to_2d[triangular_indices_count] = (qq,pp)
         end
       end
     end
   end
-
-  display(non_screened_p_indices_count)
-
-  # display(scf_data.screening_data.basis_function_screen_matrix)
-  # write the screened_triangular_indices matrix to a file 
-  # serialize_data("basis_function_screen_matrix2.h5", scf_data.screening_data.basis_function_screen_matrix, 1)
-  # serialize_data("screened_triangular_indices2.h5", screened_triangular_indicies, 1)
-  # exit()
-
   scf_data.screening_data.triangular_indices_count = triangular_indices_count
+  scf_data.screening_data.screened_triangular_indicies_to_2d = screened_triangular_indicies_to_2d
 end
 
 
@@ -508,10 +502,11 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     end
 
 
-    BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
-    BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)    
+    @time BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
+    @time BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate , 0.0, scf_data.J)    
   
-  
+    @time begin 
+    
     scf_data.two_electron_fock .= 0.0
     Threads.@threads for index in CartesianIndices(scf_data.two_electron_fock)
       if !basis_function_screen_matrix[index] || index[2] > index[1]
@@ -520,14 +515,22 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
       scf_data.two_electron_fock[index] = scf_data.J[screened_triangular_indices[index]]
       scf_data.two_electron_fock[index[2], index[1]] = scf_data.two_electron_fock[index]
     end
+    
+    end
   end
   #make the below code a bit more readable/shorter with a couple variable 
   println("exchange")
   @time begin 
+    # @time calculate_W_from_trianglular_screened(scf_data.D, p, occ, occupied_orbital_coefficients, 
+    #   screened_triangular_indices, 
+    #   scf_data.screening_data.non_zero_coefficients, 
+    #   scf_data.D_tilde,
+    #   scf_data.screening_data.screened_triangular_indicies_to_2d)
     @time calculate_W_from_trianglular_screened(scf_data.D, p, occupied_orbital_coefficients, 
-      basis_function_screen_matrix, 
-      screened_triangular_indices, 
-      scf_data.screening_data.non_zero_coefficients, scf_data.D_tilde)
+    basis_function_screen_matrix, 
+    screened_triangular_indices, 
+    scf_data.screening_data.non_zero_coefficients, scf_data.D_tilde)
+
 
     if scf_data.μ < 400
       BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (Q*occ, p)), reshape(scf_data.D_tilde, (Q*occ, p)), 0.0, scf_data.K)
@@ -555,7 +558,7 @@ function calculate_K_upper_diagonal_block(scf_data)
   occ = scf_data.occ
   # basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
 
-  batch_width = 10
+  batch_width = 20
   # for i in 20:-1:10
   #     if p%i == 0
   #         batch_width = p÷i
@@ -585,12 +588,14 @@ function calculate_K_upper_diagonal_block(scf_data)
   BLAS.set_num_threads(1)
     
 
-  Threads.@threads :static for index in CartesianIndices(batch_indexes)
+  Threads.@threads for index in CartesianIndices(batch_indexes)
       i = index[1]
       j = index[2]
       if j > i
           continue
       end
+
+
 
       p_range = (i-1)*batch_size+1:i*batch_size  
       p_start = (i-1)*batch_size+1      
@@ -598,6 +603,15 @@ function calculate_K_upper_diagonal_block(scf_data)
       # for j in 1:i
       q_range = (j-1)*batch_size+1:j*batch_size
       q_start = (j-1)*batch_size+1
+
+      total_non_screened_indices = sum(
+        view(scf_data.screening_data.basis_function_screen_matrix, p_range, q_range))
+
+      if total_non_screened_indices == 0
+          # println("block is screend i $i j $j")
+          continue
+      end
+
       batch_index = twoD_toLower_triangular(i, j, batch_width)
 
       A_ptr = pointer(W, linear_indices[1, 1, p_start])
@@ -665,10 +679,66 @@ function call_gemm!(transA::Val, transB::Val,
                 alpha, A, lda, B, ldb, beta, C, ldc)
   end
 
+# function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
+#   blas_threads = BLAS.get_num_threads()
+#   BLAS.set_num_threads(1)
+#   W .= 0.0
+#   # non_zero_coefficients_batch = Vector{Vector{Array{Float64,2}}}(undef, p)
+#   for pp in 1:p
+#     non_zero_coefficients_batch = []
+#     indices = [x for x in view(screened_triangular_indices, :, pp) if x != 0]
+#     non_screened_r = [x for x in 1:p if !basis_function_screen_matrix[x,pp]]
+
+#     B_ranges = []
+#     r_ranges = [] #ranges of r values that are non zero
+#     start = indices[1]
+#     last = indices[end]
+#     batch_index = 1 
+#     for i in 1:length(indices)-1
+#         if indices[i+1] - indices[i] != 1
+#             non_zero_coefficients_batch[batch_index] = zeros(indices[i]-start, occ)
+#             batch_index += 1
+
+#             push!(B_ranges, start:indices[i])
+#             start = indices[i+1]
+#         end
+#     end
+#     push!(B_ranges, start:last)
+#     non_zero_coefficients_batch[batch_index] = zeros(start:last, occ)
+    
+#     pritnln(B_ranges)
+    
+#     non_zero_r_index = 1
+#     for ran in ranges 
+#         for r in ran
+#             non_zero_coefficients_batch[non_zero_r_index] .= occupied_orbital_coefficients[:,r]
+#             non_zero_r_index += 1
+#         end
+#         # if basis_function_screen_matrix[r,pp] 
+#         #     non_zero_coefficients[pp][non_zero_r_index, :] .= occupied_orbital_coefficients[:,r] 
+#         #     non_zero_r_index += 1
+#         # end
+#     end
+
+    
+
+#     #make a list of ranges from the contiguous indicies 
+    
+#     for range in ranges
+#         BLAS.gemm!('N', 'N', 1.0,  B[:, range], non_zero_coefficients[pp], 1.0, view(W, :, :, pp))
+#     end
+
+#       # BLAS.gemm!('N', 'N', 1.0,  B[:, indices], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
+#   end
+#   BLAS.set_num_threads(blas_threads)
+# end
+
+
+
 function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficients, basis_function_screen_matrix, screened_triangular_indices, non_zero_coefficients, W)
   blas_threads = BLAS.get_num_threads()
   BLAS.set_num_threads(1)
-  for pp in 1:p
+  Threads.@threads for pp in 1:p
       non_zero_r_index = 1
       for r in eachindex(view(screened_triangular_indices, :, pp))
           if basis_function_screen_matrix[r,pp] 
@@ -676,20 +746,62 @@ function calculate_W_from_trianglular_screened(B, p,occupied_orbital_coefficient
               non_zero_r_index += 1
           end
       end
-      
       indices = [x for x in view(screened_triangular_indices, :, pp) if x != 0]
-      # println("pp = ", pp)
-      # println("indices = ", indices)
-      # println("length(indices) = ", length(indices))
-      # println("size(non_zero_coefficients[pp]) = ", size(non_zero_coefficients[pp]))
-      # if length(indices) != size(non_zero_coefficients[pp])[1]
-      #   println("length(indices) != size(non_zero_coefficients)[1]")
-      # end
       BLAS.gemm!('N', 'N', 1.0,  B[:, indices], non_zero_coefficients[pp], 0.0, view(W, :, :, pp))
   end
   BLAS.set_num_threads(blas_threads)
   # exit()
 end
+
+# function calculate_W_from_trianglular_screened(B, p, occ, occupied_orbital_coefficients,
+#   screened_triangular_indices, non_zero_coefficients, W, 
+#   screened_triangular_indicies_to_2d)
+
+#   blas_threads = BLAS.get_num_threads()
+#   BLAS.set_num_threads(1)
+#   W .= 0.0
+#   # non_zero_coefficients_batch = Vector{Vector{Array{Float64,2}}}(undef, p)
+#   occ_transp = permutedims(occupied_orbital_coefficients, (2, 1))
+#   # display(screened_triangular_indices)
+#   Threads.@threads for pp in 1:p
+#       indices = [x for x in view(screened_triangular_indices, :, pp) if x != 0]
+
+#       B_ranges = []
+#       r_ranges = []
+#       start = indices[1]
+#       last = indices[end]
+#       for i in 1:length(indices)-1
+#           if indices[i+1] - indices[i] != 1
+#               new_range = zeros(Int64, 0)
+#               for r_range in screened_triangular_indicies_to_2d[start:indices[i]]
+#                   if r_range[1] == pp
+#                       push!(new_range, r_range[2])
+#                   else
+#                       push!(new_range, r_range[1])
+#                   end
+#               end
+#               push!(r_ranges, new_range)
+#               push!(B_ranges, start:indices[i])
+#               start = indices[i+1]
+#           end
+#       end
+#       push!(B_ranges, start:last)
+#       new_range = zeros(Int64, 0)
+#       for r_range in screened_triangular_indicies_to_2d[start:last]
+#           if r_range[1] == pp
+#               push!(new_range, r_range[2])
+#           else
+#               push!(new_range, r_range[1])
+#           end
+#       end
+#       push!(r_ranges, new_range)
+#       for index in eachindex(r_ranges)
+#           ranged_occ = occupied_orbital_coefficients[:, r_ranges[index]]
+#           BLAS.gemm!('N', 'T', 1.0, view(B,:, B_ranges[index]), ranged_occ, 1.0, view(W, :, :, pp))
+#       end
+#   end
+#   BLAS.set_num_threads(blas_threads)
+# end
 
 
 
