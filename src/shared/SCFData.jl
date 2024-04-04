@@ -7,6 +7,8 @@ mutable struct ScreeningData
     screened_triangular_indicies
     shell_screen_matrix
     screened_triangular_indicies_to_2d
+    r_ranges #todo rename
+    B_ranges #todo rename
     triangular_indices_count :: Int
 end
 
@@ -32,7 +34,7 @@ end
 
 
 function SCFData()
-    sd = ScreeningData([],[], [], [], [], [], [], [], 0)
+    sd = ScreeningData([],[], [], [], [], [], [], [], [], [], 0)
     return SCFData([], [], [], [], [],[], [], [], [], [],[] ,[],[], sd, 0, 0, 0)
 end
 
