@@ -7,6 +7,9 @@ using JuliaChem.Shared
 using Serialization
 using HDF5
 using ThreadPinning
+using Profile
+using FileIO
+
 
 
 const BlasInt = LinearAlgebra.BlasInt
@@ -543,6 +546,8 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
     println("form B")
     @time BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)
+    # convert abovel ine to regular gemm
+    # BLAS.gemm!('N', 'N', 1.0, reshape(scf_data.D, (p*q, Q)), J_AB_invt, 0.0, reshape(scf_data.D, (p*q, Q)))
     flush(stdout)
     println("allocate memory")
     @time begin
@@ -589,7 +594,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
   end
   println("exchange")
   @time begin 
-    calculate_W_from_trianglular_screened(scf_data.D, p, occ, occupied_orbital_coefficients, 
+    @time calculate_W_from_trianglular_screened(scf_data.D, p, occ, occupied_orbital_coefficients, 
       scf_data.D_tilde,
       scf_data.screening_data.r_ranges, scf_data.screening_data.B_ranges)
     
@@ -597,7 +602,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
       BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (Q*occ, p)), reshape(scf_data.D_tilde, (Q*occ, p)), 0.0, scf_data.K)
       axpy!(1.0, scf_data.K, scf_data.two_electron_fock )
     else
-      calculate_K_upper_diagonal_block(scf_data)   
+      @time calculate_K_upper_diagonal_block(scf_data)   
     end
   end   
 end
@@ -756,33 +761,63 @@ function calculate_W_from_trianglular_screened(B, p, occ, occupied_orbital_coeff
   M = Q
   N = occ
 
-  # p_timings = zeros(Float64, p,2)
-  n_threads = 56 #Threads.nthreads()
-  pinthreads(0:n_threads-1)
-  Threads.@sync for threadindex in 1:n_threads
-    Threads.@spawn begin
-      # loop over p balanced to each threadindex 
-      for pp in threadindex:n_threads:p
-        fill!(view(W, :,:,pp), 0.0)
+  
 
-        K = 0
-        A_ptr = pointer(B, B_linear_indices[1, B_ranges[pp][1][1]])
-        B_ptr = pointer(occupied_orbital_coefficients, ooc_linear_indicies[1, r_ranges[pp][1][1]])
-        C_ptr = pointer(W, W_linear_indices[1, 1, pp])     
-        for index in eachindex(r_ranges[pp])
-          K = r_ranges[pp][index][end] - r_ranges[pp][index][1] + 1
-          A_ptr = pointer(B, B_linear_indices[1, B_ranges[pp][index][1]])
-          B_ptr = pointer(occupied_orbital_coefficients, ooc_linear_indicies[1, r_ranges[pp][index][1]])
-          call_gemm!(Val(transA), Val(transB), M, N, K, 
-              alpha, 
-              A_ptr,
-              B_ptr,
-              beta,
-              C_ptr)   
-        end 
-      end
+  r_index_count = 0
+  all_ranges = Array{Tuple{Int,Int},1}()
+  for pp in 1:p
+    for r_index in 1:length(r_ranges[pp])
+      r_index_count += 1
+      push!(all_ranges,)
     end
   end
+
+  # order p by length of r_ranges
+  
+  p_order = sort(1:p, by = x -> length(r_ranges[x]), rev = true)
+  # range_lengths = sort([length(r_ranges[pp]) for pp in 1:p], rev = true)
+  # p_timings = zeros(Float64, p,2)
+  n_threads = 56#Threads.nthreads()
+  pinthreads(0:n_threads-1)
+  println("do W loop")
+  dynamic_p_index = n_threads + 1
+  dynamic_p_lock = Threads.ReentrantLock()
+
+  elapsed_times = zeros(Float64, p)
+
+  @time begin
+    Threads.@sync for threadindex in 1:n_threads
+      Threads.@spawn begin
+        # for p_sorted_indec in threadindex:n_threads:p # loop over p balanced to each threadindex 
+        #   pp =  p_order[p_sorted_indec]
+        pp = p_order[threadindex]
+        while pp <= p
+          fill!(view(W, :,:,pp), 0.0)
+          K = 0
+          A_ptr = pointer(B, B_linear_indices[1, B_ranges[pp][1][1]])
+          B_ptr = pointer(occupied_orbital_coefficients, ooc_linear_indicies[1, r_ranges[pp][1][1]])
+          C_ptr = pointer(W, W_linear_indices[1, 1, pp])     
+          for index in eachindex(r_ranges[pp])
+            K = r_ranges[pp][index][end] - r_ranges[pp][index][1] + 1
+            A_ptr = pointer(B, B_linear_indices[1, B_ranges[pp][index][1]])
+            B_ptr = pointer(occupied_orbital_coefficients, ooc_linear_indicies[1, r_ranges[pp][index][1]])
+            call_gemm!(Val(transA), Val(transB), M, N, K,alpha,A_ptr,B_ptr,beta,C_ptr)   
+          end #inner loop r_ranges
+          lock(dynamic_p_lock) do 
+            if dynamic_p_index <= p
+              pp = p_order[dynamic_p_index]
+              dynamic_p_index += 1
+            else
+              pp = p + 1 # break out of while loop
+            end
+          end
+        end #while pp <= p/for pp in threadindex:n_threads:p
+      end#spawn
+    end#sync
+  end#time
+  #put all values in an array where elapses where not == 0
+  println("done W loop")
+  # save("/home/ac.jhayes/source/JuliaChem.jl/W_C40H82_56_psorted_threads_jlseskylake.jlprof", Profile.retrieve()...)
   BLAS.set_num_threads(blas_threads)
 end
 

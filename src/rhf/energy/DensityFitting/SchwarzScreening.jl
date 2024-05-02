@@ -53,9 +53,12 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
 
             axial_normalization_factor(eri_quartet_batch_thread[thread], μ_shell, ν_shell, λ_shell, σ_shell, nμ, nν, nλ, nσ)
 
-            shell_pair_contracted = sum(abs.(eri_quartet_batch_thread[thread]))
+            shell_pair_contracted = sum(eri_quartet_batch_thread[thread])
+            shell_screen_matrix[ish,jsh] = !(abs(shell_pair_contracted) <  σ_squared / max_P_P)
 
-            shell_screen_matrix[ish,jsh] = !(shell_pair_contracted <  σ_squared / max_P_P)
+            # shell_pair_contracted = sum(abs.(eri_quartet_batch_thread[thread]))
+            # shell_screen_matrix[ish,jsh] = !(shell_pair_contracted < σ_squared / max_P_P)
+
             shell_screen_matrix[jsh,ish] = shell_screen_matrix[ish,jsh]
 
             if shell_screen_matrix[ish,jsh] == false # if the shell pair is screened, then screen all the basis function pairs
@@ -97,7 +100,7 @@ function get_max_P_P(two_center_integrals)
     maxP = floatmin(Float64) # smallest possible float
     for p in 1:P
         if abs(two_center_integrals[p,p]) > maxP
-            maxP = two_center_integrals[p,p]
+            maxP = abs(two_center_integrals[p,p])
         end
     end
     return maxP
