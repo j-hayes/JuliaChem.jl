@@ -10,6 +10,7 @@ mutable struct ScreeningData
     r_ranges #todo rename
     B_ranges #todo rename
     triangular_indices_count :: Int
+    screened_indices_count :: Int
 end
 
 mutable struct SCFData
@@ -26,6 +27,7 @@ mutable struct SCFData
     density_array
     J
     K
+    k_blocks
     screening_data :: ScreeningData
     μ :: Int
     occ :: Int
@@ -34,8 +36,8 @@ end
 
 
 function SCFData()
-    sd = ScreeningData([],[], [], [], [], [], [], [], [], [], 0)
-    return SCFData([], [], [], [], [],[], [], [], [], [],[] ,[],[], sd, 0, 0, 0)
+    sd = ScreeningData([],[], [], [], [], [], [], [], [], [], 0, 0)
+    return SCFData([], [], [], [], [],[], [], [], [], [],[] ,[],[],[], sd, 0, 0, 0)
 end
 
 export SCFData

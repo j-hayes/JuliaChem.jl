@@ -26,11 +26,11 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
     if scf_options.load == "screened"
-        three_center_integrals = zeros(Float64, (scf_data.screening_data.triangular_indices_count, aux_basis_function_count)) # [unscreened pq, P]
+        three_center_integrals = zeros(Float64, (scf_data.screening_data.screened_indices_count, aux_basis_function_count))
         calculate_three_center_integrals_screened!(three_center_integrals, 
             jeri_engine_thread, basis_sets, thead_integral_buffer, 
                 scf_data.screening_data.shell_screen_matrix, 
-                scf_data.screening_data.screened_triangular_indicies)
+                scf_data.screening_data.sparse_pq_index_map)
     else
         three_center_integrals = zeros(Float64, (basis_function_count, basis_function_count, aux_basis_function_count))
         if scf_options.load == "sequential"

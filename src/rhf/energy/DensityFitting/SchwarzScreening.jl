@@ -13,84 +13,105 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     shell_screen_matrix = trues(basis_set_length, basis_set_length) # true means keep the shell pair, false means it is screened
     basis_function_screen_matrix = trues(scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
 
-    n_shell_indicies = get_n_shell_indicies(basis_set_length)
+    # n_shell_indicies = get_n_shell_indicies(basis_set_length)
+    n_shell_indicies = basis_set_length * (basis_set_length + 1) ÷ 2 # # of triangular shell pairs (pq)
     max_am = max_ang_mom(basis) 
     batch_size = eri_quartet_batch_size(max_am)
     nthreads = Threads.nthreads()
     eri_quartet_batch_thread = [ Vector{Float64}(undef, batch_size) for thread in 1:nthreads ]
 
     σ_squared = σ^2
-    indicies_per_thread = n_shell_indicies ÷ nthreads
-    # Threads.@threads :static for t in 1:nthreads
-    #     thread = Threads.threadid()
-    #     for index in (thread-1)*indicies_per_thread+1:thread*indicies_per_thread
-    thread = 1
-    for index in 1:n_shell_indicies
-            bra_pair, ket_pair, ish,jsh,ksh,lsh = decompose_shell_index_ijkl(index)
-            # take only where (pq|pq) and p >= q 
-            if ish != ksh || jsh != lsh || jsh > ish 
-                continue
-            end
+    dynamic_index = nthreads + 1
+    dyanmic_lock = Threads.ReentrantLock()
+    println("doing schwarz screening")
+    flush(stdout)
+    # Threads.@sync for thread in 1:Threads.nthreads()
+    #     Threads.@spawn begin
+            index = 1
+            thread = 1
+            while index <= n_shell_indicies
+                bra_pair = index
+                ket_pair = index
+                ish = decompose(index)
+                jsh = index - triangular_index(ish)
+
+                # bra_pair, ket_pair, ish,jsh,ksh,lsh = decompose_shell_index_ijkl(index)
+
+                ksh = ish
+                lsh = jsh
 
 
 
-            μ_shell = basis[ish] 
-            ν_shell = basis[jsh] 
-            λ_shell = basis[ksh] 
-            σ_shell = basis[lsh]    # σ shell not to be confused with screening parameter σ   
+                μ_shell = basis[ish]
+                ν_shell = basis[jsh]
+                λ_shell = basis[ksh]
+                σ_shell = basis[lsh]    # σ shell not to be confused with screening parameter σ   
 
-            nμ = μ_shell.nbas
-            nν = ν_shell.nbas
-            nλ = λ_shell.nbas
-            nσ = σ_shell.nbas
+                nμ = μ_shell.nbas
+                nν = ν_shell.nbas
+                nλ = λ_shell.nbas
+                nσ = σ_shell.nbas
 
-            μ_position = μ_shell.pos
-            ν_position = ν_shell.pos
+                μ_position = μ_shell.pos
+                ν_position = ν_shell.pos
 
-            eri_quartet_batch_thread[thread] .= 0.0
-            JERI.compute_eri_block(jeri_engine_thread[thread], eri_quartet_batch_thread[thread], 
-            ish,jsh,ksh,lsh, bra_pair, ket_pair, nμ*nν, nλ*nσ)
+                eri_quartet_batch_thread[thread] .= 0.0
+                JERI.compute_eri_block(jeri_engine_thread[thread], eri_quartet_batch_thread[thread],
+                    ish, jsh, ksh, lsh, bra_pair, ket_pair, nμ * nν, nλ * nσ)
 
-            axial_normalization_factor(eri_quartet_batch_thread[thread], μ_shell, ν_shell, λ_shell, σ_shell, nμ, nν, nλ, nσ)
+                axial_normalization_factor(eri_quartet_batch_thread[thread], μ_shell, ν_shell, λ_shell, σ_shell, nμ, nν, nλ, nσ)
 
-            shell_pair_contracted = sum(eri_quartet_batch_thread[thread])
-            shell_screen_matrix[ish,jsh] = !(abs(shell_pair_contracted) <  σ_squared / max_P_P)
+                shell_pair_contracted = sum(eri_quartet_batch_thread[thread])
 
-            # shell_pair_contracted = sum(abs.(eri_quartet_batch_thread[thread]))
-            # shell_screen_matrix[ish,jsh] = !(shell_pair_contracted < σ_squared / max_P_P)
+                shell_screen_matrix[ish, jsh] = !(abs(shell_pair_contracted) < σ_squared / max_P_P)
 
-            shell_screen_matrix[jsh,ish] = shell_screen_matrix[ish,jsh]
+                # shell_pair_contracted = sum(abs.(eri_quartet_batch_thread[thread]))
+                # shell_screen_matrix[ish,jsh] = !(shell_pair_contracted < σ_squared / max_P_P)
 
-            if shell_screen_matrix[ish,jsh] == false # if the shell pair is screened, then screen all the basis function pairs
-                for μμ::Int64 in μ_position:(μ_position+nμ-1) 
-                    for νν::Int64 in ν_position:(ν_position+nν-1) 
-                        basis_function_screen_matrix[μμ,νν] = false
-                        basis_function_screen_matrix[νν,μμ] = false
+                shell_screen_matrix[jsh, ish] = shell_screen_matrix[ish, jsh]
+
+                if shell_screen_matrix[ish, jsh] == false # if the shell pair is screened, then screen all the basis function pairs
+                    for μμ::Int64 in μ_position:(μ_position+nμ-1)
+                        for νν::Int64 in ν_position:(ν_position+nν-1)
+                            basis_function_screen_matrix[μμ, νν] = false
+                            basis_function_screen_matrix[νν, μμ] = false
+                        end
+                    end
+                else #screen individual basis functions pairs within the shell pair
+                    for μμ::Int64 in μ_position:(μ_position+nμ-1)
+                        for νν::Int64 in ν_position:(ν_position+nν-1)
+                            μνμν = 1 + (νν - ν_position) + nν * (μμ - μ_position) + nν * nμ * (νν - ν_position) + nν * nμ * nν * (μμ - μ_position)
+                            eri = eri_quartet_batch_thread[thread][μνμν]
+                            basis_function_screen_matrix[μμ, νν] = !(abs(eri) < σ_squared / max_P_P)
+                            basis_function_screen_matrix[νν, μμ] = basis_function_screen_matrix[μμ, νν]
+                        end
                     end
                 end
-            else #screen individual basis functions pairs within the shell pair
-                for μμ::Int64 in μ_position:(μ_position+nμ-1) 
-                    for νν::Int64 in ν_position:(ν_position+nν-1) 
-                        μνμν = 1 + (νν-ν_position) + nν*(μμ-μ_position) + nν*nμ*(νν-ν_position) + nν*nμ*nν*(μμ-μ_position)
-                        eri = eri_quartet_batch_thread[thread][μνμν] 
-                        basis_function_screen_matrix[μμ,νν] = !(abs(eri) <  σ_squared / max_P_P)
-                        basis_function_screen_matrix[νν,μμ] = basis_function_screen_matrix[μμ,νν]
+                # lock(dyanmic_lock) do
+                    if dynamic_index > n_shell_indicies
+                        index = n_shell_indicies + 1
+                    else
+                        index = dynamic_index
                     end
-                end
+                    dynamic_index += 1
+                # end
             end
-        end
-    # end
 
+    #     end # end of thread spawn
+    # end # end of thread sync 
+    println("done with schwarz screening")
+    flush(stdout)
     sparse_pq_index_map = zeros(Int64, scf_data.μ, scf_data.μ)
     index = 1
     for μμ::Int64 in 1:scf_data.μ
         for νν::Int64 in 1:scf_data.μ
-            if basis_function_screen_matrix[μμ,νν] == true
-                sparse_pq_index_map[μμ,νν] = index
+            if basis_function_screen_matrix[νν,μμ] == true
+                sparse_pq_index_map[νν,μμ] = index
                 index += 1                
             end
         end
     end
+    # display(sparse_pq_index_map[1:10,1:10])
     return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 

@@ -321,7 +321,7 @@ end
   nμ::Int, nν::Int, nλ::Int,
   μ::Int,ν::Int,λ::Int, sparse_pq_index_map) 
 
-  amμ = μsh.am
+  amμ = μsh.am  # auxiliary basis index
   amν = νsh.am
   amλ = λsh.am  
   
@@ -344,10 +344,10 @@ end
         end
         
         eri_quartet_batch[screened_index,μ+μsize] *= normalization_factor # moved AUX to third index
-        # if ν+νsize > λ+λsize
-        #   inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
-        #   eri_quartet_batch[inverted_screened_index,μ+μsize] = eri_quartet_batch[screened_index,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
-        # end not needed because we are using lower triangle 
+        if ν+νsize > λ+λsize
+          inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
+          eri_quartet_batch[inverted_screened_index,μ+μsize] = eri_quartet_batch[screened_index,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
+        end 
       end 
     end
   end 
