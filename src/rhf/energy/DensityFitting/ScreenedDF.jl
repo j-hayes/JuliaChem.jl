@@ -16,13 +16,15 @@ end
 function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integrals, basis_sets)
 
     max_P_P = get_max_P_P(two_center_integrals)
-
+    println("schwarz screen")
+    flush(stdout)
+    @time begin 
     scf_data.screening_data.shell_screen_matrix,
     scf_data.screening_data.basis_function_screen_matrix,
     scf_data.screening_data.sparse_pq_index_map =
         schwarz_screen_itegrals_df(scf_data, 10^-12, max_P_P, basis_sets, jeri_engine_thread)
     basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
-
+    end
 
     scf_data.screening_data.non_screened_p_indices_count = zeros(Int64, scf_data.μ)
     scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)

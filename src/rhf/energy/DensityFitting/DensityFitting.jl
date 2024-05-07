@@ -27,18 +27,18 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
   
-  if scf_options.contraction_mode == "screened"
-    @time df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-      basis_sets, occupied_orbital_coefficients, iteration, scf_options)
+  if scf_options.contraction_mode == "dense"
+    df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+    basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   elseif scf_options.contraction_mode == "GPU"
     df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options)  
   elseif scf_options.contraction_mode == "TensorOperations"
     df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options)
-  else # default contraction mode is now scf_options.contraction_mode == "BLAS_NoThread"
-      df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
-        basis_sets, occupied_orbital_coefficients, iteration, scf_options)  
+  else # default contraction mode is now scf_options.contraction_mode == "screened"
+    @time df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   end
 
   comm = MPI.COMM_WORLD

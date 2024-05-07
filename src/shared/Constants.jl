@@ -25,17 +25,18 @@ module SCF_Keywords
         const density_default = 1E-3
 
         const max_iterations = "niter"
-        const max_iterations_default = 10
+        const max_iterations_default = 50
 
         const df_max_iterations = "df_niter"
-        const df_max_iterations_default = 10
+        const df_max_iterations_default = 50
     end
 
     module ContractionMode 
         const contraction_mode = "contraction_mode"
-        const default = "TensorOperations"
+        const default = "default"
         const tensor_operations = "TensorOperations" # use TensorOperations.jl library 
-        const BLAS = "BLAS" # use BLAS library 
+        const dense = "dense" # use BLAS library 
+        const screened = "screened" # default 
     end 
 
     module IntegralLoad 
