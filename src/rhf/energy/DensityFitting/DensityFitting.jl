@@ -7,8 +7,6 @@ using JuliaChem.Shared
 using Serialization
 using HDF5
 using ThreadPinning
-using Profile
-using FileIO
 
 
 

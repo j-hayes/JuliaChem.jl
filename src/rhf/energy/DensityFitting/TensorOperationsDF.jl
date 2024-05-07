@@ -7,8 +7,6 @@ using JuliaChem.Shared
 using Serialization
 using HDF5
 using ThreadPinning
-using Profile
-using FileIO
 
 function df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
