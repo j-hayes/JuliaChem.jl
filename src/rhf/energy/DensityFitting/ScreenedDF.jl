@@ -74,7 +74,6 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         load = scf_options.load
         scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
         @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
-        @time three_center_integrals = permutedims(three_center_integrals, (2, 1)) #todo put this in correct order in calulation step
         scf_options.load = load #todo remove
 
         @time begin
@@ -262,7 +261,7 @@ function calculate_K_lower_diagonal_block(scf_data)
     Q = scf_data.A
     occ = scf_data.occ
 
-    batch_width = 8
+    batch_width = 10
     batch_size = p ÷ batch_width
 
     
