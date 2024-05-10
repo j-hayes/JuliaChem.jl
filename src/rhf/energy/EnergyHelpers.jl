@@ -319,7 +319,7 @@ end
 @inline function axial_normalization_factor_screened!(eri_quartet_batch::Array{Float64},
   μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
   nμ::Int, nν::Int, nλ::Int,
-  μ::Int,ν::Int,λ::Int, sparse_pq_index_map) 
+  μ::Int,ν::Int,λ::Int, sparse_pq_index_map, rank_basis_index_map) 
 
   amμ = μsh.am  # auxiliary basis index
   amν = νsh.am
@@ -342,11 +342,11 @@ end
         if amμ < 3 && amν < 3 && amλ < 3 
           normalization_factor = 1.0
         end
-        
-        eri_quartet_batch[μ+μsize,screened_index] *= normalization_factor 
-        if ν+νsize > λ+λsize
+        aux_index =  rank_basis_index_map[μ+μsize]
+        eri_quartet_batch[aux_index,screened_index] *= normalization_factor 
+        if ν+νsize != λ+λsize
           inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
-          eri_quartet_batch[μ+μsize,inverted_screened_index] = eri_quartet_batch[μ+μsize,screened_index] 
+          eri_quartet_batch[aux_index,inverted_screened_index] = eri_quartet_batch[aux_index,screened_index] 
         end 
       end 
     end

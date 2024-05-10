@@ -155,8 +155,48 @@ end
 
 
 
+  
+  
+  @inline function get_df_static_shell_indices(basis_sets, n_ranks, rank)
+    number_of_shells = length(basis_sets.auxillary)
+    indicies = zeros(Int64, 0)
+    i = rank+1
+    while i <= number_of_shells
+      push!(indicies, i)
+      i += n_ranks
+    end
+    return indicies
+  end
+  
+#   todo replace this with returning a list of ranges? https://stackoverflow.com/questions/40196070/index-array-with-multiple-ranges? probably won't do anything from a performance standpoint
+  function static_load_rank_indicies(rank, n_ranks, basis_sets)
+    shell_aux_indicies = get_df_static_shell_indices(basis_sets, n_ranks, rank)
+    basis_indicies, rank_basis_index_map = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
+    
+    return shell_aux_indicies, basis_indicies, rank_basis_index_map
+
+  end
+
+  function get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
+    basis_indicies = zeros(Int64, 0)
+    for shell_index in shell_aux_indicies
+        pos = basis_sets.auxillary[shell_index].pos
+        end_index = pos + basis_sets.auxillary[shell_index].nbas-1
+        for index in pos:end_index
+            push!(basis_indicies, index)
+        end
+    end  
+    rank_basis_indicies = sort(basis_indicies)
+    #make a map between the index in the sorted list and the original index
+    rank_basis_index_map = Dict{Int64,Int64}()
+    for (i, rank_basis_index) in enumerate(rank_basis_indicies)
+        rank_basis_index_map[rank_basis_index] = i
+    end
+    return basis_indicies, rank_basis_index_map
+  end
+
 # move these to a static load file
-@inline function get_df_static_basis_indices(basis_sets, comm_size, rank)
+    function get_df_static_basis_indices(basis_sets, comm_size, rank)
     number_of_shells = length(basis_sets.auxillary)
     indicies = []
     i = rank+1
@@ -170,41 +210,7 @@ end
     end
     return indicies
   end
-  
-  
-  @inline function get_df_static_shell_indices(basis_sets, comm_size, rank)
-    number_of_shells = length(basis_sets.auxillary)
-    indicies = zeros(Int64, 0)
-    i = rank+1
-    while i <= number_of_shells
-      push!(indicies, i)
-      i += comm_size
-    end
-    return indicies
-  end
-  
-#   todo replace this with returning a list of ranges? https://stackoverflow.com/questions/40196070/index-array-with-multiple-ranges? probably won't do anything from a performance standpoint
-  function static_load_rank_indicies(rank, n_ranks, basis_sets)
-    shell_aux_indicies = get_df_static_shell_indices(basis_sets, n_ranks, rank)
-    basis_indicies = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
-    
-    return shell_aux_indicies, basis_indicies    
 
-  end
-
-  function get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
-    basis_indicies = zeros(Int64, 0)
-    for shell_index in shell_aux_indicies
-        pos = basis_sets.auxillary[shell_index].pos
-        end_index = pos + basis_sets.auxillary[shell_index].nbas-1
-        for index in pos:end_index
-            push!(basis_indicies, index)
-        end
-    end  
-    return basis_indicies
-  end
-
-  
   function get_static_gatherv_data(rank, n_ranks, basis_sets, inner_basis_function_length) :: Tuple{Int64, Int64, Int64, Int64, Int64}
     aux_basis_length = length(basis_sets.auxillary)
     begin_index = aux_basis_length÷n_ranks * rank + 1

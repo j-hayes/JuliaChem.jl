@@ -49,10 +49,6 @@ function get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integr
         non_screened_p_indices_count[pp] = sum(view(basis_function_screen_matrix, :, pp))
         non_zero_coefficients[pp] = zeros(scf_data.occ, non_screened_p_indices_count[pp]) #todo justm aket his a vector and use it based on indicies calculated
     end
-    # println("sparse_pq_index_map")
-    # display(scf_data.screening_data.sparse_pq_index_map)
-    # println("sparse_p_start_indices")
-    # display(scf_data.screening_data.sparse_p_start_indices)
 end
 
 
@@ -73,11 +69,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         @time get_screening_metadata!(scf_data, jeri_engine_thread, two_center_integrals, basis_sets)
 
 
-        load = scf_options.load
-        scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
-        @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
-        scf_options.load = load #todo remove
-
+       
         @time begin
             LAPACK.potrf!('L', two_center_integrals)
             LAPACK.trtri!('L', 'N', two_center_integrals)
@@ -85,50 +77,103 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         end
 
         if MPI.Comm_size(MPI.COMM_WORLD) > 1 #todo update this to reduce communication?
-            indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-
-            scf_data.D = zeros(size(three_center_integrals))
-            J_AB_INV = J_AB_INV[:,indicies]
-            @time BLAS.gemm!('N', 'N', 1.0, J_AB_invt, three_center_integrals, 0.0, scf_data.D)
-            # deallocate unneeded memory
-            three_center_integrals = zeros(0) 
-            J_AB_INV = zeros(0)
+            calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options)
+            # @time BLAS.gemm!('N', 'N', 1.0, J_AB_invt, three_center_integrals, 0.0, scf_data.D)
+            
         else
-            scf_data.D = three_center_integrals
+            load = scf_options.load
+            scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
+            @time scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+            scf_options.load = load
             @time BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
+            scf_options.load = load #todo remove this and just pass the load param
         end
+        # deallocate unneeded memory
+        two_center_integrals = zeros(0)
+        J_AB_invt = zeros(0)
+        rank_Q_indicies = size(scf_data.D,1) 
+        scf_data.D_tilde = zeros(Float64, (rank_Q_indicies, scf_data.occ, scf_data.μ))
+        scf_data.coulomb_intermediate = zeros(Float64, rank_Q_indicies)
 
-        scf_data.D_tilde = zeros(Float64, (scf_data.A, scf_data.occ, scf_data.μ))
         scf_data.J = zeros(Float64, scf_data.screening_data.screened_indices_count)
         scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
-        scf_data.coulomb_intermediate = zeros(Float64, scf_data.A)
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
+
         scf_data.D_triangle = zeros(0)
         scf_data.two_electron_fock_triangle = zeros(0)
         scf_data.two_electron_fock_GPU = zeros(0)
         scf_data.thread_two_electron_fock = zeros(0)
 
+        println("size of scf_data on rank $(MPI.Comm_rank(comm)): in MB = $(sizeof(scf_data)/1024^2)")
+
     end
-    println("exchange")
+
+
     @time calculate_exchange_screened!(scf_data, occupied_orbital_coefficients)
     println("coulomb")
-    #coulomb must be called after exchange because exchange only copies the lower triangle to the fock matrix
-    # the coulomb because of its array based symmetry requires a copy anyway, 
-    # so we get that copy for free if using 
-    # F[i,j] += F[i,j] + J[i,j] method
-    # F[j,i] = F[i,j] 
-    # 
     @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
     println("done with DF-RHF screened")
+end
 
+function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
+    comm = MPI.COMM_WORLD
+    this_rank = MPI.Comm_rank(comm)
+    n_ranks = MPI.Comm_size(comm)
+
+    println("three center integrals ")
+    load = scf_options.load
+    scf_options.load = "screened"
+    @time three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+    println("type of three center integrals ", typeof(three_center_integrals))
+    scf_options.load = load
+    @time begin
+        shell_aux_indicies, three_eri_rank_indicies, rank_basis_index_map = 
+            static_load_rank_indicies(this_rank, n_ranks, basis_sets)
+
+        Q = scf_data.A
+        pq = size(three_center_integrals, 2)
+
+        #divide the B_Q indicies that will go to each rank 
+        #(these are different than the three_eri_rank_indicies indicies which are based on the static or dynamic load balancing)
+        rank_B_Q_indices = Array{UnitRange}(undef, n_ranks)
+        for i in 0:n_ranks-1
+            rank_B_Q_indices[i+1] = (i*Q÷n_ranks)+1:min((i + 1) * Q ÷ n_ranks, Q)
+        end
+        this_rank_B_Q_index_range = rank_B_Q_indices[this_rank+1]
+        this_rank_Q_length = length(this_rank_B_Q_index_range)
+
+        scf_data.D = zeros(Float64, (this_rank_Q_length, pq))
+
+        for send_rank in 0:n_ranks-1
+
+            send_rank_B_Q_index_range = rank_B_Q_indices[send_rank+1]
+
+            # the portion of J_AB_INV for the send rank and this ranks 3-eri 
+            # todo can this be preallocated? and a view be used to avoid multiple allocations?
+            send_rank_J_AB_INV = J_AB_INV[send_rank_B_Q_index_range, three_eri_rank_indicies]
+           
+            if send_rank == this_rank        
+                println("recieving rank $(this_rank) sizeof scf_data.D $(size(scf_data.D)) \n")     
+                MPI.Barrier(comm)  
+                BLAS.gemm!('N', 'N', 1.0, send_rank_J_AB_INV, three_center_integrals, 0.0, scf_data.D)
+                # MPI.Reduce!(scf_data.D, MPI.SUM, send_rank, comm)
+            else
+                B_temp = zeros(Float64, (length(send_rank_B_Q_index_range), pq))
+                println("sending rank $(this_rank) sizeof B_temp$(size(B_temp)) \n")       
+                MPI.Barrier(comm)  
+
+                BLAS.gemm!('N', 'N', 1.0, send_rank_J_AB_INV, three_center_integrals, 0.0, B_temp)
+                # MPI.Reduce(B_temp, MPI.SUM, send_rank, comm)
+            end
+        end
+    end #time 
 end
 
 function calculate_exchange_screened!(scf_data, occupied_orbital_coefficients)
+    println("do W")
     @time calculate_W_screened(scf_data, occupied_orbital_coefficients)
-    # display(scf_data.two_electron_fock)
-    if scf_data.μ < 10 #figure out what is actually small
-        # BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (scf_data.occ*scf_data.A, scf_data.μ )),
-        #  reshape(scf_data.D_tilde, (scf_data.occ*scf_data.A, scf_data.μ )), 0.0, scf_data.two_electron_fock)
+    println("do K")
+    if scf_data.μ ÷ 10 < Threads.nthreads() #figure out what is actually small
         @time calculate_K_small(scf_data)
     else
         @time calculate_K_lower_diagonal_block(scf_data)
@@ -144,7 +189,7 @@ function calculate_W_screened(scf_data, occupied_orbital_coefficients)
     dynamic_p = n_threads + 1
     dynamic_lock = Threads.ReentrantLock()
 
-    M = scf_data.A
+    M = size(scf_data.D,1)
     N = scf_data.occ
     alpha = 1.0
     beta = 0.0
@@ -188,7 +233,7 @@ function calculate_K_small(scf_data)
 
     M = scf_data.μ 
     N = scf_data.μ
-    K = scf_data.A*scf_data.occ
+    K = size(scf_data.D_tilde,1)*scf_data.occ
 
     A_ptr = pointer(scf_data.D_tilde, 1)
     B_ptr = pointer(scf_data.D_tilde, 1)
@@ -260,7 +305,7 @@ end
 function calculate_K_lower_diagonal_block(scf_data)
     W = scf_data.D_tilde
     p = scf_data.μ
-    Q = scf_data.A
+    Q = size(W, 1)
     occ = scf_data.occ
 
     batch_width = 10
@@ -320,6 +365,7 @@ function calculate_K_lower_diagonal_block(scf_data)
                     B_ptr = pointer(W, linear_indices[1, 1, q_start])
                     C_ptr = pointer(exchange_blocks, K_linear_indices[1, 1, thread])
 
+
                     call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
 
                     scf_data.two_electron_fock[p_range, q_range] .= view(exchange_blocks, :,:, thread)
@@ -351,7 +397,10 @@ function calculate_K_lower_diagonal_block(scf_data)
     q_nonsquare_range = p-(p%batch_width)+1:p
     q_nonsquare_start = q_nonsquare_range[1]
 
-    non_square_buffer = zeros(Float64, p, length(q_nonsquare_range))
+    #todo look into doing overlapping blocks at the bottom of the matrix so there isn't a long and short matrix multiplication
+    #most of which should be able to be screened? 
+
+    non_square_buffer = zeros(Float64, p, length(q_nonsquare_range)) #todo preallocate/use existing blocks
 
     M = p
     N = length(q_nonsquare_range)

@@ -20,12 +20,9 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     eri_quartet_batch_thread = [ Vector{Float64}(undef, batch_size) for thread in 1:nthreads ]
 
     σ_squared = σ^2
-    dynamic_index = nthreads + 1
-    dyanmic_lock = Threads.ReentrantLock()
-    Threads.@sync for thread in 1:Threads.nthreads()
+    Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin
-            index = thread
-            while index <= n_shell_indicies
+            for index in thread:nthreads:n_shell_indicies
                 bra_pair = index
                 ket_pair = index
                 ish = decompose(index)
@@ -42,7 +39,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
 
                 eri_quartet_batch_thread[thread] .= 0.0
                 JERI.compute_eri_block(jeri_engine_thread[thread], eri_quartet_batch_thread[thread],
-                    ish, jsh, ksh, lsh, bra_pair, ket_pair, nμ * nν, nμ * nν)
+                    ish, jsh, ish, jsh, bra_pair, ket_pair, nμ * nν, nμ * nν)
 
                 axial_normalization_factor(eri_quartet_batch_thread[thread], μ_shell, ν_shell, μ_shell, ν_shell, nμ, nν, nμ, nν)
 
@@ -69,16 +66,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
                         end
                     end
                 end
-                lock(dyanmic_lock) do
-                    if dynamic_index > n_shell_indicies
-                        index = n_shell_indicies + 1
-                    else
-                        index = dynamic_index
-                    end
-                    dynamic_index += 1
-                end
             end
-
         end # end of thread spawn
     end # end of thread sync 
     sparse_pq_index_map = zeros(Int64, scf_data.μ, scf_data.μ)
