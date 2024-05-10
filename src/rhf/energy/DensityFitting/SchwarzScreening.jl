@@ -10,8 +10,8 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
 
     basis = basis_sets.primary
     basis_set_length = length(basis)
-    shell_screen_matrix = trues(basis_set_length, basis_set_length) # true means keep the shell pair, false means it is screened
-    basis_function_screen_matrix = trues(scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
+    shell_screen_matrix = zeros(Bool,basis_set_length, basis_set_length) # true means keep the shell pair, false means it is screened
+    basis_function_screen_matrix = zeros(Bool,scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
 
     n_shell_indicies = basis_set_length * (basis_set_length + 1) ÷ 2 # # of triangular shell pairs (pq)
     max_am = max_ang_mom(basis) 
@@ -19,7 +19,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     nthreads = Threads.nthreads()
     eri_quartet_batch_thread = [ Vector{Float64}(undef, batch_size) for thread in 1:nthreads ]
 
-    σ_squared = σ^2
+    threshold = σ^2  / max_P_P
     Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin
             for index in thread:nthreads:n_shell_indicies
@@ -46,7 +46,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
                 shell_pair_contracted = sum(eri_quartet_batch_thread[thread])
 
 
-                shell_screen_matrix[ish, jsh] = !(Base.abs_float(shell_pair_contracted) < σ_squared / max_P_P)
+                shell_screen_matrix[ish, jsh] = !(Base.abs_float(shell_pair_contracted) < threshold)
                 shell_screen_matrix[jsh, ish] = shell_screen_matrix[ish, jsh]
 
                 if shell_screen_matrix[ish, jsh] == false # if the shell pair is screened, then screen all the basis function pairs
@@ -61,7 +61,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
                         for νν::Int64 in ν_position:(ν_position+nν-1)
                             μνμν = 1 + (νν - ν_position) + nν * (μμ - μ_position) + nν * nμ * (νν - ν_position) + nν * nμ * nν * (μμ - μ_position)
                             eri = eri_quartet_batch_thread[thread][μνμν]
-                            basis_function_screen_matrix[μμ, νν] = !(abs(eri) < σ_squared / max_P_P)
+                            basis_function_screen_matrix[μμ, νν] = !(Base.abs_float(eri) < threshold)
                             basis_function_screen_matrix[νν, μμ] = basis_function_screen_matrix[μμ, νν]
                         end
                     end

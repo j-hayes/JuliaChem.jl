@@ -156,14 +156,14 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
                 println("recieving rank $(this_rank) sizeof scf_data.D $(size(scf_data.D)) \n")     
                 MPI.Barrier(comm)  
                 BLAS.gemm!('N', 'N', 1.0, send_rank_J_AB_INV, three_center_integrals, 0.0, scf_data.D)
-                # MPI.Reduce!(scf_data.D, MPI.SUM, send_rank, comm)
+                MPI.Reduce!(scf_data.D, MPI.SUM, send_rank, comm)
             else
                 B_temp = zeros(Float64, (length(send_rank_B_Q_index_range), pq))
                 println("sending rank $(this_rank) sizeof B_temp$(size(B_temp)) \n")       
                 MPI.Barrier(comm)  
 
                 BLAS.gemm!('N', 'N', 1.0, send_rank_J_AB_INV, three_center_integrals, 0.0, B_temp)
-                # MPI.Reduce(B_temp, MPI.SUM, send_rank, comm)
+                MPI.Reduce(B_temp, MPI.SUM, send_rank, comm)
             end
         end
     end #time 
