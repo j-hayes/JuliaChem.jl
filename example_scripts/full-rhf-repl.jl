@@ -8,7 +8,7 @@ using JuliaChem.JCModules
 #================================#
 #== JuliaChem execution script ==#
 #================================#
-function full_rhf(input_file)
+function full_rhf(input_file; output=3)
 
   if MPI.Comm_rank(MPI.COMM_WORLD) == 0
 
@@ -36,11 +36,11 @@ function full_rhf(input_file)
   try
     #== read in input file ==#
     molecule, driver, model, keywords = JuliaChem.JCInput.run(input_file;       
-      output=2)       
+      output=output)       
     
     #== generate basis set ==#
     mol, basis = JuliaChem.JCBasis.run(molecule, model; 
-      output=2) 
+      output=output) 
    
     #== molecule info ==#
     JuliaChem.JCMolecule.run(mol)
@@ -50,14 +50,14 @@ function full_rhf(input_file)
         #== perform scf calculation ==#
         if haskey(keywords, "scf")         
           rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis, keywords["scf"]; 
-            output=2) 
+            output=output) 
         else
           rhf_energy = JuliaChem.JCRHF.Energy.run(mol, basis; 
-            output=2) 
+            output=output) 
         end    
         #== compute molecular properties such as dipole moment ==#
         properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, 
-          keywords["prop"]; output=2)
+          keywords["prop"]; output=output)
         
         return rhf_energy, properties
         
