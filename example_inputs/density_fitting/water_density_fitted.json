@@ -19,7 +19,7 @@
       "scf_type":"df",
       "guess":"hcore", 
       "load":"static",
-      "contraction_mode":"screened",
+      "contraction_mode":"GPU",
       "dele":1E-6,
       "rmsd":1E-6,
       "df_dele":1E-6,

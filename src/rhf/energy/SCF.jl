@@ -457,22 +457,13 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         scf_data.A = aux_basis_function_count
         scf_data.occ = occupied_orbital_count
         triangle_size = (basis_function_count*(basis_function_count+1))÷2
-        if scf_options.contraction_mode == "GPU"
-          scf_data.D = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_tilde =  CUDA.CuArray{Float64}(undef, (basis_function_count, occupied_orbital_count, node_indicie_count))
-          scf_data.two_electron_fock_GPU = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count))
-          scf_data.density = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count))
-          scf_data.coulomb_intermediate = CUDA.CuArray{Float64}(undef, node_indicie_count)
-          scf_data.occupied_orbital_coefficients = CUDA.CuArray{Float64}(undef, (basis_function_count, scf_data.occ))
-        else
+        if scf_options.contraction_mode != "GPU"
           scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_triangle = zeros(Float64, (triangle_size, node_indicie_count))
           scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
           scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
           scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
         end
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
-        scf_data.two_electron_fock_triangle = zeros(Float64, triangle_size)
       end
 
 

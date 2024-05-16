@@ -32,6 +32,9 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   elseif scf_options.contraction_mode == "GPU"
     df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    basis_sets, occupied_orbital_coefficients, iteration, scf_options)
+  elseif scf_options.contraction_mode == "TensorOperationsGPU"
+    df_rhf_fock_build_TensorOperations_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options)  
   elseif scf_options.contraction_mode == "TensorOperations"
     df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
