@@ -16,8 +16,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     CUDA.device!(0)
     
     if iteration == 1
-        println("starting GPU DF build")
-
         two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
         cu_three_center_integrals = CUDA.CuArray{Float64}(undef, ( scf_data.μ, scf_data.μ,scf_data.A))
@@ -52,16 +50,9 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     CUBLAS.gemv!('T', 1.0, reshape(scf_data.D, (pq, scf_data.A)), reshape(scf_data.density, pq), 0.0, scf_data.coulomb_intermediate)
     CUBLAS.gemv!('N', 2.0, reshape(scf_data.D, (pq, scf_data.A)), scf_data.coulomb_intermediate , 0.0, reshape(scf_data.two_electron_fock_GPU, pq))
 
-    copyto!(scf_data.two_electron_fock, scf_data.two_electron_fock_GPU)
-
     CUBLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), scf_data.occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
     CUBLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock_GPU)
     
     #copy back the fock matrix to the host
     copyto!(scf_data.two_electron_fock, scf_data.two_electron_fock_GPU)
-
-
-
-
-
 end
