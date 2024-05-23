@@ -1,3 +1,4 @@
+using CUDA
 mutable struct ScreeningData
     sparse_pq_index_map
     basis_function_screen_matrix
@@ -11,6 +12,21 @@ mutable struct ScreeningData
     B_ranges #todo rename
     triangular_indices_count :: Int
     screened_indices_count :: Int
+end
+
+mutable struct SCFGPUData
+    device_Q_range_lengths :: Array{Int,1}
+    device_Q_range_starts :: Array{Int,1}
+    device_Q_range_ends :: Array{Int,1}
+    device_Q_indices :: Array{UnitRange{Int},1}
+    device_B :: Array{CuArray{Float64},1}
+    device_B_send_buffers :: Array{CuArray{Float64},1}
+    device_fock :: Array{CuArray{Float64},1}
+    device_coulomb_intermediate :: Array{CuArray{Float64},1}
+    device_exchange_intermediate :: Array{CuArray{Float64},1}
+    device_occupied_orbital_coefficients :: Array{CuArray{Float64},1}
+    device_density :: Array{CuArray{Float64},1}
+    host_fock :: Array{Array{Float64,2},1}
 end
 
 mutable struct SCFData
@@ -27,6 +43,7 @@ mutable struct SCFData
     K
     k_blocks
     screening_data :: ScreeningData
+    gpu_data :: SCFGPUData
     μ :: Int
     occ :: Int
     A :: Int
@@ -35,7 +52,8 @@ end
 
 function SCFData()
     sd = ScreeningData([],[], [], [], [], [], [], [], [], [], 0, 0)
-    return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, 0, 0, 0)
+    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [])
+    return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0, 0)
 end
 
 export SCFData

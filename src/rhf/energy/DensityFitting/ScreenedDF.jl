@@ -89,9 +89,11 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.thread_two_electron_fock = zeros(0)
     end
 
+    println("calculate_exchange_screened!")
 
-    calculate_exchange_screened!(scf_data, occupied_orbital_coefficients)
-    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
+    @time calculate_exchange_screened!(scf_data, occupied_orbital_coefficients)
+    println("calculate_coulomb_screened")
+    @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
@@ -188,12 +190,8 @@ function reduce_B_other_rank(B, rank)
 end
 
 function calculate_exchange_screened!(scf_data, occupied_orbital_coefficients)
-    calculate_W_screened(scf_data, occupied_orbital_coefficients)
-    if scf_data.μ ÷ 10 < Threads.nthreads() #figure out what is actually small
-        calculate_K_small(scf_data)
-    else
-        calculate_K_lower_diagonal_block(scf_data)
-    end
+    @time calculate_W_screened(scf_data, occupied_orbital_coefficients)
+    @time calculate_K_lower_diagonal_block(scf_data)
 end
 
 function calculate_W_screened(scf_data, occupied_orbital_coefficients)
