@@ -14,8 +14,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     n_ooc = scf_data.occ
 
     devices = CUDA.devices()
-    # num_devices = length(devices)
-    num_devices = 4
+    num_devices = length(devices)
     scf_data.gpu_data.number_of_devices_used = num_devices
 
     if iteration == 1
@@ -223,7 +222,6 @@ end
 
 function free_gpu_memory(scf_data::SCFData)
     for device_id in 1:scf_data.gpu_data.number_of_devices_used
-        println("freeing data on device $device_id")
         CUDA.device!(device_id - 1)
         CUDA.unsafe_free!(scf_data.gpu_data.device_B[device_id])
         CUDA.unsafe_free!(scf_data.gpu_data.device_fock[device_id])
