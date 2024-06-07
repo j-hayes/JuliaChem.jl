@@ -7,6 +7,13 @@ module SCF_Keywords
         const density_fitting = "df" # Density Fitted Restricted Hartree Fock
     end
 
+    module Screening
+        const df_exchange_block_width = "df_exchange_block_width"
+        const df_exchange_block_width_default = 10
+        const df_sigma = "df_sigma"
+        const df_sigma_default = 1E-6
+    end
+
     module Guess
         const guess = "guess"
         const default = "hcore"
@@ -46,7 +53,7 @@ module SCF_Keywords
         const dynamic = "dynamic"
     end
     
-    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence
+    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence, Screening
 end 
 
 
