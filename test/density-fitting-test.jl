@@ -19,20 +19,20 @@ include("../example_scripts/full-rhf-repl.jl")
 
 function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input_file)
   try 
-    println(BLAS.get_config())
+    # println(BLAS.get_config())
     # BLAS.set_num_threads(28)
-    JuliaChem.initialize() 
+    # JuliaChem.initialize() 
 
     #startup compilation runs
-    # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted.json"))
+    df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted.json"))
     # scf_results, properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_rhf.json")) 
 
-    DF_time = @elapsed begin @time begin 
-      df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
-    end end
-    RHF_time = @elapsed begin @time begin 
-      scf_results, properties = full_rhf(input_file)      
-    end end
+    # DF_time = @elapsed begin @time begin 
+    #   df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
+    # end end
+    # RHF_time = @elapsed begin @time begin 
+    #   scf_results, properties = full_rhf(input_file)      
+    # end end
 
     
 
@@ -63,24 +63,36 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
   JuliaChem.finalize()
 
 end
+println(BLAS.get_config())
+JuliaChem.initialize() 
+
+n_threads = Threads.nthreads()
+
+comm_rank = MPI.Comm_rank(MPI.COMM_WORLD)
+# println("starting JC on rank $comm_rank with $n_threads threads")
+# if comm_rank %2 == 0
+#   ThreadPinning.pinthreads(0:n_threads-1)
+# else
+#   ThreadPinning.pinthreads(n_threads:(n_threads*2)-1)
+# end
 # ThreadPinning.pinthreads(:cores)
-BLAS.set_num_threads(28)
+BLAS.set_num_threads(12)
 # check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
 
 # df_path = ARGS[1]
 # rhf_path = ARGS[2]
 
-# df_path = "/home/ac.jhayes/source/JuliaChem.jl/example_inputs/density_fitting/C20H42_df.json"
-# rhf_path = "/home/ac.jhayes/source/JuliaChem.jl/example_inputs/density_fitting/C20H42.json"
+# df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C20H42_df.json")
+# rhf_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C20H42.json")
 
-df_path = "/home/ac.jhayes/source/JuliaChem.jl/example_inputs/density_fitting/C40H82_df.json"
-rhf_path = "/home/ac.jhayes/source/JuliaChem.jl/example_inputs/density_fitting/C40H82.json"
+# df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C40H82_df.json")
+# rhf_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C40H82.json")
 
 # df_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/ammonia_trimer_df.json"
 # rhf_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water.json"
 
-# MP2_Num = "07"
-# df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/$(MP2_Num)_MP2_df.json")
-# rhf_path =  joinpath(@__DIR__, "../example_inputs/density_fitting/$(MP2_Num)_MP2.json")
+MP2_Num = "03"
+df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/$(MP2_Num)_MP2_df.json")
+rhf_path =  joinpath(@__DIR__, "../example_inputs/density_fitting/$(MP2_Num)_MP2.json")
 
 check_density_fitted_method_matches_RHF(df_path, rhf_path)

@@ -89,15 +89,14 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.J = zeros(Float64, scf_data.screening_data.screened_indices_count)
         scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
-
-        scf_data.two_electron_fock_triangle = zeros(0)
         scf_data.two_electron_fock_GPU = zeros(0)
         scf_data.thread_two_electron_fock = zeros(0)
     end
 
-    println("exchange"); 
+    println("calculate_exchange_screened!")
+
     @time calculate_exchange_screened!(scf_data, occupied_orbital_coefficients)
-    println("coulomb"); 
+    println("calculate_coulomb_screened")
     @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
 end
 

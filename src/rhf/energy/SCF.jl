@@ -461,7 +461,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
           scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
         end
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
-        scf_data.two_electron_fock_triangle = zeros(Float64, triangle_size)
       end
 
 
@@ -512,8 +511,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     #== dynamic damping of Fock matrix ==#
     x = ΔE >= 1.0 ? 1.0/log(50,50*ΔE) : 1.0 
     LinearAlgebra.BLAS.axpby!(1.0-x, F_old, x, F)
-
-    F_old .= F
 
     LinearAlgebra.BLAS.blascopy!(length(F), F, 1, 
       F_old, 1) 
@@ -589,9 +586,15 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       W[i,j] += 2.0 * F_eval[iocc] * C[i, iocc] * C[j, iocc]
     end
   end
- 
+
+  if scf_options.contraction_mode == "GPU" 
+    free_gpu_memory(scf_data)
+  end
+  
   return E, scf_converged
 end
+
+
 
 function maximum_iterations_exceeded(iter, scf_options) :: Bool
   if scf_options.density_fitting 
