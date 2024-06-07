@@ -29,9 +29,9 @@ enable_language(CXX)
 #)
 
 if (CMAKE_BUILD_TYPE MATCHES Release)
-  set(CMAKE_CXX_FLAGS "-std=c++1z -O3 -ffast-math")
+  set(CMAKE_CXX_FLAGS "-std=c++20 -O3 -ffast-math")
 else()
-  set(CMAKE_CXX_FLAGS "-std=c++1z -O0 -g")
+  set(CMAKE_CXX_FLAGS "-std=c++20 -O0 -g")
 endif() 
 
 #################################
