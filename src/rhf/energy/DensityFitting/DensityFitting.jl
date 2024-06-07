@@ -48,7 +48,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   if MPI.Comm_size(comm) > 1
     MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   end
-  
+  return
 end
 
 function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, basis_sets::CalculationBasisSets,

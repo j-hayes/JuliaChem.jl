@@ -19,14 +19,16 @@ mutable struct SCFGPUData
     device_Q_range_starts :: Array{Int,1}
     device_Q_range_ends :: Array{Int,1}
     device_Q_indices :: Array{UnitRange{Int},1}
-    device_B :: Array{CuArray{Float64},1}
-    device_B_send_buffers :: Array{CuArray{Float64},1}
-    device_fock :: Array{CuArray{Float64},1}
-    device_coulomb_intermediate :: Array{CuArray{Float64},1}
-    device_exchange_intermediate :: Array{CuArray{Float64},1}
-    device_occupied_orbital_coefficients :: Array{CuArray{Float64},1}
-    device_density :: Array{CuArray{Float64},1}
-    host_fock :: Array{Array{Float64,2},1}
+    device_B :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_B_send_buffers :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_fock :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_coulomb_intermediate :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_exchange_intermediate :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_occupied_orbital_coefficients :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_density :: Array{Union{Nothing, CuArray{Float64}},1}
+    host_fock ::  Array{Array{Float64,2},1}
+    number_of_devices_used :: Int
+    device_start_index
 end
 
 mutable struct SCFData
@@ -52,7 +54,7 @@ end
 
 function SCFData()
     sd = ScreeningData([],[], [], [], [], [], [], [], [], [], 0, 0)
-    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [])
+    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], 0, 0)
     return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0, 0)
 end
 
