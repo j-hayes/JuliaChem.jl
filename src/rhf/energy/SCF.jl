@@ -6,8 +6,6 @@ using Printf
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using TensorOperations
-using CUDA
-
 const do_continue_print = false 
 const print_eri = false 
 const get_next_index_tag = 1111
@@ -33,7 +31,6 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   check_auxillary_basis_is_provided(scf_options.density_fitting, basis_sets)
 
   timings = create_jctiming() :: JCTiming
-
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
     ndiis=ndiis, dele=dele, rmsd=rmsd,
     fdiff=fdiff, scf_options=scf_options, timings)
@@ -166,11 +163,8 @@ function rhf_kernel(mol::Molecule,
   E_elec = 0.0
   F_eval = zeros(size(F)[1])
   if scf_options.guess == Guess.hcore || scf_options.guess == Guess.density_fitting
-    hcore_start = time()
     E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a, 
       workspace_b, ortho, basis_sets, 0, debug)
-    hcore_end = time()
-    timings.iteration_times["hcore"] = hcore_end - hcore_start
   end
   
   F_old = deepcopy(F)
@@ -417,33 +411,36 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       #workspace_b .= fdiff ? ΔF : F
     end
      
-    #== compress D into shells in Dsh ==#
-    for ish in 1:length(basis), jsh in 1:ish
-      ipos = basis[ish].pos
-      ibas = basis[ish].nbas
-
-      jpos = basis[jsh].pos
-      jbas = basis[jsh].nbas
-      
-      max_value = 0.0
-      for i in ipos:(ipos+ibas-1), j in jpos:(jpos+jbas-1) 
-        max_value = max(max_value, Base.abs_float(D_input[i,j]))
-      end
-      Dsh[ish, jsh] = max_value
-      Dsh[jsh, ish] = Dsh[ish, jsh] 
-    end
-  
     #== build new Fock matrix ==#
     if !do_density_fitting
+      #== compress D into shells in Dsh ==#
+      for ish in 1:length(basis), jsh in 1:ish
+        ipos = basis[ish].pos
+        ibas = basis[ish].nbas
+
+        jpos = basis[jsh].pos
+        jbas = basis[jsh].nbas
+        
+        max_value = 0.0
+        for i in ipos:(ipos+ibas-1), j in jpos:(jpos+jbas-1) 
+          max_value = max(max_value, Base.abs_float(D_input[i,j]))
+        end
+        Dsh[ish, jsh] = max_value
+        Dsh[jsh, ish] = Dsh[ish, jsh] 
+      end
+
+      fock_build_start_time =  time()
       rfh_fock_build(workspace_a, workspace_b, F, 
       F_thread, D, 
       H, basis_sets, 
       schwarz_bounds, Dsh,
       eri_quartet_batch_thread, 
       jeri_engine_thread, iter,
-      cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)      
+      cutoff, debug, scf_options.load, fdiff, ΔF, F_cumul)     
+      fock_build_end_time = time()
+      timings.fock_build_times["$iter"] = fock_build_end_time - fock_build_start_time 
     else
-
+      #todo move this to a DF file
       if iter == 1
         aux_basis_function_count = basis_sets.auxillary.norb
         basis_function_count = basis_sets.primary.norb
@@ -457,16 +454,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         scf_data.A = aux_basis_function_count
         scf_data.occ = occupied_orbital_count
         triangle_size = (basis_function_count*(basis_function_count+1))÷2
-        if scf_options.contraction_mode == "GPU"
-          scf_data.D = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_tilde =  CUDA.CuArray{Float64}(undef, (basis_function_count, occupied_orbital_count, node_indicie_count))
-          scf_data.two_electron_fock_GPU = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count))
-          scf_data.density = CUDA.CuArray{Float64}(undef, (basis_function_count, basis_function_count))
-          scf_data.coulomb_intermediate = CUDA.CuArray{Float64}(undef, node_indicie_count)
-          scf_data.occupied_orbital_coefficients = CUDA.CuArray{Float64}(undef, (basis_function_count, scf_data.occ))
-        else
+        if scf_options.contraction_mode != "GPU"
           scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_triangle = zeros(Float64, (triangle_size, node_indicie_count))
           scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
           scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
           scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
@@ -477,10 +466,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
 
       MPI.Bcast!(C, 0, comm)
-
+        fock_build_start_time =  time()
         df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
         F .= H .+ scf_data.two_electron_fock
-
+        fock_build_end_time = time()
+        timings.fock_build_times["$iter"] = fock_build_end_time - fock_build_start_time
     end
     
     if debug && MPI.Comm_rank(comm) == 0
