@@ -10,8 +10,12 @@ mutable struct ScreeningData
     screened_triangular_indicies_to_2d
     r_ranges #todo rename
     B_ranges #todo rename
+    block_screen_matrix :: Array{Bool,2}
+    blocks_to_calculate :: Array{Int,1}
+    exchange_batch_indexes :: Array{Tuple{Int, Int}}
     triangular_indices_count :: Int
     screened_indices_count :: Int
+    K_block_width :: Int
 end
 
 mutable struct SCFGPUData
@@ -53,7 +57,7 @@ end
 
 
 function SCFData()
-    sd = ScreeningData([],[], [], [], [], [], [], [], [], [], 0, 0)
+    sd = ScreeningData([],[], [], [], [], [], [], [], [], [], falses(1,1), zeros(Int,0), Array{Tuple{Int, Int}}(undef,0), 0, 0, 0)
     gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], 0, 0)
     return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0, 0)
 end

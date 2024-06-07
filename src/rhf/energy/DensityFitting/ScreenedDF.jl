@@ -91,6 +91,9 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
         scf_data.two_electron_fock_GPU = zeros(0)
         scf_data.thread_two_electron_fock = zeros(0)
+
+        calculate_exchange_block_screen_matrix(scf_data, scf_options)
+
     end
 
     println("calculate_exchange_screened!")
@@ -324,39 +327,22 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
     end
 end
 
-function calculate_K_lower_diagonal_block(scf_data, scf_options)
-    W = scf_data.D_tilde
-    p = scf_data.μ
-    Q = size(W, 1)
-    occ = scf_data.occ
-
-    K_block_width = p ÷ scf_options.df_exchange_block_width
-
-    
-    transA = true
-    transB = false
-    alpha = -1.0
-    beta = 0.0
-    linear_indices = LinearIndices(W)
-
-    M = K_block_width
-    N = K_block_width
-    K = Q * occ
-   
-    n_threads = Threads.nthreads()
+function calculate_exchange_block_screen_matrix(scf_data, scf_options)
+    n_threads = Threads.nthreads()  
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
-
-    if length(scf_data.k_blocks) == 0
-        scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, n_threads)
-    end
+    K_block_width = scf_data.μ ÷ scf_options.df_exchange_block_width
+    
+    scf_data.screening_data.K_block_width = K_block_width
+    scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, n_threads)
+    
     exchange_blocks = scf_data.k_blocks
     K_linear_indices = LinearIndices(exchange_blocks)
     
     the_batch_index = 1
-    batch_indexes = Array{Tuple{Int, Int}}(undef, lower_triangle_length)
+    exchange_batch_indexes = Array{Tuple{Int, Int}}(undef, lower_triangle_length)
     for iii in 1:scf_options.df_exchange_block_width
         for jjj in 1:iii
-            batch_indexes[the_batch_index] = (iii, jjj)
+            exchange_batch_indexes[the_batch_index] = (iii, jjj)
             the_batch_index+=1
         end
         
@@ -365,10 +351,10 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     blocks_to_calculate = Vector{Int}(undef, 0)
     block_index = 1
     block_screen_matrix = zeros(Bool, scf_options.df_exchange_block_width, scf_options.df_exchange_block_width)
-    println("calculating the k blocks screened")
+    println("calculating the k blocks screen")
     @time begin 
         while block_index <= lower_triangle_length
-            pp, qq = batch_indexes[block_index]
+            pp, qq = exchange_batch_indexes[block_index]
 
             p_range = (pp-1)*K_block_width+1:pp*K_block_width
             p_start = (pp - 1) * K_block_width + 1
@@ -386,10 +372,40 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
             block_index += 1
         end
     end
-
     println("blocks to calculate: ", length(blocks_to_calculate))
     println("total blocks: ", lower_triangle_length)
 
+    scf_data.screening_data.block_screen_matrix = block_screen_matrix
+    scf_data.screening_data.blocks_to_calculate = blocks_to_calculate
+    scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes
+    
+
+end
+
+function calculate_K_lower_diagonal_block(scf_data, scf_options)
+
+
+   
+
+    W = scf_data.D_tilde
+    p = scf_data.μ
+    Q = size(W, 1)
+    occ = scf_data.occ
+
+    K_block_width = scf_data.screening_data.K_block_width
+    
+    transA = true
+    transB = false
+    alpha = -1.0
+    beta = 0.0
+    linear_indices = LinearIndices(W)
+
+    M = K_block_width
+    N = K_block_width
+    K = Q * occ
+   
+    n_threads = Threads.nthreads()
+    
     blas_threads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     dynamic_index = n_threads + 1
@@ -397,14 +413,18 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     println("calculating the k blocks screened")
     @time begin 
     
+    exchange_blocks = scf_data.k_blocks
+
+    K_linear_indices = LinearIndices(exchange_blocks)
 
     Threads.@sync for thread in 1:n_threads
         Threads.@spawn begin
             index = thread
+            # lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
             # while index <= lower_triangle_length
-            for ii in thread:n_threads:length(blocks_to_calculate)
-                index = blocks_to_calculate[ii]
-                pp, qq = batch_indexes[index]
+            for ii in thread:n_threads:length(scf_data.screening_data.blocks_to_calculate)
+                index = scf_data.screening_data.blocks_to_calculate[ii]
+                pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
                     p_range = (pp-1)*K_block_width+1:pp*K_block_width
                     p_start = (pp - 1) * K_block_width + 1
@@ -448,28 +468,26 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     #non square part 
     q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
     q_nonsquare_start = q_nonsquare_range[1]
-
-    #todo look into doing overlapping blocks at the bottom of the matrix so there isn't a long and short matrix multiplication
-    #most of which should be able to be screened? 
-
-    non_square_buffer = zeros(Float64, p, length(q_nonsquare_range)) #todo preallocate/use existing blocks
-
     M = p
     N = length(q_nonsquare_range)
     K = Q * occ
+    
 
     A_nonsquare_ptr = pointer(W, linear_indices[1, 1, p_non_square_start])
     B_nonsquare_ptr = pointer(W, linear_indices[1, 1, q_nonsquare_start])
-    C_nonsquare_ptr = pointer(non_square_buffer, 1)
+    C_nonsquare_ptr = pointer(scf_data.k_blocks, 1)
+
 
     call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_nonsquare_ptr, B_nonsquare_ptr, beta, C_nonsquare_ptr)    
+
+    non_square_buffer = reshape(view(scf_data.k_blocks, 1:M*N), (p, length(q_nonsquare_range))) 
 
     scf_data.two_electron_fock[p_non_square_range, q_nonsquare_range] .= non_square_buffer
     scf_data.two_electron_fock[q_nonsquare_range, p_non_square_range] .= transpose(non_square_buffer)
     
 end
 
-
+#todo move this to a BLAS shared file
 function call_gemm!(transA::Val, transB::Val,
     M::Int, N::Int, K::Int,
     alpha::Float64, A::Ptr{Float64}, B::Ptr{Float64},
