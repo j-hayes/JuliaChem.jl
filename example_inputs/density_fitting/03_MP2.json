@@ -18,10 +18,12 @@
   "driver": "energy",
   "model": {
     "method": "RHF",
-    "basis": "6-31G(2df,p)"
+    "basis": "cc-pVDZ",
+    "auxiliary_basis": "cc-pVDZ-JKFIT"
   },
   "keywords": {
     "scf":{
+      "scf_type":"df",
       "guess":"hcore",
       "contraction_mode":"default",
       "load": "static",

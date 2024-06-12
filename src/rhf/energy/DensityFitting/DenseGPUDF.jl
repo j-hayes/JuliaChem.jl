@@ -4,7 +4,7 @@ using CUDA.CUSOLVER
 using LinearAlgebra
 using Base.Threads
 
-function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
+function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
     occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine,T2<:RHFTEIEngine}
     comm = MPI.COMM_WORLD
@@ -13,15 +13,15 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     p = scf_data.μ
     n_ooc = scf_data.occ
 
-    # devices = CUDA.devices()
-    num_devices = 1 #length(devices)
+    devices = CUDA.devices()
+    num_devices = length(devices)
     scf_data.gpu_data.number_of_devices_used = num_devices
 
     if iteration == 1
         two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
 
-        calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices)
+        calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf_data, num_devices)
 
         #clear the memory 
         two_center_integrals = nothing
@@ -69,10 +69,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             CUBLAS.gemv!('N', 1.0, reshape(B, (Q_length, pq)), reshape(density, pq), 0.0, V)
             CUBLAS.gemv!('T', 2.0, reshape(B, (Q_length, pq)), V, 0.0, reshape(fock, pq))
             CUBLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q_length * p, p)), 0.0, reshape(W, (n_ooc, p * Q_length)))
-
-            calculate_K_lower_diagonal_block_no_screen(fock, W, Q_length, scf_data)
-           
-            
+            CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 1.0, fock)
             copyto!(scf_data.gpu_data.host_fock[device_id], fock)
             CUDA.synchronize()
 
@@ -81,23 +78,14 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     end
 
 
-    scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
+    scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
     end
 
 end
 
-function calculate_K_lower_diagonal_block_no_screen(fock::CuArray{Float64,2}, W::CuArray{Float64,3}, Q_length::Int, scf_data::SCFData)
-    n_ooc = scf_data.occ
-    p = scf_data.μ
-    Q_length = size(W, 2)
-
-    CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 1.0, fock)
-
-end
-
-function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices)
+function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf_data, num_devices)
     pq = scf_data.μ^2
 
     device_J_AB_invt = Array{CuArray{Float64}}(undef, num_devices)

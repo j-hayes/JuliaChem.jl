@@ -28,10 +28,10 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     # scf_results, properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_rhf.json")) 
 
     # DF_time = @elapsed begin @time begin 
-    #   df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
+      df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
     # end end
     # RHF_time = @elapsed begin @time begin 
-    #   scf_results, properties = full_rhf(input_file)      
+      scf_results, properties = full_rhf(input_file)      
     # end end
 
     
@@ -75,7 +75,7 @@ comm_rank = MPI.Comm_rank(MPI.COMM_WORLD)
 # else
 #   ThreadPinning.pinthreads(n_threads:(n_threads*2)-1)
 # end
-# ThreadPinning.pinthreads(:cores)
+ThreadPinning.pinthreads(0:23)
 BLAS.set_num_threads(12)
 # check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
 

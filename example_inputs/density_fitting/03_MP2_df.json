@@ -18,14 +18,14 @@
   "driver": "energy",
   "model": {
     "method": "RHF",
-    "basis": "6-31G(2df,p)",
-    "auxiliary_basis": "cc-pVTZ-JKFIT"
+    "basis": "cc-pVDZ",
+    "auxiliary_basis": "cc-pVDZ-JKFIT"
   },
   "keywords": {
     "scf":{
       "scf_type":"df",
       "guess":"hcore",
-      "contraction_mode":"default",
+      "contraction_mode":"GPU",
       "load": "static",
       "dele":1E-3,
       "rmsd":1E-3,

@@ -25,6 +25,7 @@ Base.include(@__MODULE__,"./DensityFitting/SchwarzScreening.jl")
 Base.include(@__MODULE__,"./DensityFitting/TensorOperationsDF.jl")
 Base.include(@__MODULE__,"./DensityFitting/ScreenedDF.jl")
 Base.include(@__MODULE__,"./DensityFitting/GPUDF.jl")
+Base.include(@__MODULE__,"./DensityFitting/DenseGPUDF.jl")
 
 
 """
