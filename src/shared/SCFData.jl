@@ -53,13 +53,14 @@ mutable struct SCFData
     μ :: Int
     occ :: Int
     A :: Int
+    scf_iteration :: Int
 end
 
 
 function SCFData()
     sd = ScreeningData([],[], [], [], [], [], [], [], [], [], falses(1,1), zeros(Int,0), Array{Tuple{Int, Int}}(undef,0), 0, 0, 0)
     gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], 0, 0)
-    return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0, 0)
+    return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0 ,0,0)
 end
 
 export SCFData

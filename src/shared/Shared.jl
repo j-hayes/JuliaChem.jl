@@ -5,4 +5,15 @@ module Shared
     Base.include(@__MODULE__,"./SCFData.jl")
     Base.include(@__MODULE__,"./JCTiming.jl")
     Base.include(@__MODULE__,"./Indicies.jl")
+
+   
+
+    global Timing::JCTiming # module singleton variable for timing 
+
+    function reset_timing()
+        global Timing = create_jctiming()
+    end
+
+    export reset_timing, Timing
+
 end 

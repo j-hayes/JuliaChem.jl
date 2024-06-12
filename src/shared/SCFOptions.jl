@@ -12,6 +12,7 @@ mutable struct SCFOptions
     df_max_iterations :: Int64
     df_exchange_block_width :: Int64
     df_screening_sigma :: Float64
+    df_screen_exchange :: Bool
 end 
 
 function create_default_scf_options()
@@ -67,6 +68,9 @@ function create_scf_options(scf_flags)
     df_screening_sigma::Float64 = haskey(scf_flags, Screening.df_sigma) ? 
         scf_flags[Screening.df_sigma] : Screening.df_sigma_default
 
+    df_screen_exchange::Bool = haskey(scf_flags, Screening.df_exchange_screen_mode) ? 
+        scf_flags[Screening.df_exchange_screen_mode] : true
+
     df_niter = 0
     if do_density_fitting 
         df_niter = niter        
@@ -88,7 +92,8 @@ function create_scf_options(scf_flags)
         niter,
         df_niter, 
         df_exchange_block_width,
-        df_screening_sigma)
+        df_screening_sigma,
+        df_screen_exchange)
 end
 
 function print_scf_options(options::SCFOptions)
@@ -112,6 +117,7 @@ function print_scf_options(options::SCFOptions)
         println("DF Density Convergence: ", options.df_density_convergence)
         println("DF Exchange Block Width: nbas ÷ ", options.df_exchange_block_width)
         println("DF Screening Sigma: ", options.df_screening_sigma)
+        println("DF Screen Exchange: ", options.df_screen_exchange)
         println("--------------------------------")
     end
 end

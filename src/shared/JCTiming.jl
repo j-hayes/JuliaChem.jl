@@ -3,11 +3,13 @@ mutable struct JCTiming
     run_time :: Float64
     iteration_times :: Dict{String, Float64}
     fock_build_times :: Dict{String, Float64}
+    other_timings :: Dict{String, Any} # keys should be prefixed name_of_timing- then the iteration number
     density_fitting_iteration_range :: UnitRange{Int64}
+
 end
 
 function create_jctiming()
-    return JCTiming(0, Dict{String, Float64}(), Dict{String, Float64}(), 0:0)
+    return JCTiming(0, Dict{String, Float64}(), Dict{String, Float64}(), Dict{String, Float64}(), 0:0)
 end
 
 function print_iteration_times(timings::JCTiming)
@@ -36,4 +38,10 @@ function get_sort_index_from_key(key::String)
    end
 end
 
+using JuliaChem.Shared
+
+
+
 export JCTiming, create_jctiming, print_iteration_times
+
+

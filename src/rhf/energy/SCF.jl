@@ -571,7 +571,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       break
     end
     iter += 1
-
+    scf_data.scf_iteration = iter  
     #== if not converged, replace old D and E values for next iteration ==#
     E_old = E
   end
