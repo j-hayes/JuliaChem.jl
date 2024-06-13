@@ -13,7 +13,7 @@ using Serialization
 end
 
 
-function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center_integrals, basis_sets)
+function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
 
     max_P_P = get_max_P_P(two_center_integrals)
     scf_data.screening_data.shell_screen_matrix,
@@ -39,6 +39,8 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
 
         scf_data.screening_data.non_screened_p_indices_count[pp] = sum(view(basis_function_screen_matrix, :, pp))
         scf_data.screening_data.non_zero_coefficients[pp] = zeros(scf_data.occ, scf_data.screening_data.non_screened_p_indices_count[pp])
+
+
     end
 end
 
@@ -58,7 +60,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         println("two center integrals")
         @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         println("screening")
-        @time get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets)
+        @time get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
 
         println("J_AB_INV")
         @time begin
@@ -277,22 +279,26 @@ function calculate_K_small(scf_data)
 
 end
 
+function copy_screened_density_to_array(scf_data)
+    Threads.@threads for index in CartesianIndices(scf_data.density)
+        if !scf_data.screening_data.basis_function_screen_matrix[index[1], index[2]] || index[2] > index[1]
+            continue
+        end            
+        if index[1] != index[2]
+            scf_data.density_array[scf_data.screening_data.sparse_pq_index_map[index[1], index[2]]] = 2.0*scf_data.density[index] # symmetric multiplication 
+        else
+            scf_data.density_array[scf_data.screening_data.sparse_pq_index_map[index[1], index[2]]] = scf_data.density[index]
+        end
+    end
+end
+
 function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
     BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
     sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
-    basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
 
-    Threads.@threads for index in CartesianIndices(scf_data.density)
-        if !basis_function_screen_matrix[index[1], index[2]] || index[2] > index[1]
-            continue
-        end            
 
-        if index[1] != index[2]
-            scf_data.density_array[sparse_pq_index_map[index[1], index[2]]] = 2.0*scf_data.density[index]
-        else
-            scf_data.density_array[sparse_pq_index_map[index[1], index[2]]] = scf_data.density[index]
-        end
-    end
+    copy_screened_density_to_array(scf_data)
+
     p = scf_data.μ
     scf_data.coulomb_intermediate .= 0.0
     for pp in 1:(p-1) #todo use call_gemv to remove view usage?
@@ -305,7 +311,7 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
     end
     BLAS.gemv!('N', 1.0, 
      view(scf_data.D, :, size(scf_data.D, 2)),
-     view(scf_data.density_array, length(scf_data.density_array):length(scf_data.density_array)),
+     view(scf_data.density_array, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count),
       1.0, scf_data.coulomb_intermediate)
     
     # do symm J 
@@ -321,15 +327,23 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
     BLAS.gemv!('T', 2.0,
         view(scf_data.D, :, size(scf_data.D, 2)),
         scf_data.coulomb_intermediate,
-        1.0, view(scf_data.J, length(scf_data.J):length(scf_data.J)))
+        1.0, view(scf_data.J, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count))
+
+    println("J")
+    display(scf_data.J)
+    copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
+   
+end
+
+function copy_screened_coulomb_to_fock!(scf_data, J, fock)
 
     Threads.@threads for index in CartesianIndices(scf_data.two_electron_fock)
-        if !basis_function_screen_matrix[index] || index[2] > index[1]
+        if !scf_data.screening_data.basis_function_screen_matrix[index] || index[2] > index[1]
             continue
         end
-        scf_data.two_electron_fock[index] += scf_data.J[sparse_pq_index_map[index]]
+        fock[index] += J[scf_data.screening_data.sparse_pq_index_map[index]]
         if index[1] != index[2]
-            scf_data.two_electron_fock[index[2], index[1]] = scf_data.two_electron_fock[index]
+            fock[index[2], index[1]] = fock[index]
         end
     end
 end

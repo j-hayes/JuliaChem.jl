@@ -37,19 +37,15 @@ function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T},
         for device_id in 1:num_devices
             device!(device_id - 1)
             Q = scf_data.gpu_data.device_Q_range_lengths[device_id]
-            scf_data.gpu_data.device_fock[device_id] = CUDA.CuArray{Float64}(undef, (scf_data.μ, scf_data.μ))
-            scf_data.gpu_data.device_coulomb_intermediate[device_id] = CUDA.CuArray{Float64}(undef, (Q))
+            scf_data.gpu_data.device_fock[device_id] = CUDA.zeros(Float64, (scf_data.μ, scf_data.μ))
+            scf_data.gpu_data.device_coulomb_intermediate[device_id] = CUDA.zeros(Float64, (Q))
             scf_data.gpu_data.device_exchange_intermediate[device_id] =
-                CUDA.CuArray{Float64}(undef, (n_ooc, Q, p))
-            scf_data.gpu_data.device_occupied_orbital_coefficients[device_id] = CUDA.CuArray{Float64}(undef, (scf_data.μ, scf_data.occ))
-            scf_data.gpu_data.device_density[device_id] = CUDA.CuArray{Float64}(undef, (scf_data.μ, scf_data.μ))
+                CUDA.zeros(Float64, (n_ooc, Q, p))
+            scf_data.gpu_data.device_occupied_orbital_coefficients[device_id] = CUDA.zeros(Float64, (scf_data.μ, scf_data.occ))
+            scf_data.gpu_data.device_density[device_id] = CUDA.zeros(Float64, (scf_data.μ, scf_data.μ))
             scf_data.gpu_data.host_fock[device_id] = zeros(scf_data.μ, scf_data.μ)
-            fill!(scf_data.gpu_data.device_fock[device_id], 0.0)
-            fill!(scf_data.gpu_data.device_coulomb_intermediate[device_id], 0.0)
-            fill!(scf_data.gpu_data.device_exchange_intermediate[device_id], 0.0)
-            fill!(scf_data.gpu_data.device_occupied_orbital_coefficients[device_id], 0.0)
-            fill!(scf_data.gpu_data.device_density[device_id], 0.0)
-            CUDA.synchronize()
+
+            
         end
     end
 
@@ -71,7 +67,7 @@ function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T},
             CUBLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q_length * p, p)), 0.0, reshape(W, (n_ooc, p * Q_length)))
             CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 1.0, fock)
             copyto!(scf_data.gpu_data.host_fock[device_id], fock)
-            CUDA.synchronize()
+            
 
 
         end
@@ -100,7 +96,7 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
     device_Q_range_ends,
     device_Q_indices,
     device_Q_range_lengths,
-    max_device_Q_range_length = calculate_device_ranges(scf_data, num_devices)
+    max_device_Q_range_length = calculate_device_ranges_dense(scf_data, num_devices)
 
     scf_data.gpu_data.device_Q_range_lengths = device_Q_range_lengths
     scf_data.gpu_data.device_Q_range_starts = device_Q_range_starts
@@ -116,8 +112,8 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
             # buffer for J_AB_invt for each device max size needed is A*A 
             # for certain B calculations the device will only need a subset of this
             # and will reference it with a view referencing the front of the underlying array
-            device_J_AB_invt[device_id] = CUDA.CuArray{Float64}(undef, (scf_data.A, scf_data.A))
-            device_three_center_integrals[device_id] = CUDA.CuArray{Float64}(undef, (scf_data.μ, scf_data.μ, device_Q_range_lengths[device_id]))
+            device_J_AB_invt[device_id] = CUDA.zeros(Float64, (scf_data.A, scf_data.A))
+            device_three_center_integrals[device_id] = CUDA.zeros(Float64, (scf_data.μ, scf_data.μ, device_Q_range_lengths[device_id]))
 
             copyto!(device_J_AB_invt[device_id], two_center_integrals)
             three_center_integral_size = device_Q_range_lengths[device_id] * pq
@@ -126,23 +122,23 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
             host_pointer = pointer(three_center_integrals, device_pointer_start)
             unsafe_copyto!(device_pointer, host_pointer, three_center_integral_size)
 
-            synchronize()
+            
             CUSOLVER.potrf!('L', device_J_AB_invt[device_id])
-            synchronize() #is this one necessary?
+             #is this one necessary?
             CUSOLVER.trtri!('L', 'N', device_J_AB_invt[device_id])
 
-            device_B[device_id] = CUDA.CuArray{Float64}(undef, (device_Q_range_lengths[device_id], scf_data.μ, scf_data.μ))
+            device_B[device_id] = CUDA.zeros(Float64, (device_Q_range_lengths[device_id], scf_data.μ, scf_data.μ))
             fill!(device_B[device_id], 0.0)
-            device_B_send_buffers[device_id] = CUDA.CuArray{Float64}(undef, (max_device_Q_range_length * scf_data.μ * scf_data.μ))
+            device_B_send_buffers[device_id] = CUDA.zeros(Float64, (max_device_Q_range_length * scf_data.μ * scf_data.μ))
             fill!(device_B_send_buffers[device_id], 0.0)
-            synchronize()
+            
         end
     end
 
 
     device!(0)
     CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
-    synchronize()
+    
     J_AB_INV = two_center_integrals #simple rename to avoid confusion 
 
     for recieve_device_id in 1:num_devices
@@ -162,7 +158,7 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
                 J_AB_INV_view = reshape(view(device_J_AB_invt[send_device_id], 1:device_J_AB_inv_count), (rec_device_Q_range_length, send_device_Q_range_length))
 
                 CUDA.copyto!(device_J_AB_invt[send_device_id], J_AB_invt_for_device) #copy the needed J_AB_invt data to the device 
-                CUDA.synchronize()
+                
 
                 if send_device_id != recieve_device_id
                     send_B_view = view(device_B_send_buffers[send_device_id], 1:rec_device_Q_range_length*pq)
@@ -172,7 +168,7 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
                     CUBLAS.gemm!('N', 'T', 1.0, J_AB_INV_view, three_eri_view, 1.0,
                         reshape(device_B[recieve_device_id], (rec_device_Q_range_length, pq)))
                 end
-                CUDA.synchronize()
+                
 
             end
         end
@@ -188,15 +184,15 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
             device!(send_device_id - 1)
 
             CUDA.unsafe_copyto!(data, 1, device_B_send_buffers[send_device_id], 1, array_size)
-            synchronize()
+            
             device!(recieve_device_id - 1)
             CUDA.unsafe_copyto!(device_B_send_buffers[recieve_device_id], 1, data, 1, array_size)
-            synchronize()
+            CUDA.device_
             CUBLAS.axpy!(array_size, 1.0,
                 reshape(view(device_B_send_buffers[recieve_device_id], 1:array_size), (array_size)),
                 reshape(view(device_B[recieve_device_id], 1:array_size), (array_size)))
         end
-        synchronize()
+        
     end
     for device_id in 1:num_devices
         CUDA.unsafe_free!(device_J_AB_invt[device_id])
@@ -207,7 +203,7 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
     return
 end
 
-function calculate_device_ranges(scf_data, num_devices)
+function calculate_device_ranges_dense(scf_data, num_devices)
     indices_per_device = scf_data.A ÷ num_devices
     device_Q_range_starts = 1:indices_per_device+1:scf_data.A
     device_Q_range_ends = device_Q_range_starts .+ indices_per_device
@@ -220,16 +216,16 @@ function calculate_device_ranges(scf_data, num_devices)
 end
 
 
-function free_gpu_memory(scf_data::SCFData)
-    for device_id in 1:scf_data.gpu_data.number_of_devices_used
-        CUDA.device!(device_id - 1)
-        CUDA.unsafe_free!(scf_data.gpu_data.device_B[device_id])
-        CUDA.unsafe_free!(scf_data.gpu_data.device_fock[device_id])
-        CUDA.unsafe_free!(scf_data.gpu_data.device_coulomb_intermediate[device_id])
-        CUDA.unsafe_free!(scf_data.gpu_data.device_exchange_intermediate[device_id])
-        CUDA.unsafe_free!(scf_data.gpu_data.device_occupied_orbital_coefficients[device_id])
-        CUDA.unsafe_free!(scf_data.gpu_data.device_density[device_id])
-        CUDA.synchronize()
-    end
-    GC.gc(true) #force cleanup of the GPU data
+function free_gpu_memory_dense(scf_data::SCFData)
+    # for device_id in 1:scf_data.gpu_data.number_of_devices_used
+    #     CUDA.device!(device_id - 1)
+    #     CUDA.unsafe_free!(scf_data.gpu_data.device_B[device_id])
+    #     CUDA.unsafe_free!(scf_data.gpu_data.device_fock[device_id])
+    #     CUDA.unsafe_free!(scf_data.gpu_data.device_coulomb_intermediate[device_id])
+    #     CUDA.unsafe_free!(scf_data.gpu_data.device_exchange_intermediate[device_id])
+    #     CUDA.unsafe_free!(scf_data.gpu_data.device_occupied_orbital_coefficients[device_id])
+    #     CUDA.unsafe_free!(scf_data.gpu_data.device_density[device_id])
+    #     CUDA.reclaim()
+    # end
+    # GC.gc(true) #force cleanup of the GPU data
 end

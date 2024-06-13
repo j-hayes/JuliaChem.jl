@@ -6,13 +6,24 @@ using Printf
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using TensorOperations
+using CUDA
 const do_continue_print = false 
 const print_eri = false 
 const get_next_index_tag = 1111
 
 function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
+
+  Shared.reset_timing() #this should be moved to a move central location 
+
   
+  #setup CUDA
+  # devices = CUDA.devices()
+  # for device_id in 0:length(devices)-1
+  #   CUDA.device!(device_id)
+  #   CUDA.reclaim()
+  # end
+
   # todo move all of these options to scf_options 
   # todo move this all to a function 
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
@@ -31,6 +42,7 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   check_auxillary_basis_is_provided(scf_options.density_fitting, basis_sets)
 
   timings = create_jctiming() :: JCTiming
+
   return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
     ndiis=ndiis, dele=dele, rmsd=rmsd,
     fdiff=fdiff, scf_options=scf_options, timings)
