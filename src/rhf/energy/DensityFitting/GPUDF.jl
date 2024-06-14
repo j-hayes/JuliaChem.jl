@@ -3,6 +3,7 @@ using CUDA.CUBLAS
 using CUDA.CUSOLVER
 using LinearAlgebra
 using Base.Threads
+using HDF5
 
 function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
@@ -107,6 +108,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             host_density = scf_data.density_array
             copyto!(ooc, occupied_orbital_coefficients)
 
+            fill!(fock, 0.0)
+
             #host density until I can figure out how to write a kernel for copying to the screened vector on the gpu
             BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
             copy_screened_density_to_array(scf_data)
@@ -114,16 +117,20 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
             #GPU contractions 
             CUBLAS.gemv!('N', 1.0, B, density, 0.0, V)
+            scf_data.coulomb_intermediate = zeros(Float64, size(V))
+            copyto!(scf_data.coulomb_intermediate, V)
             CUBLAS.gemv!('T', 2.0, B, V, 0.0, J)
-
             copyto!(host_J, J)
 
             calculate_W_screened_GPU(scf_data)
-            calculate_K_lower_diagonal_block_no_screen(fock, W, Q_length, scf_data, scf_options)
-
-           
-            copyto!(scf_data.gpu_data.host_fock[device_id], fock)
             
+            scf_data.D_tilde = zeros(Float64, size(W))
+            copyto!(scf_data.D_tilde, scf_data.gpu_data.device_exchange_intermediate[device_id])
+            # println("host scf_data.D_tilde")
+            # display(scf_data.D_tilde[:, :, 1])
+            println("calling K GPU")
+            calculate_K_lower_diagonal_block_no_screen_GPU(fock, W, Q_length, scf_data, scf_options)         
+            println("called K GPU")   
             #only the lower triangle of the GPU is calculated so we need copy the values to the upper triangle
             for i in 1:scf_data.μ #this could be done outside of this loop and more parallel
                 for j in 1:i-1
@@ -135,9 +142,39 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
 
     scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
+    copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[1], scf_data.two_electron_fock)
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
         copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[device_id], scf_data.two_electron_fock)
+    end
+
+    if iteration == 2
+        #save V to HDF5 file
+       
+        #delete V file if it exists
+        if isfile("S22_03_V.h5")
+            rm("S22_03_V.h5")
+        end
+        h5write("S22_03_V.h5", "V", scf_data.coulomb_intermediate)
+        if isfile("S22_03_J.h5")
+            rm("S22_03_J.h5")
+        end
+        h5write("S22_03_J.h5", "J",  scf_data.gpu_data.host_coulomb[1])
+        if isfile("S22_03_W.h5")
+            rm("S22_03_W.h5")
+        end
+        h5write("S22_03_W.h5", "W",  scf_data.D_tilde)
+
+        if isfile("S22_03_K.h5")
+            rm("S22_03_K.h5")
+        end        
+        h5write("S22_03_K.h5", "K", scf_data.gpu_data.host_fock[1])
+
+        if isfile("S22_03_F.h5")
+            rm("S22_03_F.h5")
+        end
+        h5write("S22_03_F.h5", "F", scf_data.two_electron_fock)
+
     end
 
 end
@@ -175,10 +212,7 @@ function calculate_W_screened_GPU(scf_data::SCFData)
             end
         end
         K = scf_data.screening_data.non_screened_p_indices_count[pp]
-        # A_ptr = pointer(scf_data.D, linear_indicesB[1, scf_data.screening_data.sparse_p_start_indices[pp]])
-        # B_ptr = pointer(non_zero_coefficients[pp], 1)
-        # C_ptr = pointer(scf_data.D_tilde, linear_indicesW[1, 1, pp])
-
+      
         A_cu = view(B, :, scf_data.screening_data.sparse_p_start_indices[pp]:
             scf_data.screening_data.sparse_p_start_indices[pp]+K-1)
         B_cu = view(non_zero_coefficients, :,1:K,pp)
@@ -190,14 +224,20 @@ function calculate_W_screened_GPU(scf_data::SCFData)
 
 
     end
+
     BLAS.set_num_threads(blas_threads)
 end
 
-function calculate_K_lower_diagonal_block_no_screen(fock::CuArray{Float64,2}, W::CuArray{Float64,3}, Q_length::Int, scf_data::SCFData, scf_options::SCFOptions)
+function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}, W::CuArray{Float64,3}, Q_length::Int, scf_data::SCFData, scf_options::SCFOptions)
+
+    calculate_exchange_block_screen_matrix(scf_data, scf_options)
+
+    println("calculate_K_lower_diagonal_block_no_screen_GPU")
     n_ooc = scf_data.occ
     p = scf_data.μ
     Q = Q_length #device Q length
     K_block_width = scf_data.screening_data.K_block_width
+
 
     transA = 'T'
     transB = 'N'
@@ -211,15 +251,10 @@ function calculate_K_lower_diagonal_block_no_screen(fock::CuArray{Float64,2}, W:
 
     exchange_block = CUDA.zeros(Float64, (M, N))
 
-    K_linear_indices = LinearIndices((M,N))
-    
-
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
     
-    calculate_exchange_block_screen_matrix(scf_data, scf_options)
-
+    CUDA.device!(0)
     index = 1
-    host_block = zeros(M, N)
     while index <= lower_triangle_length
         pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
@@ -231,52 +266,38 @@ function calculate_K_lower_diagonal_block_no_screen(fock::CuArray{Float64,2}, W:
 
         A = reshape(view(W, :,:, p_range), (Q_length * n_ooc, K_block_width))
         B = reshape(view(W, :,:, q_range), (Q_length * n_ooc, K_block_width))
-        C = exchange_block
+        C = view(exchange_block, 1:M, 1:N)
 
         CUBLAS.gemm!(transA, transB, alpha, A, B, beta, C)
-
-        copyto!(host_block, exchange_block)
-        # println("host block")
-        
+   
         fock[p_range, q_range] .+= exchange_block
-
-
-
-
         index += 1
-        # if pp != qq
-        #     fock[q_range, p_range] .+= transpose(exchange_block) #probably worth doing this on the CPU instead transpose is slow on GPU 
-        # end
+
     end
-
-    if p % scf_options.df_exchange_block_width == 0 # square blocks cover the entire pq space
-        return
+    
+    if p % scf_options.df_exchange_block_width != 0 # square blocks cover the entire pq space
+        p_non_square_range = 1:p
+        p_non_square_start = 1
+    
+        #non square part 
+        q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
+        q_nonsquare_start = q_nonsquare_range[1]
+        
+        M = p
+        N = length(q_nonsquare_range)
+        K = Q * n_ooc
+        
+    
+        A_non_square = view(W, :,:, p_non_square_start)
+        B_non_square = view(W, :,:, q_nonsquare_range)
+        C_non_square = reshape(view(exchange_block, 1:M*N), (M, N))
+    
+        CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square)
+    
+        fock[p_range, q_range] .+= C_non_square 
+    
     end
-
-    p_non_square_range = 1:p
-    p_non_square_start = 1
-
-    #non square part 
-    q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
-    q_nonsquare_start = q_nonsquare_range[1]
-    
-    M = p
-    N = length(q_nonsquare_range)
-    K = Q * n_ooc
-    
-
-    A_nonsquare_ptr = CUDA.pointer(W, linear_indices[1, 1, p_non_square_start])
-    B_nonsquare_ptr = CUDA.pointer(W, linear_indices[1, 1, q_nonsquare_start])
-    C_nonsquare_ptr = CUDA.pointer(exchange_block, 1)
-
-    CUBLAS.gemm!(transA, transB, alpha, A_nonsquare_ptr, B_nonsquare_ptr, beta, C_nonsquare_ptr)
-    
-    non_square_buffer = reshape(view(scf_data.k_blocks, 1:M*N), (p, length(q_nonsquare_range))) 
-
-    scf_data.two_electron_fock[p_non_square_range, q_nonsquare_range] .= non_square_buffer
-
-    # CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 1.0, fock)
-
+    copyto!(scf_data.gpu_data.host_fock[1], fock)
 end
 
 function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices)

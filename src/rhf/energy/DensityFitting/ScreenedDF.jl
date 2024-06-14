@@ -329,8 +329,8 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
         scf_data.coulomb_intermediate,
         1.0, view(scf_data.J, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count))
 
-    println("J")
-    display(scf_data.J)
+    # println("J")
+    # display(scf_data.J)
     copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
    
 end
