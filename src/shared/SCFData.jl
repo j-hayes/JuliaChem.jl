@@ -33,6 +33,7 @@ mutable struct SCFGPUData
     device_coulomb :: Array{Union{Nothing, CuArray{Float64}},1}
     device_density :: Array{Union{Nothing, CuArray{Float64}},1}
     device_non_zero_coefficients :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_K_block :: Array{Union{Nothing, CuArray{Float64}},1}
     host_coulomb ::  Array{Array{Float64,1},1}
     host_fock ::  Array{Array{Float64,2},1}
     number_of_devices_used :: Int
@@ -63,7 +64,7 @@ end
 
 function SCFData()
     sd = ScreeningData([],[], [], [], [], [], [], [], [], [], falses(1,1), zeros(Int,0), Array{Tuple{Int, Int}}(undef,0), 0, 0, 0)
-    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [],[], 0, 0)
+    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [],[], 0, 0)
     return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0 ,0,0)
 end
 

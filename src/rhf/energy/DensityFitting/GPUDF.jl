@@ -90,6 +90,9 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
 
         end
+        calculate_exchange_block_screen_matrix(scf_data, scf_options) #todo move this so it only happens on 
+        scf_data.gpu_data.device_K_block = CUDA.zeros(Float64, (scf_data.screening_data.K_block_width, scf_data.screening_data.K_block_width))
+
     end
 
 
@@ -134,6 +137,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                 end
             end           
         end
+        
     end
 
 
@@ -143,36 +147,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
         copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[device_id], scf_data.two_electron_fock)
     end
-
-    if iteration == 2
-        #save V to HDF5 file
-       
-        #delete V file if it exists
-        # if isfile("S22_03_V.h5")
-        #     rm("S22_03_V.h5")
-        # end
-        # h5write("S22_03_V.h5", "V", scf_data.coulomb_intermediate)
-        # if isfile("S22_03_J.h5")
-        #     rm("S22_03_J.h5")
-        # end
-        # h5write("S22_03_J.h5", "J",  scf_data.gpu_data.host_coulomb[1])
-        # if isfile("S22_03_W.h5")
-        #     rm("S22_03_W.h5")
-        # end
-        # h5write("S22_03_W.h5", "W",  scf_data.D_tilde)
-
-        # if isfile("S22_03_K.h5")
-        #     rm("S22_03_K.h5")
-        # end        
-        # h5write("S22_03_K.h5", "K", scf_data.gpu_data.host_fock[1])
-
-        # if isfile("S22_03_F.h5")
-        #     rm("S22_03_F.h5")
-        # end
-        # h5write("S22_03_F.h5", "F", scf_data.two_electron_fock)
-
-    end
-
 end
 
 function calculate_W_screened_GPU(scf_data::SCFData)
@@ -226,9 +200,7 @@ end
 
 function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}, W::CuArray{Float64,3}, Q_length::Int, scf_data::SCFData, scf_options::SCFOptions)
 
-    calculate_exchange_block_screen_matrix(scf_data, scf_options)
 
-    println("calculate_K_lower_diagonal_block_no_screen_GPU")
     n_ooc = scf_data.occ
     p = scf_data.μ
     Q = Q_length #device Q length
@@ -239,13 +211,12 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}
     transB = 'N'
     alpha = -1.0
     beta = 0.0
-    linear_indices = LinearIndices(W)
 
     M = K_block_width
     N = K_block_width
     K = Q * n_ooc
 
-    exchange_block = CUDA.zeros(Float64, (M, N))
+    exchange_block = scf_data.gpu_data.device_K_block
 
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
     
@@ -255,10 +226,8 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}
         pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
         p_range = (pp-1)*K_block_width+1:pp*K_block_width
-        p_start = (pp - 1) * K_block_width + 1
 
         q_range = (qq-1)*K_block_width+1:qq*K_block_width
-        q_start = (qq - 1) * K_block_width + 1
 
         A = reshape(view(W, :,:, p_range), (Q_length * n_ooc, K_block_width))
         B = reshape(view(W, :,:, q_range), (Q_length * n_ooc, K_block_width))
@@ -273,18 +242,14 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}
 
     
     if p % scf_options.df_exchange_block_width != 0 # square blocks cover the entire pq space
-        p_non_square_range = 1:p
-        p_non_square_start = 1
-    
-        #non square part 
+        p_non_square_range = 1:p    
+        #non square part that didn't fit in blocks
         q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
-        q_nonsquare_start = q_nonsquare_range[1]
         
         M = p
         N = length(q_nonsquare_range)
         K = Q * n_ooc
         
-        exchange_block = CUDA.zeros(Float64, (M, N))
 
         A_non_square = reshape(view(W, :,:, p_non_square_range), (Q * n_ooc, p))
         B_non_square = reshape(view(W, :,:, q_nonsquare_range), (Q * n_ooc, N))
