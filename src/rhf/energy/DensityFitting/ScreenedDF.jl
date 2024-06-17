@@ -350,14 +350,24 @@ end
 
 function calculate_exchange_block_screen_matrix(scf_data, scf_options)
     n_threads = Threads.nthreads()  
+    if scf_data.μ < 100 #if the # of basis functions is small just do a dense calculation with one block
+        K_block_width = scf_data.μ
+        scf_options.df_exchange_block_width = 1
+    else
+        K_block_width = scf_data.μ ÷ scf_options.df_exchange_block_width
+        if K_block_width < 64
+            println("WARNING: K_block_width is less than 64, this may not be optimal for performance")
+        end
+    end
+
+
+
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
-    K_block_width = scf_data.μ ÷ scf_options.df_exchange_block_width
+
     
+
     scf_data.screening_data.K_block_width = K_block_width
     scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, n_threads)
-    
-    exchange_blocks = scf_data.k_blocks
-    K_linear_indices = LinearIndices(exchange_blocks)
     
     the_batch_index = 1
     exchange_batch_indexes = Array{Tuple{Int, Int}}(undef, lower_triangle_length)

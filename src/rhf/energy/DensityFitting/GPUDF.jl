@@ -126,11 +126,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             
             scf_data.D_tilde = zeros(Float64, size(W))
             copyto!(scf_data.D_tilde, scf_data.gpu_data.device_exchange_intermediate[device_id])
-            # println("host scf_data.D_tilde")
-            # display(scf_data.D_tilde[:, :, 1])
-            println("calling K GPU")
             calculate_K_lower_diagonal_block_no_screen_GPU(fock, W, Q_length, scf_data, scf_options)         
-            println("called K GPU")   
             #only the lower triangle of the GPU is calculated so we need copy the values to the upper triangle
             for i in 1:scf_data.μ #this could be done outside of this loop and more parallel
                 for j in 1:i-1
@@ -152,28 +148,28 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         #save V to HDF5 file
        
         #delete V file if it exists
-        if isfile("S22_03_V.h5")
-            rm("S22_03_V.h5")
-        end
-        h5write("S22_03_V.h5", "V", scf_data.coulomb_intermediate)
-        if isfile("S22_03_J.h5")
-            rm("S22_03_J.h5")
-        end
-        h5write("S22_03_J.h5", "J",  scf_data.gpu_data.host_coulomb[1])
-        if isfile("S22_03_W.h5")
-            rm("S22_03_W.h5")
-        end
-        h5write("S22_03_W.h5", "W",  scf_data.D_tilde)
+        # if isfile("S22_03_V.h5")
+        #     rm("S22_03_V.h5")
+        # end
+        # h5write("S22_03_V.h5", "V", scf_data.coulomb_intermediate)
+        # if isfile("S22_03_J.h5")
+        #     rm("S22_03_J.h5")
+        # end
+        # h5write("S22_03_J.h5", "J",  scf_data.gpu_data.host_coulomb[1])
+        # if isfile("S22_03_W.h5")
+        #     rm("S22_03_W.h5")
+        # end
+        # h5write("S22_03_W.h5", "W",  scf_data.D_tilde)
 
-        if isfile("S22_03_K.h5")
-            rm("S22_03_K.h5")
-        end        
-        h5write("S22_03_K.h5", "K", scf_data.gpu_data.host_fock[1])
+        # if isfile("S22_03_K.h5")
+        #     rm("S22_03_K.h5")
+        # end        
+        # h5write("S22_03_K.h5", "K", scf_data.gpu_data.host_fock[1])
 
-        if isfile("S22_03_F.h5")
-            rm("S22_03_F.h5")
-        end
-        h5write("S22_03_F.h5", "F", scf_data.two_electron_fock)
+        # if isfile("S22_03_F.h5")
+        #     rm("S22_03_F.h5")
+        # end
+        # h5write("S22_03_F.h5", "F", scf_data.two_electron_fock)
 
     end
 
@@ -274,6 +270,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}
         index += 1
 
     end
+
     
     if p % scf_options.df_exchange_block_width != 0 # square blocks cover the entire pq space
         p_non_square_range = 1:p
@@ -287,14 +284,15 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(fock::CuArray{Float64,2}
         N = length(q_nonsquare_range)
         K = Q * n_ooc
         
-    
-        A_non_square = view(W, :,:, p_non_square_start)
-        B_non_square = view(W, :,:, q_nonsquare_range)
+        exchange_block = CUDA.zeros(Float64, (M, N))
+
+        A_non_square = reshape(view(W, :,:, p_non_square_range), (Q * n_ooc, p))
+        B_non_square = reshape(view(W, :,:, q_nonsquare_range), (Q * n_ooc, N))
         C_non_square = reshape(view(exchange_block, 1:M*N), (M, N))
     
         CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square)
     
-        fock[p_range, q_range] .+= C_non_square 
+        fock[:, q_nonsquare_range] .+= C_non_square 
     
     end
     copyto!(scf_data.gpu_data.host_fock[1], fock)
