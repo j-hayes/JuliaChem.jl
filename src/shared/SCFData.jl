@@ -2,6 +2,7 @@ using CUDA
 mutable struct ScreeningData
     sparse_pq_index_map
     basis_function_screen_matrix
+    shifted_basis_function_screen_matrix
     coefficient_shifts :: Array{Array{Tuple{Int,Int},1},1}
     sparse_p_start_indices
     non_screened_p_indices_count
@@ -64,7 +65,7 @@ end
 
 
 function SCFData()
-    sd = ScreeningData([],[], [], [], [], [], [], [], [], [],
+    sd = ScreeningData([],[],[], [], [], [], [], [], [], [], [],
          [], falses(1,1), zeros(Int,0), Array{Tuple{Int, Int}}(undef,0), 0, 0, 0)
     gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [],[], 0, 0)
     return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0 ,0,0)

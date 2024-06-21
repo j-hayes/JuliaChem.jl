@@ -151,7 +151,9 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     #convert basis_function_screen_matrix to ints
     shifted_basis_function_screen_matrix_int = convert(Array{Int64,2}, shifted_basis_function_screen_matrix)
     h5write("basis_function_screen_matrix_shifted.h5", "basis_function_screen_matrix", shifted_basis_function_screen_matrix_int)
-    exit()
+    
+    scf_data.screening_data.shifted_basis_function_screen_matrix = shifted_basis_function_screen_matrix
+
     return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 

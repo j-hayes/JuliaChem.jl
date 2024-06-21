@@ -118,13 +118,13 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
     shift_fock_matrix_back!(scf_data)
     #save fock matrix to hdf5 
-    if iteration < 5
-        #delete file if exists 
-        if isfile("shift_fock_matrix_$iteration.h5")
-            rm("shift_fock_matrix_$iteration.h5")
-        end
-        h5write("shift_fock_matrix_$iteration.h5", "fock_matrix", scf_data.two_electron_fock)
-    end
+    # if iteration < 5
+    #     #delete file if exists 
+    #     if isfile("shift_fock_matrix_$iteration.h5")
+    #         rm("shift_fock_matrix_$iteration.h5")
+    #     end
+    #     h5write("shift_fock_matrix_$iteration.h5", "fock_matrix", scf_data.two_electron_fock)
+    # end
 end
 
 # function shift_B_indicies_for_K_screening!(scf_data)
@@ -413,8 +413,6 @@ function calculate_exchange_block_metadata(scf_data, scf_options)
         end
     end
 
-
-
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
 
     
@@ -446,11 +444,16 @@ function calculate_exchange_block_metadata(scf_data, scf_options)
         q_start = (qq - 1) * K_block_width + 1
 
         total_non_screened_indices = sum(
-            view(scf_data.screening_data.basis_function_screen_matrix, p_range, q_range))
+            view(scf_data.screening_data.shifted_basis_function_screen_matrix, p_range, q_range))
         
         if total_non_screened_indices != 0 #skip where all are screened
+
+            println("not screened: p_range: ", p_range, " q_range: ", q_range, " total_non_screened_indices: ", total_non_screened_indices)
+
             push!(blocks_to_calculate, block_index) 
             block_screen_matrix[pp, qq] = true
+        else
+            println("screened p_range: ", p_range, " q_range: ", q_range, " total_non_screened_indices: ", total_non_screened_indices)
         end
         block_index += 1
     end
@@ -461,6 +464,9 @@ function calculate_exchange_block_metadata(scf_data, scf_options)
     scf_data.screening_data.block_screen_matrix = block_screen_matrix
     scf_data.screening_data.blocks_to_calculate = blocks_to_calculate
     scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes
+
+    println("total non screened exchange blocks: ", length(blocks_to_calculate))
+    println("total exchange blocks: ", lower_triangle_length)
     
 
 end
