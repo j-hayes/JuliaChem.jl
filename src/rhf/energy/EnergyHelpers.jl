@@ -316,10 +316,11 @@ end
 
 
 
-@inline function axial_normalization_factor_screened!(eri_quartet_batch::Array{Float64},
+@inline function axial_normalization_factor_screened!(three_center_integrals::Array{Float64},
   μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
   nμ::Int, nν::Int, nλ::Int,
-  μ::Int,ν::Int,λ::Int, sparse_pq_index_map, rank_basis_index_map) 
+  μ_pos::Int,ν_pos::Int,λ_pos::Int, sparse_pq_index_map, 
+  basis_function_screen_matrix, rank_basis_index_map) 
 
   amμ = μsh.am  # auxiliary basis index
   amν = νsh.am
@@ -327,26 +328,25 @@ end
   
   for μsize::Int64 in 0:(nμ-1) 
     μnorm = get_axial_normalization_factor(μsize+1,amμ)
+    aux_index =  rank_basis_index_map[μ_pos+μsize]
+
     for νsize::Int64 in 0:(nν-1)
       νnorm = get_axial_normalization_factor(νsize+1,amν)
       μνnorm = μnorm*νnorm
       for λsize::Int64 in 0:(nλ-1) 
-        
-        screened_index = sparse_pq_index_map[ν+νsize,λ+λsize] 
-        if screened_index == 0 || ν+νsize < λ+λsize
+        screened_index = sparse_pq_index_map[ν_pos+νsize,λ_pos+λsize] 
+        inverted_screened_index = sparse_pq_index_map[λ_pos+λsize, ν_pos+νsize] 
+        if sparse_pq_index_map[ν_pos+νsize,λ_pos+λsize]==0 || ν_pos+νsize > λ_pos+λsize
           continue
         end
-        
         λnorm = get_axial_normalization_factor(λsize+1,amλ)
         normalization_factor = μνnorm*λnorm        
         if amμ < 3 && amν < 3 && amλ < 3 
           normalization_factor = 1.0
         end
-        aux_index =  rank_basis_index_map[μ+μsize]
-        eri_quartet_batch[aux_index,screened_index] *= normalization_factor 
-        if ν+νsize != λ+λsize
-          inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
-          eri_quartet_batch[aux_index,inverted_screened_index] = eri_quartet_batch[aux_index,screened_index] 
+        three_center_integrals[aux_index,screened_index]  *= normalization_factor 
+        if ν_pos+νsize != λ_pos+λsize          
+          three_center_integrals[aux_index,inverted_screened_index] = three_center_integrals[aux_index,screened_index] 
         end 
       end 
     end

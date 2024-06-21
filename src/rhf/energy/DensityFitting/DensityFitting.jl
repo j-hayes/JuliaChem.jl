@@ -25,7 +25,6 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
-  
   if scf_options.contraction_mode == "dense"
     @time df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
@@ -63,17 +62,10 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
     calculate_D!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
-  end  
+    end  
+
   calculate_coulomb!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
   calculate_exchange!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
-  
-  # print the scf_data.two_electron_fock matrix in a square scientific notation with 8 decimals
-  # for i in 1:scf_data.μ
-  #   for j in 1:scf_data.μ
-  #       print(@sprintf("%.8e ", scf_data.two_electron_fock[i,j]))
-  #   end
-  #   println()
-  # end
 end
 
 

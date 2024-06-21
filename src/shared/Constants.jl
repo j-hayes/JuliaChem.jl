@@ -13,6 +13,7 @@ module SCF_Keywords
         const df_sigma = "df_sigma"
         const df_sigma_default = 1E-6
         const df_exchange_screen_mode = "df_exchange_screen"
+        const df_screen_exchange_default = true
     end
 
     module Guess

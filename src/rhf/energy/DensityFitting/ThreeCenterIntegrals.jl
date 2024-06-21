@@ -30,7 +30,8 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
             jeri_engine_thread, basis_sets, thead_integral_buffer, 
             scf_data.screening_data.screened_indices_count,
             scf_data.screening_data.shell_screen_matrix, 
-            scf_data.screening_data.sparse_pq_index_map)
+            scf_data.screening_data.sparse_pq_index_map,
+            scf_data.screening_data.basis_function_screen_matrix)
     else
         three_center_integrals = zeros(Float64, (basis_function_count, basis_function_count, aux_basis_function_count))
         if scf_options.load == "sequential"
@@ -86,20 +87,6 @@ end
 
 end
 
-#calculate only the integrals that pass Schwarz screening
-#sparse_pq_index_map is a map of the non screened pq pairs to where in the screned matrix they should go in the 1D pq index, could be dense or triangular 
-@inline function calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, sparse_pq_index_map, rank_basis_index_map)
-    s1, s2, s3,
-    shell_1, shell_2, shell_3,
-    shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
-    bf_1_pos, bf_2_pos, bf_3_pos, 
-    number_of_integrals = get_indexes_eri_block(cartesian_index, basis_sets)
-    
-    JERI.compute_eri_block_df(engine, integral_buffer, s1, s2, s3, number_of_integrals, 0)
-    copy_integral_result_screened!(three_center_integrals, integral_buffer, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, sparse_pq_index_map, rank_basis_index_map)
-    axial_normalization_factor_screened!(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos, sparse_pq_index_map, rank_basis_index_map)
-
-end
 
 @inline function recieve_messages(three_center_integrals, basis_sets)
     comm = MPI.COMM_WORLD
@@ -260,8 +247,47 @@ end
 
 
 
+
+
+@inline function copy_integral_result!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
+    values_index = 1
+    for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1
+        for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
+            for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
+                three_center_integrals[j, k, i] = values[values_index]
+
+                if j >= k
+                    three_center_integrals[j, k, i] = values[values_index]
+                else
+                    three_center_integrals[j, k, i] = 0.0
+                end
+                values_index += 1
+            end
+        end
+    end
+end
+
+
+function print_three_center_integrals(three_center_integrals)
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
+
+    println("three center integrals\n")
+    i = 0
+    io = open(joinpath(@__DIR__,  "./three_center_integrals_out-rank-$rank.txt"), "w+")
+    for index in CartesianIndices(three_center_integrals)
+        write(io,"3-ERI[$(index[1]),$(index[2]),$(index[3])] = $(three_center_integrals[index])\n")
+        i += 1
+        # if i > 10000 
+        #     break
+        # end
+    end
+    close(io)
+end
+
+
 function calculate_three_center_integrals_screened!( 
-    jeri_engine_thread, basis_sets, thead_integral_buffer, screened_pq_index_count, shell_screen_matrix, sparse_pq_index_map)
+    jeri_engine_thread, basis_sets, thead_integral_buffer, screened_pq_index_count, 
+    shell_screen_matrix, sparse_pq_index_map, basis_function_screen_matrix)
     
 
     comm = MPI.COMM_WORLD
@@ -291,14 +317,15 @@ function calculate_three_center_integrals_screened!(
                 
                 aux_index = rank_shell_indicies[shell_index + thread_index_offset]
                 for μ in 1:basis_length
-                    for ν in 1:μ 
-                        if shell_screen_matrix[μ, ν] == false
-                            continue 
-                        end
-                        cartesian_index = CartesianIndex(aux_index, μ, ν)
+                    for ν in 1:μ #symmetry in shells 
+                        # if shell_screen_matrix[ν, μ] == false
+                        #     continue 
+                        # end
+                        cartesian_index = CartesianIndex(aux_index, ν, μ)
                         engine = jeri_engine_thread[thread]
                         integral_buffer = thead_integral_buffer[thread]
-                        calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, sparse_pq_index_map, rank_basis_index_map)
+                        calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, 
+                            basis_sets, integral_buffer, sparse_pq_index_map, basis_function_screen_matrix, rank_basis_index_map)
                     end
                 end    
             end
@@ -307,58 +334,47 @@ function calculate_three_center_integrals_screened!(
     return three_center_integrals
 end
 
+#calculate only the integrals that pass Schwarz screening
+#sparse_pq_index_map is a map of the non screened pq pairs to where in the screned matrix they should go in the 1D pq index, could be dense or triangular 
+@inline function calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets,
+     integral_buffer, sparse_pq_index_map, basis_function_screen_matrix, rank_basis_index_map)
+    s1, s2, s3,
+    shell_1, shell_2, shell_3,
+    shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
+    bf_1_pos, bf_2_pos, bf_3_pos, 
+    number_of_integrals = get_indexes_eri_block(cartesian_index, basis_sets)
+    
+    JERI.compute_eri_block_df(engine, integral_buffer, s1, s2, s3, number_of_integrals, 0)
+    copy_integral_result_screened!(three_center_integrals, integral_buffer, 
+    bf_1_pos, bf_2_pos, bf_3_pos, 
+    shell_1_nbasis, shell_2_nbasis, shell_3_nbasis,
+    basis_function_screen_matrix, sparse_pq_index_map, rank_basis_index_map)
+    axial_normalization_factor_screened!(three_center_integrals, 
+    shell_1, shell_2, shell_3,
+    shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
+        bf_1_pos, bf_2_pos, bf_3_pos, sparse_pq_index_map, 
+        basis_function_screen_matrix, rank_basis_index_map)
 
-@inline function copy_integral_result!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)
-    values_index = 1
-    for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1
-        for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
-            for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
-                three_center_integrals[j, k, i] = values[values_index]
-
-                if j >= k
-                    three_center_integrals[j, k, i] = values[values_index]
-                else
-                    three_center_integrals[j, k, i] = 0.0
-                end
-                values_index += 1
-            end
-        end
-    end
 end
+
 
 @inline function copy_integral_result_screened!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, 
     shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
-    screen_index_matrix, rank_basis_index_map)
+    basis_function_screen_matrix, sparse_pq_index_map,  rank_basis_index_map)
     values_index = 1
-
     for i in bf_1_pos:bf_1_pos+shell_1_nbasis-1 #auxiliary_basis index
         rank_i = rank_basis_index_map[i] #auxiliary_basis index for the rank 
         for j in bf_2_pos:bf_2_pos+shell_2_nbasis-1
             for k in bf_3_pos:bf_3_pos+shell_3_nbasis-1
-                screened_index = screen_index_matrix[j,k]
-                if screened_index == 0
+                if sparse_pq_index_map[j,k] == 0 || j > k
                     values_index += 1
                     continue
                 end
-                three_center_integrals[rank_i,screened_index] = values[values_index]
+                # inverse_sparse_index = sparse_pq_index_map[k,j]
+                sparse_index = sparse_pq_index_map[j,k]
+                three_center_integrals[rank_i,sparse_index] = values[values_index]
                 values_index += 1
             end
         end
     end
-end
-
-function print_three_center_integrals(three_center_integrals)
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-
-    println("three center integrals\n")
-    i = 0
-    io = open(joinpath(@__DIR__,  "./three_center_integrals_out-rank-$rank.txt"), "w+")
-    for index in CartesianIndices(three_center_integrals)
-        write(io,"3-ERI[$(index[1]),$(index[2]),$(index[3])] = $(three_center_integrals[index])\n")
-        i += 1
-        # if i > 10000 
-        #     break
-        # end
-    end
-    close(io)
 end

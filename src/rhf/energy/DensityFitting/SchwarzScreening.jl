@@ -69,16 +69,89 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
             end
         end # end of thread spawn
     end # end of thread sync 
+
+
+
+    shifted_basis_function_screen_matrix = deepcopy(basis_function_screen_matrix)
+    scf_data.screening_data.coefficient_shifts = Array{Array{Tuple{Int, Int},1},1}(undef, scf_data.μ)
+    for pp in 1:scf_data.μ
+        scf_data.screening_data.coefficient_shifts[pp] = Array{Tuple{Int, Int},1}(undef, 0)
+    end
+
+    for qq in 1:scf_data.μ
+        pp_large = scf_data.μ 
+        pp_small = qq
+    
+        find_screened = false
+        largest_non_screened_p = -1
+        while pp_large > pp_small
+            if !find_screened
+                largest_non_screened_p = -1
+                while largest_non_screened_p < 0 && pp_large > pp_small
+                    if basis_function_screen_matrix[pp_large, qq]
+                        largest_non_screened_p = pp_large
+                        find_screened = true
+                    end
+                    pp_large -= 1
+                end
+            else 
+                while pp_large >= pp_small 
+                    if !basis_function_screen_matrix[pp_small, qq]
+                        find_screened = false
+                        push!(scf_data.screening_data.coefficient_shifts[qq], (pp_small, largest_non_screened_p))
+                        pp_small += 1
+                        break
+                    end
+                    pp_small += 1
+                end
+            end
+        end
+    end
+    
+
+    for qq in 1:scf_data.μ
+        for shift in scf_data.screening_data.coefficient_shifts[qq]
+            temp_screen = shifted_basis_function_screen_matrix[shift[1], qq]
+            shifted_basis_function_screen_matrix[shift[1], qq] = shifted_basis_function_screen_matrix[shift[2], qq]
+            shifted_basis_function_screen_matrix[shift[2], qq] = temp_screen
+        end
+    end
+
+   
     sparse_pq_index_map = zeros(Int64, scf_data.μ, scf_data.μ)
     sparse_index = 1
     for pp::Int64 in 1:scf_data.μ
         for qq::Int64 in 1:scf_data.μ
-            if basis_function_screen_matrix[qq,pp] == true
+            if shifted_basis_function_screen_matrix[qq,pp] == true
                 sparse_pq_index_map[qq,pp] = sparse_index
                 sparse_index += 1                
             end
         end
     end
+
+    for qq in 1:scf_data.μ
+        for shift in scf_data.screening_data.coefficient_shifts[qq]
+            temp_sparse_pq_index = sparse_pq_index_map[shift[1], qq]
+            sparse_pq_index_map[shift[1], qq] = sparse_pq_index_map[shift[2], qq]
+            sparse_pq_index_map[shift[2], qq] = temp_sparse_pq_index
+        end
+    end
+
+    if isfile("basis_function_screen_matrix.h5")
+        rm("basis_function_screen_matrix.h5")
+    end
+    #convert basis_function_screen_matrix to ints 
+    basis_function_screen_matrix_int = convert(Array{Int64,2}, basis_function_screen_matrix)
+    h5write("basis_function_screen_matrix.h5", "basis_function_screen_matrix", basis_function_screen_matrix_int)
+
+
+    if isfile("basis_function_screen_matrix_shifted.h5")
+        rm("basis_function_screen_matrix_shifted.h5")
+    end
+    #convert basis_function_screen_matrix to ints
+    shifted_basis_function_screen_matrix_int = convert(Array{Int64,2}, shifted_basis_function_screen_matrix)
+    h5write("basis_function_screen_matrix_shifted.h5", "basis_function_screen_matrix", shifted_basis_function_screen_matrix_int)
+    exit()
     return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 

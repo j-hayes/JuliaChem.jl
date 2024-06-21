@@ -28,8 +28,8 @@ function create_default_scf_options()
         SCF_Keywords.Convergence.max_iterations_default,
         SCF_Keywords.Convergence.df_max_iterations_default,
         SCF_Keywords.Screening.df_exchange_block_width_default,
-        SCF_Keywords.Screening.df_sigma_default
-        )
+        SCF_Keywords.Screening.df_sigma_default,
+        SCF_Keywords.Screening.df_screen_exchange_default)
 end
 
 function create_scf_options(scf_flags)

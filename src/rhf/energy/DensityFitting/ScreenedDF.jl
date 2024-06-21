@@ -14,7 +14,8 @@ end
 
 
 function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
-
+    println("doing schwaz screening with sigma: ", sigma) 
+    flush(stdout)
     max_P_P = get_max_P_P(two_center_integrals)
     scf_data.screening_data.shell_screen_matrix,
     scf_data.screening_data.basis_function_screen_matrix,
@@ -42,6 +43,7 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
 
 
     end
+    # shift_indices_for_screen_matrix(scf_data)
 end
 
 
@@ -61,6 +63,9 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         println("screening")
         @time get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+        calculate_exchange_block_metadata(scf_data, scf_options)
+
+
 
         println("J_AB_INV")
         @time begin
@@ -80,7 +85,10 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
             println("B")
             @time BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
             scf_options.load = load #todo remove this and just pass the load param
+
         end
+        
+
         # deallocate unneeded memory
         two_center_integrals = zeros(0)
         J_AB_invt = zeros(0)
@@ -99,15 +107,54 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         #save the basis function screen matrix to the shared timing object for debugging
         Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
 
-        calculate_exchange_block_screen_matrix(scf_data, scf_options)
-
     end
 
-    println("calculate_exchange_screened!")
 
+
+    println("calculate_exchange_screened!")
     @time calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
     println("calculate_coulomb_screened")
     @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
+
+    shift_fock_matrix_back!(scf_data)
+    #save fock matrix to hdf5 
+    if iteration < 5
+        #delete file if exists 
+        if isfile("shift_fock_matrix_$iteration.h5")
+            rm("shift_fock_matrix_$iteration.h5")
+        end
+        h5write("shift_fock_matrix_$iteration.h5", "fock_matrix", scf_data.two_electron_fock)
+    end
+end
+
+# function shift_B_indicies_for_K_screening!(scf_data)
+
+#     index_from = scf_data.screening_data.sparse_pq_index_map[9, 20]
+#     index_to = scf_data.screening_data.sparse_pq_index_map[10, 20]
+    
+
+#     temp = scf_data.D[:, index_to]
+#     scf_data.D[:, index_to] = scf_data.D[:, index_from]
+#     scf_data.D[:, index_from] = temp
+# end
+
+
+# function shift_density_array_for_K_screening!(scf_data)
+#     index_from = scf_data.screening_data.sparse_pq_index_map[9, 20]
+#     index_to = scf_data.screening_data.sparse_pq_index_map[10, 20]
+#     temp = scf_data.density_array[index_to]
+#     scf_data.density_array[index_to] = scf_data.density_array[index_from]
+#     scf_data.density_array[index_from] = temp
+# end
+
+function shift_fock_matrix_back!(scf_data)
+    for qq in 1:scf_data.μ
+        for shift in scf_data.screening_data.coefficient_shifts[qq]
+            temp = scf_data.two_electron_fock[shift[2], qq]
+            scf_data.two_electron_fock[shift[2], qq] = scf_data.two_electron_fock[shift[1], qq]
+            scf_data.two_electron_fock[shift[1], qq] = temp
+        end
+    end
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
@@ -222,7 +269,7 @@ function calculate_W_screened(scf_data, occupied_orbital_coefficients)
     blas_threads = BLAS.get_num_threads()
     BLAS.set_num_threads(1)
     n_threads = Threads.nthreads()
-    dynamic_p = n_threads + 1
+    dynamic_q = n_threads + 1
     dynamic_lock = Threads.ReentrantLock()
 
     M = size(scf_data.D,1)
@@ -235,28 +282,34 @@ function calculate_W_screened(scf_data, occupied_orbital_coefficients)
 
     Threads.@sync for thread in 1:n_threads
         Threads.@spawn begin
-            pp = thread
+            qq = thread
             K = 1
-            while pp <= p
-                non_zero_r_index = 1
-                for r in 1:p
-                    if scf_data.screening_data.basis_function_screen_matrix[r, pp]
-                        scf_data.screening_data.non_zero_coefficients[pp][:, non_zero_r_index] .= view(occupied_orbital_coefficients, :, r)
+            while qq <= p
+                coeff_r_indicies = collect(1:p)
+                for shift in scf_data.screening_data.coefficient_shifts[qq]
+                    temp = coeff_r_indicies[shift[1]]
+                    coeff_r_indicies[shift[1]] = coeff_r_indicies[shift[2]]
+                    coeff_r_indicies[shift[2]] = temp
+                end
+                non_zero_r_index = 1 #count of r's that were not screened
+                for r in coeff_r_indicies
+                    if scf_data.screening_data.basis_function_screen_matrix[r, qq]
+                        scf_data.screening_data.non_zero_coefficients[qq][:, non_zero_r_index] .= view(occupied_orbital_coefficients, :, r) #swap if necessary
                         non_zero_r_index += 1
                     end
                 end
-                K = scf_data.screening_data.non_screened_p_indices_count[pp]
-                A_ptr = pointer(scf_data.D, linear_indicesB[1, scf_data.screening_data.sparse_p_start_indices[pp]])
-                B_ptr = pointer(scf_data.screening_data.non_zero_coefficients[pp], 1)
-                C_ptr = pointer(scf_data.D_tilde, linear_indicesW[1, 1, pp])
+                K = scf_data.screening_data.non_screened_p_indices_count[qq]
+                A_ptr = pointer(scf_data.D, linear_indicesB[1, scf_data.screening_data.sparse_p_start_indices[qq]])
+                B_ptr = pointer(scf_data.screening_data.non_zero_coefficients[qq], 1)
+                C_ptr = pointer(scf_data.D_tilde, linear_indicesW[1, 1, qq])
                 call_gemm!(Val(false), Val(true), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
 
                 lock(dynamic_lock) do
-                    if dynamic_p <= p
-                        pp = dynamic_p
-                        dynamic_p += 1
+                    if dynamic_q <= p
+                        qq = dynamic_q
+                        dynamic_q += 1
                     else
-                        pp = p + 1
+                        qq = p + 1
                     end
                 end
             end
@@ -348,7 +401,7 @@ function copy_screened_coulomb_to_fock!(scf_data, J, fock)
     end
 end
 
-function calculate_exchange_block_screen_matrix(scf_data, scf_options)
+function calculate_exchange_block_metadata(scf_data, scf_options)
     n_threads = Threads.nthreads()  
     if scf_data.μ < 100 #if the # of basis functions is small just do a dense calculation with one block
         K_block_width = scf_data.μ

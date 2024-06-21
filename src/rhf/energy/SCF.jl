@@ -466,11 +466,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         scf_data.A = aux_basis_function_count
         scf_data.occ = occupied_orbital_count
         triangle_size = (basis_function_count*(basis_function_count+1))÷2
-        if scf_options.contraction_mode != "GPU"
-          scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
-          scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
-          scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
+        if scf_options.contraction_mode != "GPU" #move this to DF file
+          # scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
+          # scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
+          # scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
+          # scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
         end
         scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
       end
