@@ -6,7 +6,6 @@ using Printf
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using TensorOperations
-using CUDA
 const do_continue_print = false 
 const print_eri = false 
 const get_next_index_tag = 1111
@@ -15,14 +14,6 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
 
   Shared.reset_timing() #this should be moved to a move central location 
-
-  
-  #setup CUDA
-  # devices = CUDA.devices()
-  # for device_id in 0:length(devices)-1
-  #   CUDA.device!(device_id)
-  #   CUDA.reclaim()
-  # end
 
   # todo move all of these options to scf_options 
   # todo move this all to a function 
@@ -602,7 +593,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   if scf_options.contraction_mode == "GPU" 
     free_gpu_memory(scf_data)
   end
-  
   return E, scf_converged
 end
 

@@ -53,16 +53,15 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     basis_sets::CalculationBasisSets,
     occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine,T2<:RHFTEIEngine}
     comm = MPI.COMM_WORLD
+    n_ranks = MPI.Comm_size(comm)
+    rank = MPI.Comm_rank(comm)
 
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
 
     if iteration == 1
-        println("two center integrals")
         @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        println("screening")
         @time get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
 
-        println("J_AB_INV")
         @time begin
             LAPACK.potrf!('L', two_center_integrals)
             LAPACK.trtri!('L', 'N', two_center_integrals)
@@ -73,8 +72,6 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         else
             load = scf_options.load
             scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
-            println("three center integrals")
-
             @time scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
             scf_options.load = load
             println("B")
@@ -100,14 +97,27 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
 
         calculate_exchange_block_screen_matrix(scf_data, scf_options)
-
+     
+        h5open("B_$(n_ranks)_ranks_cpu_rank_$(rank).h5", "w") do file
+            write(file, "device_B", scf_data.D)
+        end
     end
+
+
+
 
     println("calculate_exchange_screened!")
 
     @time calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
     println("calculate_coulomb_screened")
     @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
+    if iteration > 1
+        return 
+    end
+    #write the fock matrix to the hdf5 file
+    h5open("fock_cpu_$(rank).h5", "w") do file
+        write(file, "fock", scf_data.two_electron_fock)
+    end
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
@@ -120,52 +130,61 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
     scf_options.load = load
     
-    shell_aux_indicies, three_eri_rank_indicies, rank_basis_index_map = 
-        static_load_rank_indicies(this_rank, n_ranks, basis_sets)
+  
 
-    Q = scf_data.A
     pq = size(three_center_integrals, 2)
 
     #divide the B_Q indicies that will go to each rank 
     #(these are different than the three_eri_rank_indicies indicies which are based on the static or dynamic load balancing)
-    rank_B_Q_indices = Array{UnitRange}(undef, n_ranks)
-    for i in 0:n_ranks-1
-        rank_B_Q_indices[i+1] = (i*Q÷n_ranks)+1:min((i + 1) * Q ÷ n_ranks, Q)
-    end
-    this_rank_B_Q_index_range = rank_B_Q_indices[this_rank+1]
+    load_balance_indicies = [static_load_rank_indicies_3_eri(rank_index, n_ranks, basis_sets) for rank_index in 0:n_ranks-1]
+    three_eri_rank_indicies = load_balance_indicies[this_rank+1][2]
+    this_rank_B_Q_index_range = load_balance_indicies[this_rank+1][2]
+    
     this_rank_Q_length = length(this_rank_B_Q_index_range)
 
-    max_rank_n_aux_indicies = maximum(length.(rank_B_Q_indices))
+    println("rank: $this_rank this_rank_B_Q_index_range = $this_rank_B_Q_index_range")
+
+
+
+    max_rank_n_aux_indicies = 0
+    for rank_index in 0:n_ranks-1
+        max_rank_n_aux_indicies = max(max_rank_n_aux_indicies, length(load_balance_indicies[rank_index+1][2]))
+    end
 
     scf_data.D = zeros(Float64, (this_rank_Q_length, pq))
     B_temp_buffer = zeros(Float64, (max_rank_n_aux_indicies*pq)) 
     alpha = 1.0
     beta = 0.0
 
-    for send_rank in 0:n_ranks-1
-
-        send_rank_B_Q_index_range = rank_B_Q_indices[send_rank+1]
-        send_rank_J_AB_INV = J_AB_INV[send_rank_B_Q_index_range, three_eri_rank_indicies] #this allocates memory perhaps needs to be done another way
+    for recieve_rank in 0:n_ranks-1
+        recieve_rank_B_Q_index_range = load_balance_indicies[recieve_rank+1][2]
+        recieve_rank_J_AB_INV = J_AB_INV[recieve_rank_B_Q_index_range, three_eri_rank_indicies] #this allocates memory perhaps needs to be done another way
             
-        if send_rank == this_rank        
-            BLAS.gemm!('N', 'N', 1.0, send_rank_J_AB_INV, three_center_integrals, 0.0, scf_data.D)
-            reduce_B_this_rank(scf_data.D, send_rank)                
+        if recieve_rank == this_rank        
+            BLAS.gemm!('N', 'N', 1.0, recieve_rank_J_AB_INV, three_center_integrals, 0.0, scf_data.D)
+            reduce_B_this_rank(scf_data.D, recieve_rank)                
         else
-            send_rank_index_range_length = length(send_rank_B_Q_index_range)
-            B_buffer_view = view(B_temp_buffer, 1:(send_rank_index_range_length*pq))
+            recieve_rank_index_range_length = length(recieve_rank_B_Q_index_range)
+            B_buffer_view = view(B_temp_buffer, 1:(recieve_rank_index_range_length*pq))
 
-            pointerA = pointer(send_rank_J_AB_INV, 1)
+            pointerA = pointer(recieve_rank_J_AB_INV, 1)
             pointerB = pointer(three_center_integrals, 1)
             pointerC = pointer(B_buffer_view, 1)
-            M = send_rank_index_range_length
+            M = recieve_rank_index_range_length
             N = pq
-            K = size(send_rank_J_AB_INV, 2)
+            K = size(recieve_rank_J_AB_INV, 2)
 
             call_gemm!(Val(false), Val(false), M, N, K, alpha, pointerA, pointerB, beta, pointerC)
-            B_temp = reshape(B_buffer_view, (send_rank_index_range_length, pq))
-            reduce_B_other_rank(B_temp, send_rank)                
+            B_temp = reshape(B_buffer_view, (recieve_rank_index_range_length, pq))
+            reduce_B_other_rank(B_temp, recieve_rank)                
         end
     end
+
+    #write the B matrix to the hdf5 file
+    h5open("s22_3_B_$(n_ranks)_ranks_cpu_rank_$(this_rank).h5", "w") do file
+        write(file, "device_B", scf_data.D)
+    end
+
 end
 
 function reduce_B_this_rank(B, rank)

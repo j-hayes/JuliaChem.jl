@@ -177,6 +177,18 @@ end
 
   end
 
+  function static_load_rank_indicies_3_eri(rank, n_ranks, basis_sets)
+    number_of_shells = length(basis_sets.auxillary)
+    shells_per_rank = number_of_shells ÷ n_ranks 
+    shell_aux_indicies = (rank*shells_per_rank)+1:min((rank+1)*shells_per_rank, number_of_shells)
+    if rank == n_ranks - 1 # grab the remaining shells and give them to the last rank. 
+        shell_aux_indicies = (rank*shells_per_rank)+1:number_of_shells
+    end # todo evenly distribute the remaining shells to the ranks.
+    shell_aux_indicies = collect(shell_aux_indicies)
+    basis_indicies, rank_basis_index_map = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
+    return shell_aux_indicies, basis_indicies, rank_basis_index_map
+  end
+
   function get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
     basis_indicies = zeros(Int64, 0)
     for shell_index in shell_aux_indicies

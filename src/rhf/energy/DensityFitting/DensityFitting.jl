@@ -52,6 +52,15 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   if MPI.Comm_size(comm) > 1
     MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   end
+
+  if iteration == 1  && MPI.Comm_rank(comm) == 0
+    #write the two electron fock matrix to an hdf5 file 
+    h5open("fock_$(scf_options.contraction_mode)_$(MPI.Comm_size(comm))_ranks_reduced.h5", "w") do file
+      write(file, "fock", scf_data.two_electron_fock)
+    end
+  end
+
+
   return
 end
 

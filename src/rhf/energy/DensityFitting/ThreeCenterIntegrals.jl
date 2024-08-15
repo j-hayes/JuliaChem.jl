@@ -3,22 +3,30 @@ using LinearAlgebra
 using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
+using MPI 
 
 three_center_integral_tag = 3000
 
 #no screening
 function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions)
-    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, SCFData()) ##todo this should all be one interface after refactor
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
+    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, SCFData(), rank, n_ranks) ##todo this should all be one interface after refactor
 end
 
 function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, 
     scf_data::SCFData)
+    rank = MPI.Comm_rank(MPI.COMM_WORLD)
+    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, scf_data, rank, n_ranks)
+end
+
+function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, 
+    scf_data::SCFData, rank::Int, n_ranks::Int)
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
     basis_shell_count = length(basis_sets.primary)
-
-
 
     n_threads = Threads.nthreads()
     three_center_integrals = []
@@ -26,7 +34,7 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
     if scf_options.load == "screened"
-        three_center_integrals = calculate_three_center_integrals_screened!( 
+        three_center_integrals = calculate_three_center_integrals_screened!(rank, n_ranks, 
             jeri_engine_thread, basis_sets, thead_integral_buffer, 
             scf_data.screening_data.screened_indices_count,
             scf_data.screening_data.shell_screen_matrix, 
@@ -260,20 +268,18 @@ end
 
 
 
-function calculate_three_center_integrals_screened!( 
+function calculate_three_center_integrals_screened!(rank, n_ranks, 
     jeri_engine_thread, basis_sets, thead_integral_buffer, screened_pq_index_count, shell_screen_matrix, sparse_pq_index_map)
     
 
-    comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    n_ranks = MPI.Comm_size(comm)
+   
     nthreads = Threads.nthreads()
     basis_length = length(basis_sets.primary)
     
-    load_balance_indicies = [static_load_rank_indicies(rank_index, n_ranks, basis_sets) for rank_index in 0:n_ranks-1]
-    rank_shell_indicies = load_balance_indicies[rank+1][1] 
-    rank_basis_indicies = load_balance_indicies[rank+1][2] 
-    rank_basis_index_map = load_balance_indicies[rank+1][3]
+    rank_shell_indicies, 
+    rank_basis_indicies, 
+    rank_basis_index_map = static_load_rank_indicies_3_eri(rank, n_ranks, basis_sets) 
+    
 
 
     rank_number_of_shells = length(rank_shell_indicies)
