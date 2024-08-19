@@ -4,7 +4,7 @@ using CUDA.CUSOLVER
 using LinearAlgebra
 using Base.Threads
 
-function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
+function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
     occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine,T2<:RHFTEIEngine}
     comm = MPI.COMM_WORLD
@@ -33,7 +33,7 @@ function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.gpu_data.device_occupied_orbital_coefficients = Array{CuArray{Float64}}(undef, num_devices)
         scf_data.gpu_data.device_density = Array{CuArray{Float64}}(undef, num_devices)
         scf_data.gpu_data.host_fock = Array{Array{Float64,2}}(undef, num_devices)
-
+        scf_data.gpu_data.host_coulomb = Array{Array{Float64,2}}(undef, num_devices)
         for device_id in 1:num_devices
             device!(device_id - 1)
             Q = scf_data.gpu_data.device_Q_range_lengths[device_id]
@@ -43,30 +43,40 @@ function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T},
                 CUDA.zeros(Float64, (n_ooc, Q, p))
             scf_data.gpu_data.device_occupied_orbital_coefficients[device_id] = CUDA.zeros(Float64, (scf_data.μ, scf_data.occ))
             scf_data.gpu_data.device_density[device_id] = CUDA.zeros(Float64, (scf_data.μ, scf_data.μ))
-            scf_data.gpu_data.host_fock[device_id] = zeros(scf_data.μ, scf_data.μ)
+            scf_data.gpu_data.host_fock[device_id] = zeros(Float64, scf_data.μ, scf_data.μ)
+            scf_data.gpu_data.host_coulomb[device_id] = zeros(Float64, (scf_data.μ, scf_data.μ))
 
             
         end
     end
 
+   
+
+    host_V = zeros(Float64, scf_data.gpu_data.device_Q_range_lengths[1])
+    host_density = zeros(Float64, scf_data.μ, scf_data.μ)
     Threads.@sync for device_id in 1:num_devices
         Threads.@spawn begin
             device!(device_id - 1)
             ooc = scf_data.gpu_data.device_occupied_orbital_coefficients[device_id]
             density = scf_data.gpu_data.device_density[device_id]
+            
             B = scf_data.gpu_data.device_B[device_id]
             Q_length = scf_data.gpu_data.device_Q_range_lengths[device_id]
             V = scf_data.gpu_data.device_coulomb_intermediate[device_id]
             W = scf_data.gpu_data.device_exchange_intermediate[device_id]
             fock = scf_data.gpu_data.device_fock[device_id]
+            host_J = scf_data.gpu_data.host_coulomb[device_id]
             copyto!(ooc, occupied_orbital_coefficients)
 
             CUBLAS.gemm!('N', 'T', 1.0, ooc, ooc, 0.0, density)
+            CUDA.copyto!(host_density, density)
             CUBLAS.gemv!('N', 1.0, reshape(B, (Q_length, pq)), reshape(density, pq), 0.0, V)
+            CUDA.copyto!(host_V, V)
             CUBLAS.gemv!('T', 2.0, reshape(B, (Q_length, pq)), V, 0.0, reshape(fock, pq))
-            CUBLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q_length * p, p)), 0.0, reshape(W, (n_ooc, p * Q_length)))
+            CUDA.copyto!(host_J, fock)
+            CUBLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q_length * p, p)), 0.0, reshape(W, (n_ooc, Q_length* p)))
             CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 1.0, fock)
-            copyto!(scf_data.gpu_data.host_fock[device_id], fock)
+            CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], fock)
             
 
 
@@ -74,10 +84,23 @@ function df_rhf_fock_build_dense_GPU(scf_data, jeri_engine_thread_df::Vector{T},
     end
 
 
-    scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
+    scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
     end
+
+
+    # println("B: ")
+    # display(host_B[1, 1:5,1:5])
+
+    println("density: ")
+    display(host_density[1:5,1:5])
+    println("V: ")
+    display(host_V[1:5])
+    println("J: ")
+    display(scf_data.gpu_data.host_coulomb[1][1:5,1:5])
+    println("fock: ")
+    display(scf_data.two_electron_fock[1:5,1:5])
 
 end
 
@@ -105,6 +128,7 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
 
 
     three_eri_linear_indices = LinearIndices(three_center_integrals)
+
 
     Threads.@sync for device_id in 1:num_devices
         Threads.@spawn begin
@@ -134,6 +158,9 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
             
         end
     end
+
+    host_B = zeros(Float64, size(scf_data.gpu_data.device_B[1]))    
+
 
 
     device!(0)
@@ -174,33 +201,32 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
         end
 
 
-        device!(recieve_device_id - 1)
-        array_size = rec_device_Q_range_length * pq
-        data = zeros(array_size)
         for send_device_id in 1:num_devices
             if send_device_id == recieve_device_id
                 continue
             end
-            device!(send_device_id - 1)
-
-            CUDA.unsafe_copyto!(data, 1, device_B_send_buffers[send_device_id], 1, array_size)
-            
-            device!(recieve_device_id - 1)
-            CUDA.unsafe_copyto!(device_B_send_buffers[recieve_device_id], 1, data, 1, array_size)
-            CUDA.device_
+            CUDA.copyto!(host_B_send_buffers[send_device_id], 1, device_B_send_buffers[send_device_id], 1, array_size)
+            CUDA.copyto!(device_B_send_buffers[recieve_device_id], 1, host_B_send_buffers, 1, array_size)
             CUBLAS.axpy!(array_size, 1.0,
                 reshape(view(device_B_send_buffers[recieve_device_id], 1:array_size), (array_size)),
                 reshape(view(device_B[recieve_device_id], 1:array_size), (array_size)))
         end
+
+        
+        CUDA.copyto!(host_B, scf_data.gpu_data.device_B[1])
         
     end
-    for device_id in 1:num_devices
-        CUDA.unsafe_free!(device_J_AB_invt[device_id])
-        CUDA.unsafe_free!(device_three_center_integrals[device_id])
-        CUDA.unsafe_free!(device_B_send_buffers[device_id])
+    
+
+    
+
+    if any(isnan, host_B)
+        println("B is NaN")
+    else
+        println("B is not NaN")
     end
-    GC.gc(true) #force cleanup of the GPU data
-    return
+
+    
 end
 
 function calculate_device_ranges_dense(scf_data, num_devices)

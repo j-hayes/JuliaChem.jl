@@ -111,45 +111,44 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             host_J = scf_data.gpu_data.host_coulomb[device_id]
             fock = scf_data.gpu_data.device_fock[device_id]
             host_fock = scf_data.gpu_data.host_fock[device_id]
-            copyto!(ooc, occupied_orbital_coefficients)
+            CUDA.copyto!(ooc, occupied_orbital_coefficients)
 
-            fill!(fock, 0.0)
+            
 
             #host density until I can figure out how to write a kernel for copying to the screened vector on the gpu
-            copyto!(density, scf_data.density_array)
+            CUDA.copyto!(density, scf_data.density_array)
 
             CUBLAS.gemv!('N', 1.0, B, density, 0.0, V)
-            scf_data.coulomb_intermediate = zeros(Float64, size(V))
-            copyto!(scf_data.coulomb_intermediate, V)
             CUBLAS.gemv!('T', 2.0, B, V, 0.0, J)
-            copyto!(host_J, J)
+            CUDA.copyto!(host_J, J)
 
             calculate_W_screened_GPU(device_id, scf_data)
-            
-            scf_data.D_tilde = zeros(Float64, size(W))
-            copyto!(scf_data.D_tilde, scf_data.gpu_data.device_exchange_intermediate[device_id])
-            calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options)         
+            CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 0.0, fock)
+            CUDA.copyto!(host_fock, fock)
+
+
+            # calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options)         
             #only the lower triangle of the GPU is calculated so we need copy the values to the upper triangle
-            for i in 1:scf_data.μ #this could be done outside of this loop and more parallel
-                for j in 1:i-1
-                    host_fock[j, i] = scf_data.gpu_data.host_fock[device_id][i, j]
-                end
-            end           
+            # for i in 1:scf_data.μ #this could be done outside of this loop and more parallel
+            #     for j in 1:i-1
+            #         host_fock[j, i] = scf_data.gpu_data.host_fock[device_id][i, j]
+            #     end
+            # end           
         end        
     end
 
 
     scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
-    copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[1], scf_data.two_electron_fock)
+    # copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[1], scf_data.two_electron_fock)
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
-        copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[device_id], scf_data.two_electron_fock)
+        # copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[device_id], scf_data.two_electron_fock)
     end
-    if iteration > 1
-        return 
-    end
-    #write the fock matrix to the hdf5 file
-    
+
+
+    println("host J:")
+    println("fock: ")
+    display(scf_data.two_electron_fock[1:5,1:5])
 end
 
 function calculate_W_screened_GPU(device_id, scf_data::SCFData)
@@ -395,21 +394,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             end
         end
     end
-
-    # for device_id in 1:scf_data.gpu_data.number_of_devices_used
-    #     CUDA.device!(device_id-1)
-    #     CUDA.unsafe_free!(device_J_AB_invt[device_id])
-    #     CUDA.unsafe_free!(device_three_center_integrals[device_id])
-    #     CUDA.unsafe_free!(device_B_send_buffers[device_id])
-    # end
-
-    # GC.gc(true) #force cleanup of the GPU data
-    # for device_id in 1:scf_data.gpu_data.number_of_devices_used
-    #     CUDA.device!(device_id-1)
-    #     CUDA.reclaim()
-    # end
-
-    # MPI.Barrier(COMM) #sync all ranks 
+    MPI.Barrier(COMM) #sync all ranks 
     return
 end
 
