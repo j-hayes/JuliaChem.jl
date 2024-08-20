@@ -34,7 +34,7 @@ mutable struct SCFGPUData
     device_density :: Array{Union{Nothing, CuArray{Float64}},1}
     device_non_zero_coefficients :: Array{Union{Nothing, CuArray{Float64}},1}
     device_K_block :: Array{Union{Nothing, CuArray{Float64}},1}
-    host_coulomb ::  Array{Array{Float64,2},1}
+    host_coulomb ::  Array{Array{Float64,1},1}
     host_fock ::  Array{Array{Float64,2},1}
     number_of_devices_used :: Int
     device_start_index

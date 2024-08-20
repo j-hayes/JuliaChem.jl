@@ -53,8 +53,9 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         scf_data.gpu_data.device_density = Array{CuArray{Float64}}(undef, num_devices)
         scf_data.gpu_data.device_non_zero_coefficients = Array{Array{CuArray{Float64}}}(undef, num_devices)
         scf_data.gpu_data.device_K_block = Array{CuArray{Float64}}(undef, num_devices)
-        scf_data.gpu_data.host_coulomb = Array{Array{Float64}}(undef, num_devices)
+        scf_data.gpu_data.host_coulomb = Array{Array{Float64,1}}(undef, num_devices)
 
+        
         scf_data.gpu_data.host_fock = Array{Array{Float64,2}}(undef, num_devices)
         scf_data.density = zeros(Float64, (scf_data.μ,scf_data.μ ))
 
@@ -75,6 +76,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             scf_data.gpu_data.device_exchange_intermediate[device_id] =  CUDA.zeros(Float64, (Q, n_ooc, p))
             scf_data.gpu_data.device_K_block[device_id] = CUDA.zeros(Float64, (scf_data.screening_data.K_block_width, scf_data.screening_data.K_block_width))
             scf_data.gpu_data.device_non_zero_coefficients[device_id] = CUDA.zeros(Float64, n_ooc, p, p)
+            scf_data.gpu_data.host_coulomb[device_id] = zeros(Float64, scf_data.screening_data.screened_indices_count)
 
             #host density until I can figure out how to write a kernel for copying to the screened vector on the gpu
             scf_data.density_array = zeros(Float64, (scf_data.screening_data.screened_indices_count))
@@ -139,16 +141,12 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
 
     scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
-    # copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[1], scf_data.two_electron_fock)
+    copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[1], scf_data.two_electron_fock)
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
-        # copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[device_id], scf_data.two_electron_fock)
+        copy_screened_coulomb_to_fock!(scf_data, scf_data.gpu_data.host_coulomb[device_id], scf_data.two_electron_fock)
     end
 
-
-    println("host J:")
-    println("fock: ")
-    display(scf_data.two_electron_fock[1:5,1:5])
 end
 
 function calculate_W_screened_GPU(device_id, scf_data::SCFData)
