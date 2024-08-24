@@ -72,6 +72,14 @@ function run(mol::Molecule, basis_sets::CalculationBasisSets, scf_flags = Dict()
   #== actually perform scf calculation ==#
   rhfenergy = rhf_energy(mol, basis_sets, scf_flags; output=output)
 
+  rhfenergy["Timings"].other_timings["basis"] = basis_sets.primary.model 
+  rhfenergy["Timings"].other_timings["basis_function_count"] = basis_sets.primary.norb 
+
+  if !isnothing(basis_sets.auxillary)
+    rhfenergy["Timings"].other_timings["auxillary"] = basis_sets.auxillary.model
+    rhfenergy["Timings"].other_timings["auxillary_function_count"] = basis_sets.auxillary.norb
+  end
+
   if MPI.Comm_rank(comm) == 0 && output >= 2
     println("                       ========================================                 ")
     println("                              END RESTRICTED CLOSED-SHELL                       ")

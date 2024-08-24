@@ -5,7 +5,6 @@ mutable struct JCTiming
     fock_build_times :: Dict{String, Float64}
     other_timings :: Dict{String, Any} # keys should be prefixed name_of_timing- then the iteration number
     density_fitting_iteration_range :: UnitRange{Int64}
-
 end
 
 function create_jctiming()

@@ -245,8 +245,10 @@ function rhf_kernel(mol::Molecule,
              "Overlap" => S,                                                   
              "Energy" => E,                                                     
              "Converged?" => converged,
-             "Timings"=> timings                                              
-            )      
+             "Timings"=> timings,
+             "Options" => scf_options                                              
+            )     
+  
   
   return scf 
 end
@@ -548,7 +550,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         xiK = nothing
         two_electron_fock_component = nothing        
         do_density_fitting = false
-        timings.density_fitting_iteration_range = 2:iter
+        timings.density_fitting_iteration_range = 1:iter
         if scf_options.guess == Guess.density_fitting # density fitting guess done proceed to RHF 
           jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) for thread in 1:nthreads ]
           if MPI.Comm_rank(comm) == 0 && output >= 2

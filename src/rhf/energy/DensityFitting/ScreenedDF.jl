@@ -4,7 +4,6 @@ using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
-using HDF5
 using ThreadPinning 
 using Serialization
 
@@ -59,24 +58,32 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
 
     if iteration == 1
-        @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        @time get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+        Shared.Timing.other_timings["two-eri"] = @elapsed begin
+        two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+        end#timing
+        Shared.Timing.other_timings["get_screening_metadata"] = @elapsed begin
+        get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+        end#timing
 
-        @time begin
-            LAPACK.potrf!('L', two_center_integrals)
-            LAPACK.trtri!('L', 'N', two_center_integrals)
-            J_AB_invt = two_center_integrals
-        end
+        Shared.Timing.other_timings["J_(-1/2)"] = @elapsed begin
+        LAPACK.potrf!('L', two_center_integrals)
+        LAPACK.trtri!('L', 'N', two_center_integrals)
+        end#timing
+        J_AB_invt = two_center_integrals
+
+        Shared.Timing.other_timings["B"] = @elapsed begin
         if MPI.Comm_size(MPI.COMM_WORLD) > 1 #todo update this to reduce communication?
-            @time calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options)
+            calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options)
         else
             load = scf_options.load
             scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
-            @time scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+            Shared.Timing.other_timings["three-eri"] = @elapsed begin
+            scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+            end#timing
             scf_options.load = load
-            println("B")
-            @time BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
+            BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
             scf_options.load = load #todo remove this and just pass the load param
+        end
         end
         # deallocate unneeded memory
         two_center_integrals = zeros(0)
@@ -90,34 +97,11 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
         scf_data.two_electron_fock_GPU = zeros(0)
         scf_data.thread_two_electron_fock = zeros(0)
-
-        basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
-
-        #save the basis function screen matrix to the shared timing object for debugging
-        Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
-
         calculate_exchange_block_screen_matrix(scf_data, scf_options)
-     
-        h5open("B_$(n_ranks)_ranks_cpu_rank_$(rank).h5", "w") do file
-            write(file, "device_B", scf_data.D)
-        end
     end
 
-
-
-
-    println("calculate_exchange_screened!")
-
-    @time calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    println("calculate_coulomb_screened")
-    @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
-    if iteration > 1
-        return 
-    end
-    #write the fock matrix to the hdf5 file
-    h5open("fock_cpu_$(rank).h5", "w") do file
-        write(file, "fock", scf_data.two_electron_fock)
-    end
+    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
+    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
@@ -127,7 +111,9 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
 
     load = scf_options.load
     scf_options.load = "screened"
+    Shared.Timing.other_timings["three-eri"] = @elapsed begin
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+    end#timing
     scf_options.load = load
     
   
@@ -141,10 +127,6 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
     this_rank_B_Q_index_range = load_balance_indicies[this_rank+1][2]
     
     this_rank_Q_length = length(this_rank_B_Q_index_range)
-
-    println("rank: $this_rank this_rank_B_Q_index_range = $this_rank_B_Q_index_range")
-
-
 
     max_rank_n_aux_indicies = 0
     for rank_index in 0:n_ranks-1
@@ -179,12 +161,6 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
             reduce_B_other_rank(B_temp, recieve_rank)                
         end
     end
-
-    #write the B matrix to the hdf5 file
-    h5open("s22_3_B_$(n_ranks)_ranks_cpu_rank_$(this_rank).h5", "w") do file
-        write(file, "device_B", scf_data.D)
-    end
-
 end
 
 function reduce_B_this_rank(B, rank)
@@ -223,16 +199,19 @@ function reduce_B_other_rank(B, rank)
 end
 
 function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    @time calculate_W_screened(scf_data, occupied_orbital_coefficients)
-   
-    Shared.Timing.other_timings["K_block-$(scf_data.scf_iteration)"] = @elapsed begin
-        if scf_options.df_screen_exchange
-            @time calculate_K_lower_diagonal_block(scf_data, scf_options)
-        else
-            @time calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
-        end
-    end
+    Shared.Timing.other_timings["exchange-intermediate-$(scf_data.scf_iteration)"] = @elapsed begin
     
+    calculate_W_screened(scf_data, occupied_orbital_coefficients)
+    
+    end
+   
+    Shared.Timing.other_timings["exchange-$(scf_data.scf_iteration)"] = @elapsed begin
+    if scf_options.df_screen_exchange
+        calculate_K_lower_diagonal_block(scf_data, scf_options)
+    else
+        calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
+    end
+    end    
 end
 
 function calculate_W_screened(scf_data, occupied_orbital_coefficients)
@@ -312,6 +291,7 @@ function copy_screened_density_to_array(scf_data)
 end
 
 function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
+    Shared.Timing.other_timings["coulomb_intermediate-$(scf_data.scf_iteration)"] = @elapsed begin
     BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
     sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
 
@@ -333,6 +313,8 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
      view(scf_data.density_array, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count),
       1.0, scf_data.coulomb_intermediate)
     
+    end # timing
+    Shared.Timing.other_timings["coulomb-$(scf_data.scf_iteration)"] = @elapsed begin
     # do symm J 
     scf_data.J .= 0.0
     for pp in 1:(p-1) #todo use call_gemv to remove view usage?
@@ -348,10 +330,8 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
         scf_data.coulomb_intermediate,
         1.0, view(scf_data.J, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count))
 
-    # println("J")
-    # display(scf_data.J)
     copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
-   
+    end #timing
 end
 
 function copy_screened_coulomb_to_fock!(scf_data, J, fock)
@@ -454,13 +434,16 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     n_threads = min(n_threads, length(scf_data.screening_data.blocks_to_calculate))
     
     blas_threads = BLAS.get_num_threads()
-    BLAS.set_num_threads(1)
-    dynamic_index = n_threads + 1
-    dynamic_lock = Threads.ReentrantLock()
-    
+
+   
     exchange_blocks = scf_data.k_blocks
 
     K_linear_indices = LinearIndices(exchange_blocks)
+
+    if length(scf_data.screening_data.blocks_to_calculate) > 1
+        BLAS.set_num_threads(1)
+    end
+
 
     Threads.@sync for thread in 1:n_threads
         Threads.@spawn begin
@@ -469,23 +452,23 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
                 index = scf_data.screening_data.blocks_to_calculate[ii]
                 pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
-                    p_range = (pp-1)*K_block_width+1:pp*K_block_width
-                    p_start = (pp - 1) * K_block_width + 1
+                p_range = (pp-1)*K_block_width+1:pp*K_block_width
+                p_start = (pp - 1) * K_block_width + 1
 
-                    q_range = (qq-1)*K_block_width+1:qq*K_block_width
-                    q_start = (qq - 1) * K_block_width + 1
+                q_range = (qq-1)*K_block_width+1:qq*K_block_width
+                q_start = (qq - 1) * K_block_width + 1
 
-                    A_ptr = pointer(W, linear_indices[1, 1, p_start])
-                    B_ptr = pointer(W, linear_indices[1, 1, q_start])
-                    C_ptr = pointer(exchange_blocks, K_linear_indices[1, 1, thread])
+                A_ptr = pointer(W, linear_indices[1, 1, p_start])
+                B_ptr = pointer(W, linear_indices[1, 1, q_start])
+                C_ptr = pointer(exchange_blocks, K_linear_indices[1, 1, thread])
 
 
-                    call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
+                call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
 
-                    scf_data.two_electron_fock[p_range, q_range] .= view(exchange_blocks, :,:, thread)
-                    if pp != qq
-                        scf_data.two_electron_fock[q_range, p_range] .= transpose(view(exchange_blocks, :,:, thread)) 
-                    end
+                scf_data.two_electron_fock[p_range, q_range] .= view(exchange_blocks, :,:, thread)
+                if pp != qq
+                    scf_data.two_electron_fock[q_range, p_range] .= transpose(view(exchange_blocks, :,:, thread)) 
+                end
             end
         end
     end#sync
@@ -542,7 +525,8 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
     n_threads = Threads.nthreads()
     
     blas_threads = BLAS.get_num_threads()
-    BLAS.set_num_threads(1)
+
+    
     dynamic_index = n_threads + 1
     dynamic_lock = Threads.ReentrantLock()
     
@@ -550,6 +534,10 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
 
     K_linear_indices = LinearIndices(exchange_blocks)
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
+
+    if lower_triangle_length > 1
+        BLAS.set_num_threads(1)
+    end
 
     Threads.@sync for thread in 1:n_threads
         Threads.@spawn begin

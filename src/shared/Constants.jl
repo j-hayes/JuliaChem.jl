@@ -13,6 +13,7 @@ module SCF_Keywords
         const df_sigma = "df_sigma"
         const df_sigma_default = 1E-6
         const df_exchange_screen_mode = "df_exchange_screen"
+        const df_exchange_screen_mode_default = false
     end
 
     module Guess
@@ -33,10 +34,10 @@ module SCF_Keywords
         const density_default = 1E-3
 
         const max_iterations = "niter"
-        const max_iterations_default = 25
+        const max_iterations_default = 50
 
         const df_max_iterations = "df_niter"
-        const df_max_iterations_default = 25
+        const df_max_iterations_default = 50
     end
 
     module ContractionMode 

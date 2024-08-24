@@ -25,12 +25,13 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
+  Shared.Timing.other_timings["fock-$(scf_data.scf_iteration)"] = @elapsed begin
   
   if scf_options.contraction_mode == "dense"
-    @time df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+    df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   elseif scf_options.contraction_mode == "denseGPU"
-    @time df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options)
  
   elseif scf_options.contraction_mode == "TensorOperationsGPU"
@@ -41,27 +42,17 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
     error("not implemented")
   elseif scf_options.contraction_mode == "GPU" # screened symmetric algorithm
-    @time df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options)
   else # default contraction mode is now scf_options.contraction_mode == "screened"
-    @time df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   end
 
-  comm = MPI.COMM_WORLD
-  if MPI.Comm_size(comm) > 1
-    MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
+  if MPI.Comm_size(MPI.COMM_WORLD) > 1
+    MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, MPI.COMM_WORLD)
   end
-
-  if iteration == 1  && MPI.Comm_rank(comm) == 0
-    #write the two electron fock matrix to an hdf5 file 
-    h5open("fock_$(scf_options.contraction_mode)_$(MPI.Comm_size(comm))_ranks_reduced.h5", "w") do file
-      write(file, "fock", scf_data.two_electron_fock)
-    end
-  end
-
-
-  return
+  end #timing 
 end
 
 function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, basis_sets::CalculationBasisSets,
