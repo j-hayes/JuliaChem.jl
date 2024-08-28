@@ -589,10 +589,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       W[i,j] += 2.0 * F_eval[iocc] * C[i, iocc] * C[j, iocc]
     end
   end
-
-  if scf_options.contraction_mode == "GPU" 
-    free_gpu_memory(scf_data)
-  end
   return E, scf_converged
 end
 

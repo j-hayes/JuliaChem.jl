@@ -29,9 +29,9 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   if scf_options.contraction_mode == "dense"
     @time df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
-  elseif scf_options.contraction_mode == "denseGPU"
-    @time df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options)
+  # elseif scf_options.contraction_mode == "denseGPU" todo remove 
+  #   @time df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+  #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
  
   elseif scf_options.contraction_mode == "TensorOperationsGPU"
     df_rhf_fock_build_TensorOperations_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,

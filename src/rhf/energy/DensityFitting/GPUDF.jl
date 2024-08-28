@@ -11,7 +11,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine,T2<:RHFTEIEngine}
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
-    comm_size = MPI.Comm_size(comm)
+    n_ranks = MPI.Comm_size(comm)
     pq = scf_data.μ^2
 
     p = scf_data.μ
@@ -19,24 +19,45 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
     devices = CUDA.devices()
     num_devices = length(devices)
-    num_devices_global = num_devices*comm_size  
+    num_devices_global = num_devices*n_ranks  
     scf_data.gpu_data.number_of_devices_used = num_devices
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2,1))
 
     three_center_integrals = Array{Array{Float64}}(undef, num_devices)
     if iteration == 1
+        scf_options.df_screening_sigma = 0.0
         two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         get_screening_metadata!(scf_data,
          scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
         
+        three_center_integrals_all = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
 
-        load = scf_options.load
-        scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
+        # load = scf_options.load
+        # scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
+        # for device_id in 1:num_devices
+        #     global_device_id = device_id + (rank)*num_devices
+        #     three_center_integrals[device_id] = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data, global_device_id-1,num_devices_global)
+        # end
+        # scf_options.load = load
+
+        device_Q_indices, 
+        device_rank_Q_indices, 
+        device_Q_range_lengths, 
+        max_device_Q_range_length  = calculate_device_ranges_GPU(scf_data, num_devices, n_ranks, basis_sets)
+
+        scf_data.gpu_data.device_Q_range_lengths = device_Q_range_lengths
+        scf_data.gpu_data.device_Q_indices = device_Q_indices
+
+
+
+        three_center_integrals = Array{Array{Float64}}(undef, num_devices)
+
         for device_id in 1:num_devices
             global_device_id = device_id + (rank)*num_devices
-            three_center_integrals[device_id] = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data, global_device_id-1,num_devices_global)
+            three_center_integrals[device_id] = permutedims(three_center_integrals_all[:,:,device_Q_indices[global_device_id]], (3,1,2))
+            three_center_integrals[device_id] = reshape(three_center_integrals[device_id], (device_Q_range_lengths[global_device_id], pq))
         end
-        scf_options.load = load
+
 
         calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets)
        
@@ -59,13 +80,9 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         scf_data.gpu_data.host_fock = Array{Array{Float64,2}}(undef, num_devices)
         scf_data.density = zeros(Float64, (scf_data.μ,scf_data.μ ))
 
-        #println("calculating exchange block screen matrix");flush(stdout)
         calculate_exchange_block_screen_matrix(scf_data, scf_options)
         for device_id in 1:num_devices
             CUDA.device!(device_id-1)
-            
-            #println("creating data for fock for device $device_id");flush(stdout)
-
             global_device_id = device_id + (rank)*num_devices
             Q = scf_data.gpu_data.device_Q_range_lengths[global_device_id]
             scf_data.gpu_data.device_fock[device_id] = CUDA.zeros(Float64,(scf_data.μ, scf_data.μ))
@@ -99,8 +116,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     Threads.@sync for device_id in 1:num_devices
         Threads.@spawn begin
             CUDA.device!(device_id-1)
-            #println("stariting fock build for device $device_id");flush(stdout)
-
             global_device_id = device_id + (rank)*num_devices
             Q_length = scf_data.gpu_data.device_Q_range_lengths[global_device_id]
 
@@ -283,8 +298,6 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
     scf_data.gpu_data.device_Q_range_lengths = device_Q_range_lengths
     scf_data.gpu_data.device_Q_indices = device_Q_indices
 
-
-
     device_id_offset = rank * num_devices
     Threads.@sync for setup_device_id in 1:num_devices
         Threads.@spawn begin
@@ -308,7 +321,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             device_B[setup_device_id] = CUDA.zeros(Float64, (device_Q_range_lengths[global_device_id], pq))
             device_B_send_buffers[setup_device_id] = CUDA.zeros(Float64, (max_device_Q_range_length * pq))
             host_B_send_buffers[setup_device_id] = zeros(Float64, (max_device_Q_range_length * pq))
-
+            CUDA.synchronize()
         end #spawn
     end
     
@@ -318,23 +331,24 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
     # CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
     
     for global_recieve_device_id in 1:num_devices_global
-        #println("starting device $global_recieve_device_id");flush(stdout)
         rec_device_Q_range_length = device_Q_range_lengths[global_recieve_device_id]
         recieve_rank = (global_recieve_device_id-1) ÷ num_devices
         rank_recieve_device_id = ((global_recieve_device_id-1) % num_devices) + 1 # one indexed device id for the rank 
         array_size = rec_device_Q_range_length*pq
         Threads.@sync for r_send_device_id in 1:num_devices
             Threads.@spawn begin
-                CUDA.device!(r_send_device_id-1) do 
+                CUDA.device!(r_send_device_id-1) 
                     global_send_device_id = r_send_device_id + device_id_offset 
                     send_device_Q_range_length = device_Q_range_lengths[global_send_device_id]
                     J_AB_invt_for_device = two_center_integrals[device_Q_indices[global_recieve_device_id],device_Q_indices[global_send_device_id]]
                     device_J_AB_inv_count = send_device_Q_range_length*rec_device_Q_range_length # total number of elements in the J_AB_invt matrix for the device
                     CUDA.copyto!(device_J_AB_invt[r_send_device_id],1,J_AB_invt_for_device,1,device_J_AB_inv_count) #copy the needed J_AB_invt data to the device 
-    
+
                     J_AB_INV_view = reshape(
                         view(device_J_AB_invt[r_send_device_id],
                         1:device_J_AB_inv_count), (rec_device_Q_range_length,send_device_Q_range_length))
+
+
                     if global_send_device_id == global_recieve_device_id
                         CUBLAS.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id], 1.0, device_B[rank_recieve_device_id])
                     else
@@ -342,7 +356,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                         CUBLAS.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id],
                             0.0, reshape(send_B_view, (rec_device_Q_range_length, pq)))
                     end
-                end
+                    CUDA.synchronize()
 
             end #spawn
         end #sync for 
@@ -367,7 +381,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                 send_unique_tag = send_rank*100000 + recieve_rank*10000 + global_send_device_id*1000 + global_recieve_device_id*100
                 if send_rank == recieve_rank # devices belong to the same rank 
                     CUDA.device!(rank_recieve_device_id-1) do 
-                        CUDA.copyto!(device_B_send_buffers[rank_recieve_device_id],
+                    CUDA.copyto!(device_B_send_buffers[rank_recieve_device_id],
                          1, host_B_send_buffers[rank_send_device_id], 1, array_size)
                     end
                     
@@ -392,8 +406,6 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             end
         end
     end
-    MPI.Barrier(COMM) #sync all ranks 
-    return
 end
 
 
@@ -410,6 +422,8 @@ end
 # ranges[16] = 61:63
 # Currently we assume easch rank has the same number of devices
 # A GPU device behaves as though it were a CPU rank in non-GPU mode
+# uses the indicies as they are calculated by the static_load_rank_indicies_3_eri function
+# which is used for the 3-eri load balancing to ranks and devices
 function calculate_device_ranges_GPU(scf_data, num_devices, n_ranks, basis_sets)
 
     load_balance_indicies = []
@@ -443,20 +457,3 @@ function calculate_device_ranges_GPU(scf_data, num_devices, n_ranks, basis_sets)
 end
 
 
-function free_gpu_memory(scf_data::SCFData)
-    # for device_id in 1:scf_data.gpu_data.number_of_devices_used
-    #     CUDA.device!(device_id-1)
-    #     CUDA.unsafe_free!(scf_data.gpu_data.device_B[device_id])
-    #     CUDA.unsafe_free!(scf_data.gpu_data.device_fock[device_id])
-    #     CUDA.unsafe_free!(scf_data.gpu_data.device_coulomb_intermediate[device_id])
-    #     CUDA.unsafe_free!(scf_data.gpu_data.device_exchange_intermediate[device_id])
-    #     CUDA.unsafe_free!(scf_data.gpu_data.device_occupied_orbital_coefficients[device_id])
-    #     CUDA.unsafe_free!(scf_data.gpu_data.device_density[device_id])
-    # end
-
-    # GC.gc(true) #force cleanup of the GPU data
-    # for device_id in 1:scf_data.gpu_data.number_of_devices_used
-    #     CUDA.device!(device_id-1)
-    #     CUDA.reclaim()
-    # end
-end
