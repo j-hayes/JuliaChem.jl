@@ -117,10 +117,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
 
             calculate_W_screened_GPU(device_id, scf_data)
-            # CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q_length, p)), reshape(W, (n_ooc * Q_length, p)), 0.0, fock)
-            # CUDA.copyto!(host_fock, fock)
-
-            CUDA.fill!(fock, 0.0)
             calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options)         
 
             CUDA.synchronize()
@@ -215,7 +211,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         CUBLAS.gemm!(transA, transB, alpha, A, B, beta, C)
    
         #should probably copy the block to the host and then add it to the fock matrix on the host to avoid non-contig memory access on gpu
-        fock[p_range, q_range] .+= exchange_block   
+        fock[p_range, q_range] .= exchange_block   
         index += 1
 
     end
@@ -237,7 +233,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
     
         CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square)
     
-        fock[:, q_nonsquare_range] .+= C_non_square 
+        fock[:, q_nonsquare_range] .= C_non_square 
     
     end
     # CUDA.synchronize()

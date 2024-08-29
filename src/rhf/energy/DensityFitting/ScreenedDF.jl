@@ -97,27 +97,10 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
 
         calculate_exchange_block_screen_matrix(scf_data, scf_options)
-     
-        h5open("B_$(n_ranks)_ranks_cpu_rank_$(rank).h5", "w") do file
-            write(file, "device_B", scf_data.D)
-        end
     end
 
-
-
-
-    println("calculate_exchange_screened!")
-
-    @time calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    println("calculate_coulomb_screened")
-    @time calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
-    if iteration > 1
-        return 
-    end
-    #write the fock matrix to the hdf5 file
-    h5open("fock_cpu_$(rank).h5", "w") do file
-        write(file, "fock", scf_data.two_electron_fock)
-    end
+    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
+    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
@@ -141,10 +124,6 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
     this_rank_B_Q_index_range = load_balance_indicies[this_rank+1][2]
     
     this_rank_Q_length = length(this_rank_B_Q_index_range)
-
-    println("rank: $this_rank this_rank_B_Q_index_range = $this_rank_B_Q_index_range")
-
-
 
     max_rank_n_aux_indicies = 0
     for rank_index in 0:n_ranks-1
@@ -179,12 +158,6 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
             reduce_B_other_rank(B_temp, recieve_rank)                
         end
     end
-
-    #write the B matrix to the hdf5 file
-    h5open("s22_3_B_$(n_ranks)_ranks_cpu_rank_$(this_rank).h5", "w") do file
-        write(file, "device_B", scf_data.D)
-    end
-
 end
 
 function reduce_B_this_rank(B, rank)
@@ -223,13 +196,13 @@ function reduce_B_other_rank(B, rank)
 end
 
 function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    @time calculate_W_screened(scf_data, occupied_orbital_coefficients)
+    calculate_W_screened(scf_data, occupied_orbital_coefficients)
    
     Shared.Timing.other_timings["K_block-$(scf_data.scf_iteration)"] = @elapsed begin
         if scf_options.df_screen_exchange
-            @time calculate_K_lower_diagonal_block(scf_data, scf_options)
+            calculate_K_lower_diagonal_block(scf_data, scf_options)
         else
-            @time calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
+            calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
         end
     end
     
@@ -348,10 +321,7 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
         scf_data.coulomb_intermediate,
         1.0, view(scf_data.J, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count))
 
-    # println("J")
-    # display(scf_data.J)
     copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
-   
 end
 
 function copy_screened_coulomb_to_fock!(scf_data, J, fock)
