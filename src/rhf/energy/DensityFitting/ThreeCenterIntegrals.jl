@@ -34,7 +34,6 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
     max_aux_nbas = max_number_of_basis_functions(basis_sets.auxillary)
     thead_integral_buffer = [zeros(Float64, max_primary_nbas^2 * max_aux_nbas) for thread in 1:n_threads]
     if scf_options.load == "screened"
-        println("doing screened integrals")
         three_center_integrals = calculate_three_center_integrals_screened!(rank, n_ranks, 
             jeri_engine_thread, basis_sets, thead_integral_buffer, 
             scf_data.screening_data.screened_indices_count,

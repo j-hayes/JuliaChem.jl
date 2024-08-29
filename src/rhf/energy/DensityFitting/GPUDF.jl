@@ -188,9 +188,6 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
     Q = Q_length #device Q length
     K_block_width = scf_data.screening_data.K_block_width
 
-    
-
-
     transA = 'T'
     transB = 'N'
     alpha = -1.0
