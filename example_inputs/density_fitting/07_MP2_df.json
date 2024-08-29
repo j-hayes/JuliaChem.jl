@@ -47,7 +47,7 @@
       "scf_type":"df",
       "guess":"hcore",
       "load": "static",
-      "contraction_mode": "screened"
+      "contraction_mode": "GPU"
 },
     "prop":{
       "mo energies":true,

@@ -11,21 +11,22 @@
   "driver": "energy",
   "model": {   
     "method": "RHF",
-    "basis": "STO-3G",
-    "auxiliary_basis": "def2-universal-JKFIT"
+    "basis": "6-31G",
+    "auxiliary_basis": "cc-pVDZ-JKFIT"
   },
   "keywords": {
     "scf":{
       "scf_type":"df",
       "guess":"hcore", 
       "load":"static",
-      "contraction_mode":"dense",
+      "contraction_mode":"GPU",
       "dele":1E-6,
       "rmsd":1E-6,
       "df_dele":1E-6,
       "df_rmsd":1E-6,
       "niter":50,
-      "df_niter":50
+      "df_niter":50,
+      "df_exchange_screen":false
     },
     "prop":{
       "mo energies":true,

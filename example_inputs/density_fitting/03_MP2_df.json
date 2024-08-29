@@ -27,10 +27,10 @@
       "guess":"hcore",
       "contraction_mode":"GPU",
       "load": "static",
-      "dele":1E-3,
-      "rmsd":1E-3,
-      "df_dele":1E-3,
-      "df_rmsd":1E-3
+      "dele":1E-6,
+      "rmsd":1E-6,
+      "df_dele":1E-6,
+      "df_rmsd":1E-6
     },
     "prop":{
       "mo energies":true,

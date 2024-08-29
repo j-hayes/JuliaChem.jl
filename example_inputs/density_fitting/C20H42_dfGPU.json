@@ -14,7 +14,7 @@
     "scf": {
       "guess": "hcore",
       "scf_type": "df",
-      "contraction_mode": "dense",
+      "contraction_mode": "GPU",
       "load": "static",
       "dele": 1e-6,
       "rmsd": 1e-6,
