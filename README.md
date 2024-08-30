@@ -13,7 +13,7 @@ If you are simply interested in using JuliaChem.jl for your calculations, you
 can build JuliaChem.jl as follows:
 
 ```julia
-Pkg.add(PackageSpec(url="https://github.com/davpoolechem/JuliaChem.jl.git"))
+]add JuliaChem
 ```
 
 This will download the JuliaChem.jl package to your computer and build the Libint/JuliaChem.jl interface.
@@ -23,6 +23,13 @@ JuliaChem.jl in any script you wish simply by importing the JuliaChem.jl module:
 ```julia
 using JuliaChem
 ```
+
+### Common Installation Error:
+
+```No such file or directory  #include <julia.h>```
+
+If you see this error when adding the package, make sure that your Julia bin directory is added to the $PATH variable on your machine.
+
 
 # Building JuliaChem (for Developers)
 If you are interested in actively developing JuliaChem.jl, you will want to build and 
@@ -64,3 +71,4 @@ julia make_user.jl
 ```
 
 in the shell.
+

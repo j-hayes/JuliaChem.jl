@@ -1,6 +1,8 @@
 module JuliaChem
 
+
 Base.include(@__MODULE__,"../deps/src/jeri.jl")
+Base.include(@__MODULE__,"shared/Shared.jl")
 Base.include(@__MODULE__, "modules/JCModules.jl")
 
 Base.include(@__MODULE__, "basis/JCBasis.jl")
