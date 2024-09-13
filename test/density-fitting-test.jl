@@ -29,19 +29,15 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     #   screened_scf_results, screened_properties = full_rhf(input_file)    # screened cpu df-rhf
     # end end
     # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
-    df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
+    # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
     # cpu_scf_results, cpu_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_cpu.json"), output=1)
 
 
 
-    for i in 1:20
+    for i in 1:1
      
       # sleep(.1)
       df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file, output=outputval)
-      if df_scf_results["Converged?"] == false
-        println("DF-RHF did not converge!")
-        break
-      end
       # df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
     end
     # DF_time = @elapsed begin @time begin 

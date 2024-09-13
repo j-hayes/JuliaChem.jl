@@ -64,25 +64,56 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   return
 end
 
+function allocate_memory_density_fitting_dense(scf_data, indicies)
+  AA = length(indicies)
+  μμ = scf_data.μ
+  ii = scf_data.occ
+  scf_data.D = zeros(Float64, (μμ, μμ, AA))
+  scf_data.D_tilde = zeros(Float64, (μμ, AA,ii))
+  scf_data.coulomb_intermediate = zeros(Float64, AA)
+  scf_data.two_electron_fock = zeros(Float64, (μμ, μμ))
+  scf_data.density = zeros(Float64, (μμ, μμ))
+
+  return
+end
+
 function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, basis_sets::CalculationBasisSets,
     occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
   if iteration == 1
+    allocate_memory_density_fitting_dense(scf_data, indicies)
     two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
     calculate_D!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
   end  
-  calculate_coulomb!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
   calculate_exchange!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
+
+
+
   
-  # print the scf_data.two_electron_fock matrix in a square scientific notation with 8 decimals
-  # for i in 1:scf_data.μ
-  #   for j in 1:scf_data.μ
-  #       print(@sprintf("%.8e ", scf_data.two_electron_fock[i,j]))
-  #   end
-  #   println()
-  # end
+  if iteration == 1 && MPI.Comm_rank(comm) == 0
+  #write scf_data.D to hdf5 file
+    h5open("./testoutputs/D_.h5", "w") do file
+      write(file, "D", scf_data.D)
+    end
+
+    #write the exchange intermediate 
+    h5open("./testoutputs/exchange_inter_.h5", "w") do file
+      write(file, "exchange", scf_data.D_tilde)
+    end
+
+    #write the two electron fock matrix to an hdf5 file
+    h5open("./testoutputs/fock_.h5", "w") do file
+      write(file, "fock", scf_data.two_electron_fock)
+    end
+
+  end
+
+  calculate_coulomb!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
+
+
+
 end
 
 
@@ -96,6 +127,8 @@ function calculate_D!(scf_data, two_center_integrals, three_center_integrals, ba
   if MPI.Comm_size(MPI.COMM_WORLD) > 1
     two_center_integrals = two_center_integrals[:,indicies]
   end
+
+  scf_data.D = zeros(size(three_center_integrals))
   
   BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), two_center_integrals, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
  
@@ -107,7 +140,7 @@ function calculate_coulomb!(scf_data, occupied_orbital_coefficients,  basis_sets
   
 
   BLAS.gemv!('T', 1.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), reshape(scf_data.density, scf_data.μ*scf_data.μ), 0.0, scf_data.coulomb_intermediate)
-  BLAS.gemv!('N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), scf_data.coulomb_intermediate , 0.0, reshape(scf_data.two_electron_fock, scf_data.μ^2))
+  BLAS.gemv!('N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), scf_data.coulomb_intermediate , 1.0, reshape(scf_data.two_electron_fock, scf_data.μ^2))
 
 end
 
@@ -116,5 +149,5 @@ function calculate_exchange!(scf_data, occupied_orbital_coefficients,  basis_set
   μμ = scf_data.μ
   ii = scf_data.occ
   BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
-  BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 1.0, scf_data.two_electron_fock)
+  BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 0.0, scf_data.two_electron_fock)
 end

@@ -227,8 +227,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
     exchange_block = scf_data.gpu_data.device_K_block[device_id]
 
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)#should only be done on first iteration 
-    index = 1
-    while index <= lower_triangle_length #next step cuda streams to make use of more parallelism on the GPU device
+    for index in 1:lower_triangle_length #next step cuda streams to make use of more parallelism on the GPU device
         pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
         p_range = (pp-1)*K_block_width+1:pp*K_block_width
@@ -243,7 +242,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
    
         #should probably copy the block to the host and then add it to the fock matrix on the host to avoid non-contig memory access on gpu
         fock[p_range, q_range] .= exchange_block   
-        index += 1
+        # index += 1
 
     end
 
@@ -267,7 +266,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         fock[:, q_nonsquare_range] .= C_non_square 
     
     end
-    CUDA.synchronize()
+    CUDA.device_synchronize()
     CUDA.copyto!(host_fock, fock)
 end
 

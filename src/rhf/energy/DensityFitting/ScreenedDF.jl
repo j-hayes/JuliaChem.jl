@@ -337,6 +337,11 @@ function copy_screened_coulomb_to_fock!(scf_data, J, fock)
     end
 end
 
+
+function get_triangle_matrix_length(n)::Int
+    return n * (n + 1) ÷ 2
+end
+
 function calculate_exchange_block_screen_matrix(scf_data, scf_options)
     n_threads = Threads.nthreads()  
     if scf_data.μ < 100 #if the # of basis functions is small just do a dense calculation with one block
