@@ -69,7 +69,7 @@ function create_scf_options(scf_flags)
         scf_flags[Screening.df_sigma] : Screening.df_sigma_default
 
     df_screen_exchange::Bool = haskey(scf_flags, Screening.df_exchange_screen_mode) ? 
-        scf_flags[Screening.df_exchange_screen_mode] : true
+        scf_flags[Screening.df_exchange_screen_mode] : Screening.df_exchange_screen_mode_default
 
     df_niter = 0
     if do_density_fitting 

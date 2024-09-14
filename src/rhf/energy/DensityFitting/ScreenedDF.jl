@@ -26,8 +26,10 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
     scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
     scf_data.screening_data.screened_indices_count = sum(basis_function_screen_matrix)
     scf_data.screening_data.sparse_p_start_indices = zeros(Int64, scf_data.μ)
+    scf_data.screening_data.non_zero_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
+    scf_data.screening_data.non_zero_sparse_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
 
-    Threads.@threads for pp in 1:scf_data.μ
+    for pp in 1:scf_data.μ
         first_index = 1
         while scf_data.screening_data.sparse_p_start_indices[pp] == 0
             if scf_data.screening_data.basis_function_screen_matrix[first_index, pp] != 0
@@ -41,13 +43,32 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
         scf_data.screening_data.non_zero_coefficients[pp] = zeros(scf_data.occ, scf_data.screening_data.non_screened_p_indices_count[pp])
 
 
+        scf_data.screening_data.non_zero_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
+        scf_data.screening_data.non_zero_sparse_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
+
+        start_index = 0
+        end_index = 0
+        non_zero_index = 1
+        for r in 1:scf_data.μ
+            if scf_data.screening_data.basis_function_screen_matrix[r, pp]
+                if start_index == 0 
+                    start_index = r 
+                end
+                end_index = r
+            end
+            if start_index != 0 && (!scf_data.screening_data.basis_function_screen_matrix[r, pp] || r == scf_data.μ) 
+                push!(scf_data.screening_data.non_zero_ranges[pp], start_index:end_index)
+                range_length = end_index - start_index + 1
+                push!(scf_data.screening_data.non_zero_sparse_ranges[pp], non_zero_index:(non_zero_index + range_length - 1))
+                non_zero_index += range_length 
+                
+                start_index = 0
+                end_index = 0
+            end
+        end
     end
 end
 
-
-function get_triangle_matrix_length(n)::Int
-    return n * (n + 1) ÷ 2
-end
 
 function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
@@ -59,23 +80,22 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
 
     if iteration == 1
-        @time two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        @time get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+        two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+        get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
 
-        @time begin
-            LAPACK.potrf!('L', two_center_integrals)
-            LAPACK.trtri!('L', 'N', two_center_integrals)
-            J_AB_invt = two_center_integrals
-        end
+        
+        LAPACK.potrf!('L', two_center_integrals)
+        LAPACK.trtri!('L', 'N', two_center_integrals)
+        J_AB_invt = two_center_integrals
+        
         if MPI.Comm_size(MPI.COMM_WORLD) > 1 #todo update this to reduce communication?
-            @time calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options)
+            calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options)
         else
             load = scf_options.load
             scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
-            @time scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+            scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
             scf_options.load = load
-            println("B")
-            @time BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
+            BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
             scf_options.load = load #todo remove this and just pass the load param
         end
         # deallocate unneeded memory
