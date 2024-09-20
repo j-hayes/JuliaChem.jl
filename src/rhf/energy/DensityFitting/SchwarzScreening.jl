@@ -46,7 +46,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
                 shell_pair_contracted = sum(eri_quartet_batch_thread[thread])
 
 
-                shell_screen_matrix[ish, jsh] = !(Base.abs_float(shell_pair_contracted) < threshold)
+                shell_screen_matrix[ish, jsh] = !(Base.abs_float(shell_pair_contracted) <= threshold)
                 shell_screen_matrix[jsh, ish] = shell_screen_matrix[ish, jsh]
 
                 if shell_screen_matrix[ish, jsh] == false # if the shell pair is screened, then screen all the basis function pairs
@@ -79,6 +79,10 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
             end
         end
     end
+
+    println("schwarz screening threshold = ", threshold)
+    println("number of unscreened shell pairs = ", sum(shell_screen_matrix))
+
     return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 
