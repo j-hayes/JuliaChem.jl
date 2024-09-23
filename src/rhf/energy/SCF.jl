@@ -469,8 +469,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
       MPI.Bcast!(C, 0, comm)
         fock_build_start_time =  time()
-        df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options)
-        F .= H .+ scf_data.two_electron_fock
+        df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options, H)
+        F = scf_data.two_electron_fock
         fock_build_end_time = time()
         timings.fock_build_times["$iter"] = fock_build_end_time - fock_build_start_time
     end

@@ -23,29 +23,24 @@ indices for all tensor contractions
 
 function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread ::Vector{T2},
   basis_sets::CalculationBasisSets,
-  occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
+  occupied_orbital_coefficients, iteration, scf_options::SCFOptions, H::Array{Float64}) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
   
   if scf_options.contraction_mode == "dense"
     df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
-  # elseif scf_options.contraction_mode == "denseGPU" todo remove 
-  #   @time df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-  #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
- 
-  elseif scf_options.contraction_mode == "TensorOperationsGPU"
-    df_rhf_fock_build_TensorOperations_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options)  
-  elseif scf_options.contraction_mode == "TensorOperations"
-    # df_rhf_fock_build_TensorOperations!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
-    error("not implemented")
+
+
   elseif scf_options.contraction_mode == "GPU" # screened symmetric algorithm
     df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options)
+    basis_sets, occupied_orbital_coefficients, iteration, scf_options, H)
   else # default contraction mode is now scf_options.contraction_mode == "screened"
     df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
+  end
+
+  if scf_options.contraction_mode != "GPU" && MPI.Comm_rank(comm) == 0
+      two_electron_fock .+= H 
   end
 
   comm = MPI.COMM_WORLD
