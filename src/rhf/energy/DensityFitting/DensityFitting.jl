@@ -27,7 +27,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
 
   
   if scf_options.contraction_mode == "dense"
-    @time df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+    df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   # elseif scf_options.contraction_mode == "denseGPU" todo remove 
   #   @time df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
@@ -41,10 +41,10 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     #   basis_sets, occupied_orbital_coefficients, iteration, scf_options)
     error("not implemented")
   elseif scf_options.contraction_mode == "GPU" # screened symmetric algorithm
-    @time df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options)
   else # default contraction mode is now scf_options.contraction_mode == "screened"
-    @time df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   end
 
