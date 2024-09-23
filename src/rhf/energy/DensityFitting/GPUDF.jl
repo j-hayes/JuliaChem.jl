@@ -126,7 +126,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
             calculate_J_screened_symmetric_GPU(density, host_J, J, V, B, scf_data)
             calculate_W_screened_GPU(device_id, scf_data)
-            calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options)     
+            calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options) 
+                
         end        
     end
     
@@ -151,9 +152,10 @@ end
 
 function calculate_J_screened_GPU(device_density::CuArray, 
     host_J::Array{Float64,1}, J::CuArray, V::CuArray, B::CuArray, scf_data::SCFData)
-    CUDA.copyto!(device_density, scf_data.density_array)
+
 
     CUBLAS.gemv!('N', 1.0, B, device_density, 0.0, V)
+    CUDA.synchronize()
     CUBLAS.gemv!('T', 2.0, B, V, 0.0, J)
     CUDA.synchronize()
     CUDA.copyto!(host_J, J)
@@ -167,19 +169,24 @@ function calculate_J_screened_symmetric_GPU(device_density::CuArray,
     sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
     sparse_p_start_indices = scf_data.screening_data.sparse_p_start_indices
     CUDA.fill!(V, 0.0)
-    CUDA.fill!(J, 0.0)
+    CUDA.synchronize()
+
     last_index = scf_data.screening_data.screened_indices_count
     for pp in 1:(p-1)
         range_start = sparse_pq_index_map[pp, pp]
         range_end = sparse_p_start_indices[pp+1] -1
         CUBLAS.gemv!('N', 1.0, view(B, :, range_start:range_end), view(device_density,  range_start:range_end), 1.0, V) 
+        CUDA.synchronize()
     end
     CUBLAS.gemv!('N', 1.0, view(B, :, last_index:last_index),  view(device_density, last_index:last_index), 1.0, V)
-    
+    CUDA.fill!(J, 0.0)
+    CUDA.synchronize()
     for pp in 1:(p-1) 
         range_start = sparse_pq_index_map[pp, pp]
         range_end = sparse_p_start_indices[pp+1]-1
         CUBLAS.gemv!('T', 2.0, view(B, :, range_start:range_end), V, 1.0, view(J, range_start:range_end))
+        CUDA.synchronize()
+
     end
     CUBLAS.gemv!('T', 2.0, view(B, :, last_index:last_index), V, 1.0, view(J, last_index:last_index))
     CUDA.synchronize()
@@ -218,6 +225,13 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
     Q = Q_length #device Q length
     K_block_width = scf_data.screening_data.K_block_width
 
+
+    # CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (Q*n_ooc, p)), reshape(W, (Q*n_ooc, p)), 0.0, fock)
+    # CUDA.synchronize()
+    # CUDA.copyto!(host_fock, fock)
+
+    # return
+
     transA = 'T'
     transB = 'N'
     alpha = -1.0
@@ -242,32 +256,35 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         C = view(exchange_block, 1:M, 1:N)
 
         CUBLAS.gemm!(transA, transB, alpha, A, B, beta, C)
-   
+        CUDA.synchronize()
+
         #should probably copy the block to the host and then add it to the fock matrix on the host to avoid non-contig memory access on gpu
         fock[p_range, q_range] .= exchange_block   
         # index += 1
+        CUDA.synchronize()
 
     end
 
     
     if p % scf_options.df_exchange_block_width != 0 # square blocks cover the entire pq space
-        p_non_square_range = 1:p    
+        col_non_square_range = 1:p    
         #non square part that didn't fit in blocks
-        q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
+        row_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
         
-        M = p
-        N = length(q_nonsquare_range)
+        M = length(row_nonsquare_range)
+        N = p
         K = Q * n_ooc
         
 
-        A_non_square = reshape(view(W, :,:, p_non_square_range), (Q * n_ooc, p))
-        B_non_square = reshape(view(W, :,:, q_nonsquare_range), (Q * n_ooc, N))
-        C_non_square = reshape(view(exchange_block, 1:M*N), (M, N))
+        A_non_square = reshape(view(W, :,:, row_nonsquare_range), (Q * n_ooc, M))
+        B_non_square = reshape(view(W, :,:, col_non_square_range), (Q * n_ooc, N))
+        C_non_square = CUDA.zeros(Float64, (M, N))
+         #reshape(view(exchange_block, 1:M*N), (M, N))
     
         CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square)
-    
-        fock[:, q_nonsquare_range] .= C_non_square 
-    
+        CUDA.synchronize()
+
+        fock[row_nonsquare_range,:] .= C_non_square     
     end
     CUDA.synchronize()
     CUDA.copyto!(host_fock, fock)
@@ -324,6 +341,14 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
     
     LAPACK.potrf!('L', two_center_integrals)
     LAPACK.trtri!('L', 'N', two_center_integrals)
+
+    if n_ranks == 1 && num_devices == 1
+        CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)    
+        CUDA.synchronize()
+        CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
+        CUDA.synchronize() 
+        return
+    end
 
     # CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
     
@@ -391,6 +416,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                         MPI.Recv!(host_B_send_buffers[rank_recieve_device_id], send_rank, send_unique_tag, COMM)
                         CUDA.copyto!(device_B_send_buffers[rank_recieve_device_id],1,
                          host_B_send_buffers[rank_recieve_device_id],1, array_size)
+                         CUDA.synchronize()
                     end
                 end
                     
@@ -398,6 +424,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                     CUDA.device!(rank_recieve_device_id-1) do 
                         device_B_send_view = reshape(view(device_B_send_buffers[rank_recieve_device_id], 1:array_size), (rec_device_Q_range_length, pq))
                         CUDA.axpy!(1.0, device_B_send_view, device_B[rank_recieve_device_id])
+                        CUDA.synchronize()
                     end                
                 end
             end
