@@ -39,7 +39,7 @@ mutable struct SCFGPUData
     host_coulomb ::  Array{Array{Float64,1},1}
     host_fock ::  Array{Array{Float64,2},1}
     device_H :: CuArray{Float64} #only copied to rank 0 GPU 1 because it only needs to be added to one of the partial fock matricies 
-    sparse_pq_index_map :: Array{CuArray{Int},1}
+    sparse_pq_index_map :: Array{CuArray{Int,2},1}
     number_of_devices_used :: Int
     device_start_index
 end
@@ -69,7 +69,7 @@ end
 function SCFData()
     sd = ScreeningData([],[], [], [], [], [], [], [], [], [], falses(1,1), zeros(Int,0), Array{Tuple{Int, Int}}(undef,0),
     Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
-    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [],[], CuArray{Float64}(undef, 0), CuArray{Int}(undef, 0), 0, 0)
+    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [],[], CuArray{Float64}(undef, 0), [], 0, 0)
     return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0 ,0,0)
 end
 
