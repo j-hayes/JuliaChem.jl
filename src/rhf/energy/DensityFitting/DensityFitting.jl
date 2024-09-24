@@ -32,7 +32,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
 
 
   elseif scf_options.contraction_mode == "GPU" # screened symmetric algorithm
-    df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    @time df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options, H)
   else # default contraction mode is now scf_options.contraction_mode == "screened"
     df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
