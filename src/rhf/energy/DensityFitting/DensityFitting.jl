@@ -38,12 +38,12 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   end
+  comm = MPI.COMM_WORLD
 
   if scf_options.contraction_mode != "GPU" && MPI.Comm_rank(comm) == 0
-      two_electron_fock .+= H 
+    scf_data.two_electron_fock .+= H 
   end
 
-  comm = MPI.COMM_WORLD
   if MPI.Comm_size(comm) > 1
     MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   end  

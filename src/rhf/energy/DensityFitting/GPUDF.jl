@@ -172,7 +172,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
     Threads.@threads for device_id in 1:num_devices
         CUDA.device!(device_id-1)
-        CUDA.copyto!(host_fock, scf_data.gpu_data.device_fock[device_id])  
+        CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
     end
 
     scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
