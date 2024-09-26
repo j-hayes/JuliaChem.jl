@@ -93,7 +93,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             scf_data.gpu_data.sparse_pq_index_map[device_id] = CUDA.zeros(Int, (p, p))
             copyto!(scf_data.gpu_data.sparse_pq_index_map[device_id], scf_data.screening_data.sparse_pq_index_map)
 
-
             CUDA.synchronize()
         end
 
@@ -103,19 +102,20 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     
 
     
+    
+
     BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
     copy_screened_density_to_array(scf_data) 
-    Threads.@sync for pp in 1:p
-        Threads.@spawn begin
-            for range_index in 1:length(scf_data.screening_data.non_zero_ranges[pp])
-                nonzero_range = scf_data.screening_data.non_zero_ranges[pp][range_index]
-                nonzero_range_sparse = scf_data.screening_data.non_zero_sparse_ranges[pp][range_index]
-                scf_data.screening_data.non_zero_coefficients[:, nonzero_range_sparse, pp].= view(occupied_orbital_coefficients, :, nonzero_range)
-            end
-        end
-    end
 
-    @time Threads.@sync for device_id in 1:num_devices
+    
+
+    W_time = 0.0
+    J_time = 0.0
+    K_time = 0.0
+    H_time = 0.0
+    non_zero_coeff_time  = 0.0
+
+    total_fock_gpu_time = @elapsed Threads.@sync for device_id in 1:num_devices
         Threads.@spawn begin
             CUDA.device!(device_id-1)
             global_device_id = device_id + (rank)*num_devices
@@ -133,26 +133,34 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             
           
             lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)#should only be done on first iteration 
-
-            Threads.@sync begin 
-                
-                Threads.@async begin 
-                    CUDA.copyto!(scf_data.gpu_data.device_non_zero_coefficients[device_id], scf_data.screening_data.non_zero_coefficients)
+        
+            # Threads.@sync begin 
+            #     Threads.@async begin 
+                    CUDA.copyto!(scf_data.gpu_data.device_occupied_orbital_coefficients[device_id], occupied_orbital_coefficients)
                     CUDA.synchronize()
-                    calculate_W_screened_GPU(device_id, scf_data)
-                    calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options, lower_triangle_length) 
-                    if rank == 0 && device_id == 1
-                        CUDA.axpy!(1.0, scf_data.gpu_data.device_H, fock)
+
+                    # numblocks = ceil(Int, p/256)
+                    # threads = min(256, p)
+
+
+                    non_zero_coeff_time = @elapsed form_nozero_coefficient_matrix!(scf_data, device_id)
+
+                    W_time = @elapsed calculate_W_screened_GPU(device_id, scf_data)
+                    K_time = @elapsed calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options, lower_triangle_length) 
+                    H_time = @elapsed begin 
+                        if rank == 0 && device_id == 1
+                          CUDA.axpy!(1.0, scf_data.gpu_data.device_H, fock)
+                        end
                     end
-                end
-                Threads.@async begin 
+                # end
+                # Threads.@async begin 
                     CUDA.copyto!(density, scf_data.density_array)
                     CUDA.synchronize()
-                    calculate_J_screened_GPU(density, host_J, J, V, B, scf_data)
+                    J_time = @elapsed calculate_J_screened_GPU(density, host_J, J, V, B, scf_data)
                     # calculate_J_screened_symmetric_GPU(density, host_J, J, V, B, scf_data)
-                end
+                # end
 
-            end
+            # end
             CUDA.synchronize()
 
             numblocks = ceil(Int, p/256)
@@ -169,7 +177,9 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
         end        
     end
-
+    total_time = total_fock_gpu_time 
+    println("gpu timings: $(total_fock_gpu_time) W_time: $(W_time) J_time: $(J_time) K_time: $(K_time) H_time: $(H_time) non_zero_coeff_time: $(non_zero_coeff_time)")
+    println("total time: $(total_time)")
     Threads.@threads for device_id in 1:num_devices
         CUDA.device!(device_id-1)
         CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
@@ -178,6 +188,98 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
+    end
+end
+
+#todo make this a kernel and copy from ranges that are stored on the device to avoid CPU threading 
+function form_nozero_coefficient_matrix!(scf_data::SCFData, device_id :: Int64)
+    CUDA.device!(device_id-1)
+
+    p = scf_data.μ
+    n_ranges = 0
+    for pp in 1:p
+        n_ranges += length(scf_data.screening_data.non_zero_ranges[pp])
+    end
+
+    range_p = Array{Int64}(undef, n_ranges)
+    range_start = Array{Int64}(undef, n_ranges)
+    range_end = Array{Int64}(undef, n_ranges)
+    range_sparse_start = Array{Int64}(undef, n_ranges)
+    range_sparse_end = Array{Int64}(undef, n_ranges)
+
+    range_index = 1
+    for pp in 1:p 
+        for range in 1:length(scf_data.screening_data.non_zero_ranges[pp])
+            range_p[range_index] = pp
+            range_start[range_index] = scf_data.screening_data.non_zero_ranges[pp][range][1]
+            range_end[range_index] = scf_data.screening_data.non_zero_ranges[pp][range][end]
+            range_sparse_start[range_index] = scf_data.screening_data.non_zero_sparse_ranges[pp][range][1]
+            range_sparse_end[range_index] = scf_data.screening_data.non_zero_sparse_ranges[pp][range][end]
+            range_index += 1
+        end
+    end
+
+    device_range_p = CUDA.zeros(Int64, n_ranges)
+    device_range_start = CUDA.zeros(Int64, n_ranges)
+    device_range_end = CUDA.zeros(Int64, n_ranges)
+    device_range_sparse_start = CUDA.zeros(Int64, n_ranges)
+    device_range_sparse_end = CUDA.zeros(Int64, n_ranges)
+    
+    CUDA.copyto!(device_range_p, range_p)
+    CUDA.copyto!(device_range_start, range_start)
+    CUDA.copyto!(device_range_end, range_end)
+    CUDA.copyto!(device_range_sparse_start, range_sparse_start)
+    CUDA.copyto!(device_range_sparse_end, range_sparse_end)
+
+    numblocks = ceil(Int, n_ranges/256)
+    threads = min(256, n_ranges)
+
+    build_coeff_time = @elapsed begin
+        @cuda threads=threads blocks=numblocks build_non_zero_coefficients_kernel(scf_data.gpu_data.device_non_zero_coefficients[device_id], 
+            scf_data.gpu_data.device_occupied_orbital_coefficients[device_id], 
+            device_range_p, 
+            device_range_start, 
+            device_range_end,
+            device_range_sparse_start,
+            device_range_sparse_end,
+            n_ranges)
+        CUDA.synchronize()
+    end
+    println("build_coeff_time: $(build_coeff_time)")
+    
+
+    # Threads.@sync for pp in 1:p
+    #     Threads.@spawn begin
+    #         for range_index in 1:length(scf_data.screening_data.non_zero_ranges[pp])
+    #             nonzero_range = scf_data.screening_data.non_zero_ranges[pp][range_index]
+    #             nonzero_range_sparse = scf_data.screening_data.non_zero_sparse_ranges[pp][range_index]
+    #             scf_data.gpu_data.device_non_zero_coefficients[device_id][:, nonzero_range_sparse, pp] .= view(occupied_orbital_coefficients, :, nonzero_range)
+    #         end
+    #     end
+    # end
+end
+
+function build_non_zero_coefficients_kernel(non_zero_coefficients::CuDeviceArray{Float64}, 
+     occupied_orbital_coefficients::CuDeviceArray{Float64},
+        device_range_p::CuDeviceArray{Int64},
+        device_range_start::CuDeviceArray{Int64},
+        device_range_end::CuDeviceArray{Int64},
+        device_range_sparse_start::CuDeviceArray{Int64},
+        device_range_sparse_end::CuDeviceArray{Int64},
+        n_ranges::Int64)
+
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    stride = gridDim().x * blockDim().x
+    for i = index:stride:n_ranges
+        pp = device_range_p[i]
+        range_start = device_range_start[i]
+        range_end = device_range_end[i]
+        range_sparse_start = device_range_sparse_start[i]
+        # range_sparse_end = device_range_sparse_end[i]
+
+        for j in 0:range_end-range_start
+            non_zero_coefficients[:, range_sparse_start+j, pp] .= view(occupied_orbital_coefficients, :, range_start+j)
+        end
     end
 end
 
