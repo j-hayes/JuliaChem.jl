@@ -115,12 +115,9 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
         #save the basis function screen matrix to the shared timing object for debugging
         Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
-
         calculate_exchange_block_screen_matrix(scf_data, scf_options)
     end
-
     calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
@@ -133,8 +130,6 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
     three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
     scf_options.load = load
     
-  
-
     pq = size(three_center_integrals, 2)
 
     #divide the B_Q indicies that will go to each rank 
@@ -218,6 +213,14 @@ end
 function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
     calculate_W_screened(scf_data, occupied_orbital_coefficients)
    
+
+    p = scf_data.μ
+    n_occ = scf_data.occ
+    Q = scf_data.A
+
+    BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (Q*n_occ, p)), reshape(scf_data.D_tilde, (Q*n_occ, p)), 0.0, scf_data.two_electron_fock)
+    return
+    
     Shared.Timing.other_timings["K_block-$(scf_data.scf_iteration)"] = @elapsed begin
         if scf_options.df_screen_exchange
             calculate_K_lower_diagonal_block(scf_data, scf_options)

@@ -59,6 +59,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         scf_data.gpu_data.device_range_end = Array{CuArray{Int64,1}}(undef, num_devices)
         scf_data.gpu_data.device_range_sparse_start = Array{CuArray{Int64,1}}(undef, num_devices)
         scf_data.gpu_data.device_range_sparse_end = Array{CuArray{Int64,1}}(undef, num_devices)
+        scf_data.gpu_data.device_sparse_to_p = Array{CuArray{Int64,1}}(undef, num_devices)
+        scf_data.gpu_data.device_sparse_to_q = Array{CuArray{Int64,1}}(undef, num_devices)
 
         scf_data.gpu_data.sparse_pq_index_map = Array{CuArray{Int64,2}}(undef, num_devices)
         
@@ -98,14 +100,15 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             scf_data.gpu_data.device_fock[device_id] = CUDA.zeros(Float64,(scf_data.μ, scf_data.μ))
             scf_data.gpu_data.device_coulomb_intermediate[device_id] = CUDA.zeros(Float64,(Q))
 
-            scf_data.gpu_data.sparse_pq_index_map[device_id] = CUDA.zeros(Int, (p, p))
-            copyto!(scf_data.gpu_data.sparse_pq_index_map[device_id], scf_data.screening_data.sparse_pq_index_map)
-            CUDA.synchronize()
+           
 
-            setup_non_zero_coefficient_ranges_gpu!(scf_data, num_devices)
         end
-
+        gpu_screening_setup = @elapsed setup_gpu_screening_data!(scf_data, num_devices)
+        println("gpu screening setup time: $(gpu_screening_setup)")
     end
+
+  
+
 
     W_time = 0.0
     J_time = 0.0
@@ -128,59 +131,69 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             host_J = scf_data.gpu_data.host_coulomb[device_id]
             fock = scf_data.gpu_data.device_fock[device_id]
             host_fock = scf_data.gpu_data.host_fock[device_id]
-            
-          
+         
             lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)#should only be done on first iteration 
         
             Threads.@sync begin 
                 Threads.@async begin 
-                    CUDA.copyto!(scf_data.gpu_data.device_occupied_orbital_coefficients[device_id], occupied_orbital_coefficients)
+                    CUDA.copyto!(ooc, occupied_orbital_coefficients)
                     CUDA.synchronize()
                     non_zero_coeff_time = @elapsed form_nozero_coefficient_matrix!(scf_data, device_id)
 
                     W_time = @elapsed calculate_W_screened_GPU(device_id, scf_data)
                     K_time = @elapsed calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id, scf_data, scf_options, lower_triangle_length) 
+
                     H_time = @elapsed begin 
                         if rank == 0 && device_id == 1
                           CUDA.axpy!(1.0, scf_data.gpu_data.device_H, fock)
                         end
                     end
-                end
+                    CUDA.synchronize()
+
+                end # Threads.@async
                 Threads.@async begin 
                     density_time = @elapsed form_screened_density!(scf_data, device_id)
                     J_time = @elapsed calculate_J_screened_GPU(density, host_J, J, V, B, scf_data)
                     # calculate_J_screened_symmetric_GPU(density, host_J, J, V, B, scf_data)
-                end
+                    CUDA.synchronize()
+                end #Threads.@async
+            end #Threads.@sync
 
-            end
-            CUDA.synchronize()
-
-            numblocks = ceil(Int64, p/256)
-            threads = min(256, p)
+   
 
 
-            sparse_pq_map = scf_data.gpu_data.sparse_pq_index_map[device_id]
+            numblocks = ceil(Int64, scf_data.screening_data.screened_indices_count/256)
+            threads = min(256, scf_data.screening_data.screened_indices_count)
 
-            @cuda threads=threads blocks=numblocks copy_screened_J_to_fock(fock, J, sparse_pq_map)
+            device_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
+            device_sparse_to_q = scf_data.gpu_data.device_sparse_to_q[device_id]
+
+            @cuda threads=threads blocks=numblocks copy_screened_J_to_fock(fock, J, device_sparse_to_p, 
+                device_sparse_to_q, scf_data.screening_data.screened_indices_count)
             CUDA.synchronize()  
 
-            @cuda threads=threads blocks=numblocks copy_lower_to_upper_kernel(fock)
-            CUDA.synchronize()  
-
+            # @cuda threads=threads blocks=numblocks copy_lower_to_upper_kernel(fock)
+            # CUDA.synchronize()  
         end        
     end
+
+    
     total_time = total_fock_gpu_time 
     println("gpu timings: $(total_fock_gpu_time) W_time: $(W_time) J_time: $(J_time) K_time: $(K_time) H_time: $(H_time) non_zero_coeff_time: $(non_zero_coeff_time) density_time: $(density_time)")
     println("total time: $(total_time)")
     Threads.@threads for device_id in 1:num_devices
         CUDA.device!(device_id-1)
         CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
+        CUDA.synchronize()
     end
 
     scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
     for device_id in 2:num_devices
         axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
     end
+
+    # scf_data.two_electron_fock .+= H
+
 end
 
 #todo to remove branching I need a map from screened[1d index] to unscreened 2d[p,q] indices 
@@ -224,15 +237,26 @@ function form_screened_density!(scf_data::SCFData, device_id::Int64)
 
 end
 
-function setup_non_zero_coefficient_ranges_gpu!(scf_data::SCFData, num_devices::Int64)
+# todo this could be sped up a bit 
+# there is some parallelism that could be exploited here, and better yet merge this with the code in ScreenedDF.jl that forms the original ranges, 
+# the slowest bits have been sped up 
+# it is staying relatively constant scaling as the system size increases
+# if it becomes a problem, this can be revisisted 
+function setup_gpu_screening_data!(scf_data::SCFData, num_devices::Int64)
+    println("setup gpu screening")
     n_ranges = 0
     p = scf_data.μ
-
-    # there is some parallelism that could be exploited here, and better yet merge this with the code in ScreenedDF that forms the original ranges, not a priority yet
-    for pp in 1:p
-        n_ranges += length(scf_data.screening_data.non_zero_ranges[pp])
+    n_ranges_arr = zeros(Int64, p)
+    Threads.@threads for pp in 1:p
+        n_ranges_arr[pp] = length(scf_data.screening_data.non_zero_ranges[pp])
     end
+    n_ranges = sum(n_ranges_arr)
 
+    p_non_zero_ranges_start = zeros(Int64, p) #the nth range that corresponds to the first range for p 
+    p_non_zero_ranges_start[1] = 1
+    for pp in 2:p
+        p_non_zero_ranges_start[pp] = p_non_zero_ranges_start[pp-1] + n_ranges_arr[pp-1]
+    end
     scf_data.gpu_data.n_screened_occupied_orbital_ranges = n_ranges
 
     range_p = Array{Int64}(undef, n_ranges)
@@ -241,15 +265,19 @@ function setup_non_zero_coefficient_ranges_gpu!(scf_data::SCFData, num_devices::
     range_sparse_start = Array{Int64}(undef, n_ranges)
     range_sparse_end = Array{Int64}(undef, n_ranges)
 
+
+
+
     range_index = 1
-    for pp in 1:p 
-        for range in 1:length(scf_data.screening_data.non_zero_ranges[pp])
+    Threads.@threads for pp in 1:p 
+        pp_range_index = 1
+        for range_index in p_non_zero_ranges_start[pp]:p_non_zero_ranges_start[pp]+n_ranges_arr[pp]-1
             range_p[range_index] = pp
-            range_start[range_index] = scf_data.screening_data.non_zero_ranges[pp][range][1]
-            range_end[range_index] = scf_data.screening_data.non_zero_ranges[pp][range][end]
-            range_sparse_start[range_index] = scf_data.screening_data.non_zero_sparse_ranges[pp][range][1]
-            range_sparse_end[range_index] = scf_data.screening_data.non_zero_sparse_ranges[pp][range][end]
-            range_index += 1
+            range_start[range_index] = scf_data.screening_data.non_zero_ranges[pp][pp_range_index][1]
+            range_end[range_index] = scf_data.screening_data.non_zero_ranges[pp][pp_range_index][end]
+            range_sparse_start[range_index] = scf_data.screening_data.non_zero_sparse_ranges[pp][pp_range_index][1]
+            range_sparse_end[range_index] = scf_data.screening_data.non_zero_sparse_ranges[pp][pp_range_index][end]
+            pp_range_index += 1
         end
     end
     
@@ -261,16 +289,53 @@ function setup_non_zero_coefficient_ranges_gpu!(scf_data::SCFData, num_devices::
             scf_data.gpu_data.device_range_end[device_id] = CUDA.zeros(Int, n_ranges)
             scf_data.gpu_data.device_range_sparse_start[device_id] = CUDA.zeros(Int, n_ranges)
             scf_data.gpu_data.device_range_sparse_end[device_id] = CUDA.zeros(Int, n_ranges)    
+            scf_data.gpu_data.device_sparse_to_p[device_id] = CUDA.zeros(Int64, scf_data.screening_data.screened_indices_count)
+            scf_data.gpu_data.device_sparse_to_q[device_id] = CUDA.zeros(Int64, scf_data.screening_data.screened_indices_count)
             
+            scf_data.gpu_data.sparse_pq_index_map[device_id] = CUDA.zeros(Int, (p, p))
+
+            CUDA.copyto!(scf_data.gpu_data.sparse_pq_index_map[device_id], scf_data.screening_data.sparse_pq_index_map)
             CUDA.copyto!(scf_data.gpu_data.device_range_p[device_id], range_p)
             CUDA.copyto!(scf_data.gpu_data.device_range_start[device_id], range_start)
             CUDA.copyto!(scf_data.gpu_data.device_range_end[device_id], range_end)
             CUDA.copyto!(scf_data.gpu_data.device_range_sparse_start[device_id], range_sparse_start)
             CUDA.copyto!(scf_data.gpu_data.device_range_sparse_end[device_id], range_sparse_end)
-
             CUDA.synchronize() 
+
+
         end
     end
+
+    Threads.@sync for device_id in 1:num_devices
+        Threads.@spawn begin
+            CUDA.device!(device_id-1)
+            numblocks = ceil(Int64, n_ranges/256)
+            threads = min(256, n_ranges)
+
+            @cuda threads=threads blocks=numblocks create_sparse_to_p_q_kernel(scf_data.gpu_data.device_sparse_to_p[device_id],
+                scf_data.gpu_data.device_sparse_to_q[device_id], 
+                scf_data.gpu_data.sparse_pq_index_map[device_id], p)
+            CUDA.synchronize()
+        end 
+    end
+end
+
+function create_sparse_to_p_q_kernel(sparse_to_p::CuDeviceArray{Int64}, 
+    sparse_to_q::CuDeviceArray{Int64}, 
+    sparse_pq_index_map::CuDeviceArray{Int64},  p::Int64)
+    index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    stride = gridDim().x * blockDim().x
+
+    for pp in index:stride:p
+        for qq in 1:p
+            sparse_index = sparse_pq_index_map[pp, qq]
+            if sparse_index != 0
+                sparse_to_p[sparse_index] = pp
+                sparse_to_q[sparse_index] = qq
+            end
+        end
+    end
+
 end
 
 #todo make this a kernel and copy from ranges that are stored on the device to avoid CPU threading 
@@ -318,16 +383,17 @@ function build_non_zero_coefficients_kernel(non_zero_coefficients::CuDeviceArray
     end
 end
 
-function copy_screened_J_to_fock(fock::CuDeviceArray{Float64}, J::CuDeviceArray{Float64}, sparse_pq_index_map::CuDeviceArray{Int64})
+function copy_screened_J_to_fock(fock::CuDeviceArray{Float64}, J::CuDeviceArray{Float64},
+        device_sparse_to_p::CuDeviceArray{Int64}, device_sparse_to_q::CuDeviceArray{Int64}, n_sparse_indicies::Int64)
     
     index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
     
-    for i = index:stride:size(fock, 1)
-        for j = 1:size(fock, 2)
-            @inbounds fock[i, j] += J[sparse_pq_index_map[i, j]]
-        end
+    for i = index:stride:n_sparse_indicies
+        pp = device_sparse_to_p[i]
+        qq = device_sparse_to_q[i]
+        @inbounds fock[pp, qq] +=J[i]
     end
     return
 end
@@ -358,6 +424,7 @@ function calculate_J_screened_GPU(device_density::CuArray,
     CUBLAS.gemv!('N', 1.0, B, device_density, 0.0, V)
     CUDA.synchronize()
     CUBLAS.gemv!('T', 2.0, B, V, 0.0, J)
+    CUDA.synchronize()
     # CUDA.copyto!(host_J, J)
 end
 
@@ -417,7 +484,7 @@ function calculate_W_screened_GPU(device_id, scf_data::SCFData)
             end
         end 
     end
-    # CUDA.synchronize()
+    CUDA.synchronize()
 end
 
 function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64,2},
@@ -433,7 +500,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
 
 
     CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (Q*n_ooc, p)), reshape(W, (Q*n_ooc, p)), 0.0, fock)
-    # CUDA.synchronize()
+    CUDA.synchronize()
     # CUDA.copyto!(host_fock, fock)
 
     return
@@ -487,8 +554,8 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         
                 A_non_square = reshape(view(W, :,:, row_nonsquare_range), (Q * n_ooc, M))
                 B_non_square = reshape(view(W, :,:, col_non_square_range), (Q * n_ooc, N))
-                C_non_square = CUDA.zeros(Float64, (M, N)) #todo make this its own data in scf_data?
-                #reshape(view(exchange_block, 1:M*N), (M, N))
+                C_non_square =  reshape(view(exchange_block, 1:M*N), (M, N)) #CUDA.zeros(Float64, (M, N)) #todo make this its own data in scf_data?
+               
             
                 CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square)
                 CUDA.synchronize()
@@ -498,6 +565,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         end
         CUDA.synchronize()
     end
+    CUDA.synchronize()
 end
 
 function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets)
