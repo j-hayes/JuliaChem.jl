@@ -33,15 +33,15 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
 
 
-        # if p >= 1600
-        #     scf_options.df_exchange_block_width = 12
-        # elseif p >= 1300
-        #     scf_options.df_exchange_block_width = 8
-        # elseif p >= 1200
-        #     scf_options.df_exchange_block_width = 4
-        # elseif p > 800
-        #     scf_options.df_exchange_block_width = 2
-        # end 
+        if p >= 1600
+            scf_options.df_exchange_block_width = 12
+        elseif p >= 1300
+            scf_options.df_exchange_block_width = 8
+        elseif p >= 1200
+            scf_options.df_exchange_block_width = 4
+        elseif p > 800
+            scf_options.df_exchange_block_width = 2
+        end 
 
 
         println("exchange block width: $(scf_options.df_exchange_block_width)")
