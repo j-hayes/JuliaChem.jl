@@ -29,14 +29,17 @@ mutable struct SCFGPUData
     device_B :: Array{Union{Nothing, CuArray{Float64}},1}
     device_B_send_buffers :: Array{Union{Nothing, CuArray{Float64}},1}
     device_fock :: Array{Union{Nothing, CuArray{Float64}},1}
-    device_coulomb_intermediate :: Array{Union{Nothing, CuArray{Float64}},1}
     device_exchange_intermediate :: Array{Union{Nothing, CuArray{Float64}},1}
     device_occupied_orbital_coefficients :: Array{Union{Nothing, CuArray{Float64}},1}
     device_coulomb :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_stream_coulmob :: Array{Union{Nothing, Array{CuArray{Float64}}},1}
+    device_coulomb_intermediate :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_stream_coulmob_intermediate :: Array{Union{Nothing, Array{CuArray{Float64}}},1} #todo this data could be shared between stream V and J 
     device_density :: Array{Union{Nothing, CuArray{Float64}},1}
     device_screened_density :: Array{Union{Nothing, CuArray{Float64}},1}
     device_non_zero_coefficients :: Array{Union{Nothing, CuArray{Float64}},1}
     device_K_block :: Array{Union{Nothing, CuArray{Float64}},1}
+    device_non_square_K_block :: Array{Union{Nothing, CuArray{Float64}},1}
     host_coulomb ::  Array{Array{Float64,1},1}
     host_fock ::  Array{Array{Float64,2},1}
     device_H :: CuArray{Float64} #only copied to rank 0 GPU 1 because it only needs to be added to one of the partial fock matricies 
@@ -78,7 +81,7 @@ end
 function SCFData()
     sd = ScreeningData([],[], [], [], [], [], [], [], [], [], falses(1,1), zeros(Int,0), Array{Tuple{Int, Int}}(undef,0),
     Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
-    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],[], [], [], [], [], [], [], [], CuArray{Float64}(undef, 0), [], 0, 0)
+    gpu_data = SCFGPUData([], [], [], [], [], [], [],[], [], [], [], [], [], [], [],[], [], [], [],[], [], [], [], [], [], [], [], CuArray{Float64}(undef, 0), [], 0, 0)
     return SCFData([], [], [],[], [], [], [], [],[] ,[],[],[], sd, gpu_data, 0, 0 ,0,0)
 end
 

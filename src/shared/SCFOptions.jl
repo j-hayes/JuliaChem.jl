@@ -28,7 +28,8 @@ function create_default_scf_options()
         SCF_Keywords.Convergence.max_iterations_default,
         SCF_Keywords.Convergence.df_max_iterations_default,
         SCF_Keywords.Screening.df_exchange_block_width_default,
-        SCF_Keywords.Screening.df_sigma_default
+        SCF_Keywords.Screening.df_sigma_default,
+        SCF_Keywords.Screening.df_exchange_screen_mode_default
         )
 end
 
@@ -65,6 +66,9 @@ function create_scf_options(scf_flags)
 
     df_exchange_block_width::Int = haskey(scf_flags, Screening.df_exchange_block_width) ? 
         scf_flags[Screening.df_exchange_block_width] : Screening.df_exchange_block_width_default 
+
+        println("options df_exchange_block_width: ", df_exchange_block_width)
+
     df_screening_sigma::Float64 = haskey(scf_flags, Screening.df_sigma) ? 
         scf_flags[Screening.df_sigma] : Screening.df_sigma_default
 
