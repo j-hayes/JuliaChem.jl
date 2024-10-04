@@ -118,6 +118,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         calculate_exchange_block_screen_matrix(scf_data, scf_options)
     end
     calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
+    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
