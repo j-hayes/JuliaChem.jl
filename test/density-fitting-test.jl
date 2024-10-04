@@ -3,8 +3,10 @@
 #=============================#
 # ENV["MKL_DYNAMIC"] = false
 # using MKL
-import JuliaChem
-import Test
+println("starting density fitting test"); flush(stdout)
+using JuliaChem
+println("imported JuliaChem"); flush(stdout)
+using Test
 using JuliaChem.Shared
 using MPI
 using LinearAlgebra
@@ -19,26 +21,34 @@ include("../example_scripts/full-rhf-repl.jl")
  values are close to the ones produced by non density fitted RHF
 ==================================================================#
 
-function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input_file)
+function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input_file, run_warmup=true)
   try 
 
-    outputval = 1
+    outputval = 2
 
     #startup compilation runs
    # screened_cpu_time = @elapsed begin @time begin 
     #   screened_scf_results, screened_properties = full_rhf(input_file)    # screened cpu df-rhf
     # end end
+    if run_warmup
+      df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
+      GC.gc(true)
+      CUDA.reclaim()
+      CUDA.synchronize()
+      # cpu_scf_results, cpu_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_cpu.json"), output=outputval)
+    end
     # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
-    # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
-    # cpu_scf_results, cpu_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_cpu.json"), output=1)
 
 
 
     for i in 1:1
      
       # sleep(.1)
-      df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file, output=outputval)
-      # df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
+      full_rhf(denity_fitted_input_file, output=outputval)
+      # scf_results, properties = full_rhf(input_file, output=outputval)
+
+      # energy_diff = abs(scf_results["Energy"] - df_scf_results["Energy"])
+      # println("Energy difference: $energy_diff")
     end
     # DF_time = @elapsed begin @time begin 
     #   df_scf_results, density_fitted_properties = full_rhf(denity_fitted_input_file)
@@ -73,42 +83,65 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     flush(stdout)
     exit()
   end 
-  JuliaChem.finalize()
+  # JuliaChem.finalize()
 
 end
-println(BLAS.get_config())
-println("number of gpus =  $(length(CUDA.devices()))")
-JuliaChem.initialize() 
 
-n_threads = Threads.nthreads()
+function main()
+  println("Running Density Fitting Tests")
+  println(BLAS.get_config())
+  println("number of gpus =  $(length(CUDA.devices()))")
+  JuliaChem.initialize() 
+  println("initialized JuliaChem"); flush(stdout)
 
-comm_rank = MPI.Comm_rank(MPI.COMM_WORLD)
-# println("starting JC on rank $comm_rank with $n_threads threads")
-# if comm_rank %2 == 0
-#   ThreadPinning.pinthreads(0:n_threads-1)
-# else
-#   ThreadPinning.pinthreads(n_threads:(n_threads*2)-1)
-# end
-ThreadPinning.pinthreads(0:63)
-BLAS.set_num_threads(64)
-# check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
+  n_threads = Threads.nthreads()
 
-# df_path = ARGS[1]
-# rhf_path = ARGS[2]
+  comm_rank = MPI.Comm_rank(MPI.COMM_WORLD)
+  # println("starting JC on rank $comm_rank with $n_threads threads")
+  # if comm_rank %2 == 0
+  #   ThreadPinning.pinthreads(0:n_threads-1)
+  # else
+  #   ThreadPinning.pinthreads(n_threads:(n_threads*2)-1)
+  # end
+  # ThreadPinning.pinthreads(0:n_threads-1)
+  BLAS.set_num_threads(n_threads)
+  # check_density_fitted_method_matches_RHF(ARGS[1], ARGS[2])
 
-# df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C20H42_df.json")
-# rhf_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C20H42.json")
+  # df_path = ARGS[1]
+  # rhf_path = ARGS[2]
 
-# df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C40H82_df.json")
-# rhf_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C40H82.json")
+  # df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C20H42_dfGPU.json")
+  # rhf_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C20H42_df.json")
 
-# df_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/ammonia_trimer_df.json"
-# rhf_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water.json"
+  # df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C40H82_df.json")
+  # rhf_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/C40H82.json")
 
-MP2_Num = "03"
-df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/$(MP2_Num)_MP2_df.json")
-rhf_path =  joinpath(@__DIR__, "../example_inputs/density_fitting/$(MP2_Num)_MP2.json")
+  # df_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/ammonia_trimer_df.json"
+  # rhf_path = "/home/jackson/source/JuliaChem.jl/example_inputs/S22_3/6-31+G_d/benzene_2_water.json"
 
-check_density_fitted_method_matches_RHF(df_path, rhf_path)
+  # MP2_Num = "03"
+  # df_path = joinpath(@__DIR__,  "../example_inputs/density_fitting/$(MP2_Num)_MP2_df.json")
+  # rhf_path =  joinpath(@__DIR__, "../example_inputs/density_fitting/$(MP2_Num)_MP2.json")
+
+  # check_density_fitted_method_matches_RHF(df_path, rhf_path, true)
 
 
+  df_rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df_gpu/gly")
+  rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df/gly")
+
+  start_index = 10
+  end_index = 18
+  for i in start_index:end_index
+    println("Running polyglycine-$i")
+    df_gly_path = df_rhf_path * string(i) * ".json"
+    rhf_gly_path = rhf_path * string(i) * ".json"
+    check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path,  i == start_index)
+    display(CUDA.pool_status())
+    GC.gc(true)
+    CUDA.reclaim()
+    CUDA.synchronize()
+    display(CUDA.pool_status())
+  end
+end
+
+main()

@@ -28,31 +28,36 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   comm = MPI.COMM_WORLD
   rank = MPI.Comm_rank(comm)
 
-  if scf_options.contraction_mode == "dense"
-    df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
-  elseif scf_options.contraction_mode == "GPU" # screened symmetric algorithm
-    if scf_data.μ < 200 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
+ 
+  if scf_options.contraction_mode == "GPU"  # screened symmetric algorithm
+    if scf_data.μ < 0 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
         df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, H)
     else
       df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, H)
     end    
-  else # default contraction mode is now scf_options.contraction_mode == "screened"
+  else
+    if scf_options.contraction_mode == "dense"
+      df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+      basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
+    end
+    
+    #default contraction mode is now scf_options.contraction_mode == "screened"
     df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
-    
+   
+    if rank == 0
+      scf_data.two_electron_fock .+= H # add the core hamiltonian to the two electron fock matrix
+    end
   end
 
-  if scf_options.contraction_mode != "GPU" && rank == 0
-    scf_data.two_electron_fock .+= H 
-  end
+ 
 
   if MPI.Comm_size(comm) > 1
     MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
   end  
-  return
+  return scf_data.two_electron_fock
 end
 
 function allocate_memory_density_fitting_dense(scf_data, indicies)

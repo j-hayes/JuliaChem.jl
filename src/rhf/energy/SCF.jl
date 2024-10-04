@@ -456,7 +456,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         scf_data.μ = basis_function_count
         scf_data.A = aux_basis_function_count
         scf_data.occ = occupied_orbital_count
-        triangle_size = (basis_function_count*(basis_function_count+1))÷2
         if scf_options.contraction_mode != "GPU"
           scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
           scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
@@ -468,9 +467,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
 
       MPI.Bcast!(C, 0, comm)
-        fock_build_start_time =  time()
-        df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options, H)
-        F = scf_data.two_electron_fock
+        fock_build_start_time =  time()        
+        F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options, H)
         fock_build_end_time = time()
         timings.fock_build_times["$iter"] = fock_build_end_time - fock_build_start_time
     end

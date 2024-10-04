@@ -97,17 +97,19 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
             CUDA.axpy!(1.0, H, fock)
             CUDA.synchronize()   
         end
-    end     
-    total_time = total_fock_gpu_time 
+
+        CUDA.copyto!(scf_data.gpu_data.host_fock[1], scf_data.gpu_data.device_fock[device_id])
+    
+        scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
+        for device_id in 2:num_devices
+            axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
+        end
+    end    
+    
+    total_time = total_fock_gpu_time  
     println("gpu timings: $(total_fock_gpu_time) W_time: $(W_time) J_time: $(J_time) K_time: $(K_time) H_time: $(H_time)")
     println("total time: $(total_time)")
-
-    CUDA.copyto!(scf_data.gpu_data.host_fock[1], scf_data.gpu_data.device_fock[device_id])
-
-    scf_data.two_electron_fock .= scf_data.gpu_data.host_fock[1]
-    for device_id in 2:num_devices
-        axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
-    end
+   
 end
 
 function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf_data, num_devices)
