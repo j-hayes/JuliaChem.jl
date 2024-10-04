@@ -25,12 +25,14 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   basis_sets::CalculationBasisSets,
   occupied_orbital_coefficients, iteration, scf_options::SCFOptions, H::Array{Float64}) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
-  
+  comm = MPI.COMM_WORLD
+  rank = MPI.Comm_rank(comm)
+
   if scf_options.contraction_mode == "dense"
     df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
   elseif scf_options.contraction_mode == "GPU" # screened symmetric algorithm
-    if scf_data.μ < 200
+    if scf_data.μ < 200 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
         df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, H)
     else
@@ -42,9 +44,8 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
     
   end
-  comm = MPI.COMM_WORLD
 
-  if scf_options.contraction_mode != "GPU" && MPI.Comm_rank(comm) == 0
+  if scf_options.contraction_mode != "GPU" && rank == 0
     scf_data.two_electron_fock .+= H 
   end
 
