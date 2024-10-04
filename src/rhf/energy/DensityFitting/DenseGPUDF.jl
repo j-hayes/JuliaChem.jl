@@ -13,12 +13,9 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
     rank = MPI.Comm_rank(comm)
 
     if rank == 0 && MPI.Comm_size(comm) > 1
-        println("Dense GPU algorithm is not supported for MPI runs with more than 1 rank")
-        MPI.Abort(comm, 1)
-        exit()
+        println("WARNING: Dense GPU algorithm only supports 1 rank 1 GPU device runs, running on rank 0 only")        
     elseif rank != 0
-        MPI.Abort(comm, 1)
-        exit()
+        return
     end
     device_id = 1
     device!(0)
