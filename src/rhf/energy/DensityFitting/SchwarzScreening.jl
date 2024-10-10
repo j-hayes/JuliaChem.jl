@@ -19,7 +19,7 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     nthreads = Threads.nthreads()
     eri_quartet_batch_thread = [ Vector{Float64}(undef, batch_size) for thread in 1:nthreads ]
 
-    threshold = 10.0^-10
+    threshold = 10.0^-10 #todo put this back to (σ^2) / max_P_P
     Threads.@sync for thread in 1:nthreads
         Threads.@spawn begin
             for index in thread:nthreads:n_shell_indicies

@@ -587,6 +587,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       W[i,j] += 2.0 * F_eval[iocc] * C[i, iocc] * C[j, iocc]
     end
   end
+
+  if do_density_fitting && scf_options.contraction_mode == "GPU"
+    clear_gpu_data(scf_data)
+  end
+
   return E, scf_converged
 end
 

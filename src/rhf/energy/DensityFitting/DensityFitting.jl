@@ -28,9 +28,30 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   comm = MPI.COMM_WORLD
   rank = MPI.Comm_rank(comm)
 
+  
  
   if scf_options.contraction_mode == "GPU"  # screened symmetric algorithm
-    if scf_data.μ < 0 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
+    #get environment variable for use dense 
+    use_dense = false
+    if haskey(ENV, "JC_USE_DENSE")
+      use_dense = parse(Bool, ENV["JC_USE_DENSE"])
+      if iteration == 1
+        println("use dense = $use_dense")
+      end
+    end
+    use_adaptive = false
+    num_devices = 1
+    if haskey(ENV, "JC_USE_ADAPTIVE")
+      use_adaptive = parse(Bool, ENV["JC_USE_ADAPTIVE"])
+      if iteration == 1
+        println("use adaptive = $use_adaptive")
+      end
+    end
+    if haskey(ENV, "JC_NUM_DEVICES")
+      num_devices = parse(Int64, ENV["JC_NUM_DEVICES"])
+    end
+
+    if use_dense || num_devices == 1 && use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
         df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, H)
     else
@@ -84,32 +105,7 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
     calculate_D!(scf_data, two_center_integrals, three_center_integrals, basis_sets, indicies, scf_options)
   end  
   calculate_exchange!(scf_data, occupied_orbital_coefficients ,basis_sets, indicies,scf_options)
-
-
-
-  
-  if iteration == 1 && MPI.Comm_rank(comm) == 0
-  #write scf_data.D to hdf5 file
-    h5open("./testoutputs/D_.h5", "w") do file
-      write(file, "D", scf_data.D)
-    end
-
-    #write the exchange intermediate 
-    h5open("./testoutputs/exchange_inter_.h5", "w") do file
-      write(file, "exchange", scf_data.D_tilde)
-    end
-
-    #write the two electron fock matrix to an hdf5 file
-    h5open("./testoutputs/fock_.h5", "w") do file
-      write(file, "fock", scf_data.two_electron_fock)
-    end
-
-  end
-
   calculate_coulomb!(scf_data, occupied_orbital_coefficients , basis_sets, indicies,scf_options)
-
-
-
 end
 
 

@@ -31,10 +31,12 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     #   screened_scf_results, screened_properties = full_rhf(input_file)    # screened cpu df-rhf
     # end end
     if run_warmup
+      println("starting warm up")
       df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
       GC.gc(true)
       CUDA.reclaim()
       CUDA.synchronize()
+      println("finished warm up")
       # cpu_scf_results, cpu_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_cpu.json"), output=outputval)
     end
     # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
@@ -129,18 +131,35 @@ function main()
   df_rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df_gpu/gly")
   rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df/gly")
 
-  start_index = 10
+  start_index = 5
   end_index = 18
   for i in start_index:end_index
     println("Running polyglycine-$i")
-    df_gly_path = df_rhf_path * string(i) * ".json"
-    rhf_gly_path = rhf_path * string(i) * ".json"
-    check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path,  i == start_index)
-    display(CUDA.pool_status())
-    GC.gc(true)
-    CUDA.reclaim()
-    CUDA.synchronize()
-    display(CUDA.pool_status())
+  
+      for j in [2,3,4,6,8]
+        # try  
+          println("run trial: JC_K_RECT_N_BLOCKS $j")
+          for k in 1:2 #run each input twice for each JC_K_RECT_N_BLOCKS
+
+          ENV["JC_K_RECT_N_BLOCKS"] = string(j)
+          df_gly_path = df_rhf_path * string(i) * ".json"
+          rhf_gly_path = rhf_path * string(i) * ".json"
+          check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path, i == start_index && j == 1)
+          display(CUDA.pool_status())
+          GC.gc(true)
+          CUDA.reclaim()
+          CUDA.synchronize()
+          display(CUDA.pool_status())
+          GC.gc(true)
+          CUDA.reclaim()
+          CUDA.synchronize()
+          display(CUDA.pool_status())
+        end
+        # catch 
+        #   println("Failed on polyglycine-$i run $JC_K_RECT_N_BLOCKS")
+        # end
+      end
+   
   end
 end
 
