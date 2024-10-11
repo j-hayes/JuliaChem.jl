@@ -24,6 +24,8 @@ include("../example_scripts/full-rhf-repl.jl")
 function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input_file, run_warmup=true)
   try 
 
+    println("running density fitted file $denity_fitted_input_file")
+
     outputval = 2
 
     #startup compilation runs
@@ -131,19 +133,22 @@ function main()
   df_rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df_gpu/gly")
   rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df/gly")
 
-  start_index = 5
+  start_index = 1
   end_index = 18
   for i in start_index:end_index
     println("Running polyglycine-$i")
   
-      for j in [2,3,4,6,8]
+      for j in [1]
         # try  
-          println("run trial: JC_K_RECT_N_BLOCKS $j")
           for k in 1:2 #run each input twice for each JC_K_RECT_N_BLOCKS
 
-          ENV["JC_K_RECT_N_BLOCKS"] = string(j)
           df_gly_path = df_rhf_path * string(i) * ".json"
           rhf_gly_path = rhf_path * string(i) * ".json"
+
+
+          # df_gly_path = "/pscratch/sd/j/jhayes1/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
+          # rhf_gly_path =  "/pscratch/sd/j/jhayes1/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
+
           check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path, i == start_index && j == 1)
           display(CUDA.pool_status())
           GC.gc(true)

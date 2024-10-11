@@ -67,8 +67,6 @@ function create_scf_options(scf_flags)
     df_exchange_block_width::Int = haskey(scf_flags, Screening.df_exchange_block_width) ? 
         scf_flags[Screening.df_exchange_block_width] : Screening.df_exchange_block_width_default 
 
-        println("options df_exchange_block_width: ", df_exchange_block_width)
-
     df_screening_sigma::Float64 = haskey(scf_flags, Screening.df_sigma) ? 
         scf_flags[Screening.df_sigma] : Screening.df_sigma_default
 
