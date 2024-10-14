@@ -42,5 +42,10 @@ function set_basis_info!(jc_timing::JCTiming, basis::Basis, aux_basis::Basis)
     jc_timing.non_timing_data[JCTC.n_occupied_orbitals] = string(basis.nels÷2)
 end
 
-export set_scf_options_data!, set_threads_and_ranks!, set_converged!, set_basis_info!
+function set_converge_properties!(jc_timing, scf_converged, n_iterations, scf_energy)
+    jc_timing.converged = scf_converged
+    jc_timing.non_timing_data[JCTC.n_iterations] = string(n_iterations)
+    jc_timing.scf_energy = scf_energy
+end
 
+export set_scf_options_data!, set_threads_and_ranks!, set_converged!, set_basis_info!, set_converge_properties!

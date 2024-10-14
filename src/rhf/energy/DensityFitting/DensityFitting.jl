@@ -30,7 +30,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
 
   
  
-  if scf_options.contraction_mode == "GPU"  # screened symmetric algorithm
+  if scf_options.contraction_mode == "GPU"  # screened symmetric algorithm with adaptive use of denseGPU algorithm for small systems
     #get environment variable for use dense 
     use_dense = false
     if haskey(ENV, "JC_USE_DENSE")
@@ -52,6 +52,9 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
       df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
     end    
+  elseif scf_options.contraction_mode == "denseGPU" # dense algorithm
+    df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+    basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else # CPU
     if scf_options.contraction_mode == "dense"
       df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
@@ -60,7 +63,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     
     #default contraction mode is now scf_options.contraction_mode == "screened"
     df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options) 
+    basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
    
     if rank == 0
       H_add_time = @elapsed scf_data.two_electron_fock .+= H # add the core hamiltonian to the two electron fock matrix
@@ -106,8 +109,8 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
     jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense cpu"
 
   end  
-  calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing)
-  calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  indicies, jc_timing)
+  calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing, iteration)
+  calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  indicies, jc_timing, iteration)
 end
 
 
@@ -116,7 +119,7 @@ function calculate_B!(scf_data, two_center_integrals, three_center_integrals, in
   νν = scf_data.μ
   AA = length(indicies)
 
-  form_JAB_inv_time = @elapsed begin 
+  form_J_AB_inv_time = @elapsed begin 
     LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
     LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
 
@@ -128,13 +131,13 @@ function calculate_B!(scf_data, two_center_integrals, three_center_integrals, in
   B_time = @elapsed BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), two_center_integrals, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
 
   #TODO make this a TRMM! for 1 rank case 
-  jc_timing.timings[JCTiming_key(JCTC.form_JAB_inv_time,iteration)] = form_JAB_inv_time
-  jc_timing.timings[JCTiming_key(JCTC.B_time,iteration)] = B_time
+  jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
+  jc_timing.timings[JCTC.B_time] = B_time
 end
 
-function calculate_coulomb!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming)
+function calculate_coulomb!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming, iteration)
   AA = length(indicies)
-  density_time = BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+  density_time = @elapsed BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
   V_time = @elapsed BLAS.gemv!('T', 1.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), reshape(scf_data.density, scf_data.μ*scf_data.μ), 0.0, scf_data.coulomb_intermediate)
   J_time = @elapsed BLAS.gemv!('N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), scf_data.coulomb_intermediate , 1.0, reshape(scf_data.two_electron_fock, scf_data.μ^2))
 
@@ -143,7 +146,7 @@ function calculate_coulomb!(scf_data, occupied_orbital_coefficients, indicies, j
   jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
 end
 
-function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming)
+function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming, iteration)
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ

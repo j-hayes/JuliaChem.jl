@@ -5,24 +5,26 @@ module JCTC
 
     #file names when saving to hdf5 or other key value store 
     const run_level_data = "run_level_data"
-    const iteration_times = "iteration_times"
+    const scf_options = "scf_options"
+    const timings = "timings"
+    const non_timing_data = "non_timing_data"
     #...
 
 
     const run_time = "run_time"
     const run_name = "run_name"
-    const converged = "converged" #
-    const scf_energy = "scf_energy"#
+    const converged = "converged" 
+    const scf_energy = "scf_energy"
 
 
-    const n_basis_functions = "n_basis_functions"#
-    const n_electrons = "n_electrons"#
-    const n_occupied_orbitals = "n_oo"#
+    const n_basis_functions = "n_basis_functions"
+    const n_electrons = "n_electrons"
+    const n_occupied_orbitals = "n_oo"
     const n_atoms = "n_atoms"
 
-    const n_threads = "n_threads" #
-    const n_ranks = "n_ranks"#
-    const n_iterations = "n_iterations"#
+    const n_threads = "n_threads" 
+    const n_ranks = "n_ranks"
+    const n_iterations = "n_iterations"
     const size_scf_data_MB = "size_scf_data_MB"
 
 
@@ -47,14 +49,14 @@ module JCTC
 
 
     #fock build times
-    const form_JAB_inv_time = "form_JAB_inv_time" # CPU D S #GPU D S
+    const form_J_AB_inv_time = "form_J_AB_inv_time" 
     const density_time = "density_time-" # CPU D  #GPU D S
     const H_time = "H_time"# CPU D S #GPU C S 
     const H_add_time = "H_add_time-"# CPU D S  #GPU
-    const K_time = "K_time-"# CPU D S #GPU D S
-    const W_time = "W_time-"# CPU D S #GPU D S
-    const J_time = "J_time-"# CPU D S #GPU D S
-    const V_time = "V_time-"# CPU D S #GPU D S
+    const K_time = "K_time-"
+    const W_time = "W_time-"
+    const J_time = "J_time-"
+    const V_time = "V_time-"
     const screening_time = "screening_time"# CPU X S  #GPU
     const fock_MPI_time = "fock_MPI_time-"# ALL 
     const screening_metadata_time = "screening_metadata_time"# CPU X S  #GPU X S 
@@ -65,34 +67,37 @@ module JCTC
 
     #DF specific
     const contraction_algorithm = "contraction_algorithm"
-    const B_time = "B_time" # CPU D S #GPU 
+    const B_time = "B_time" 
 
-    const n_auxiliary_basis_functions = "n_auxiliary_basis_functions"#
-    const three_eri_time = "three_eri_time"# CPU D S #GPU
-    const two_eri_time = "two_eri_time"# CPU D S #GPU
-    const screened_indices_count = "screened_indices_count" # CPU X C  #GPU
-    const unscreened_exchange_blocks = "unscreened_exchange_blocks" # CPU X C  #GPU
-    const total_exchange_blocks = "total_exchange_blocks" # CPU X S  #GPU X S
+    const n_auxiliary_basis_functions = "n_auxiliary_basis_functions"
+    const three_eri_time = "three_eri_time"
+    const two_eri_time = "two_eri_time"
+    const screened_indices_count = "screened_indices_count" 
+    const unscreened_exchange_blocks = "unscreened_exchange_blocks" 
+    const total_exchange_blocks = "total_exchange_blocks" 
 
     #DF Guess specific
-    const DF_iteration_range_start = "DF_iteration_range_start"#
-    const DF_iteration_range_end = "DF_iteration_range_end"#
+    const DF_iteration_range_start = "DF_iteration_range_start"
+    const DF_iteration_range_end = "DF_iteration_range_end"
 
     #GPU specific
-    const fock_gpu_cpu_copy_time = "fock_gpu_cpu_copy_time-"# D
-    const total_fock_gpu_time = "total_fock_gpu_time-" # D
-    const GPU_K_time = "GPU_-N-_K_time-" # D
-    const GPU_W_time = "GPU_-N-_W_time-" # D
-    const GPU_J_time = "GPU_-N-_J_time-" # D
-    const GPU_V_time = "GPU_-N-_V_time-" # D
-    const gpu_fock_time = "GPU_-N-_fock_time-" # D
+    const fock_gpu_cpu_copy_time = "fock_gpu_cpu_copy_time-"
+    const gpu_copy_J_time = "gpu_copy_J_time-"
+    const gpu_copy_sym_time = "gpu_copy_sym_time-"
+    const total_fock_gpu_time = "total_fock_gpu_time-" 
+    const GPU_K_time = "GPU_-N-_K_time-" 
+    const GPU_W_time = "GPU_-N-_W_time-" 
+    const GPU_J_time = "GPU_-N-_J_time-" 
+    const GPU_V_time = "GPU_-N-_V_time-" 
+    const gpu_fock_time = "GPU_-N-_fock_time-"
 
-    const GPU_H_add_time = "GPU_-N-_H_add_time-" # D
-    const GPU_non_zero_coeff_time = "GPU_-N-_non_zero_coeff_time-" # X
-    const GPU_density_time = "GPU_-N-_density_time-" #
-    const GPU_screening_setup_time = "GPU_-N-_screening_setup_time" # X
-    const GPU_num_devices = "GPU_num_devices" # D
-    const GPU_data_size_MB = "GPU_-N-_data_size_MB" # D
+
+    const GPU_H_add_time = "GPU_-N-_H_add_time-"
+    const GPU_non_zero_coeff_time = "GPU_-N-_non_zero_coeff_time-" 
+    const GPU_density_time = "GPU_-N-_density_time-"
+    const GPU_screening_setup_time = "GPU_screening_setup_time" 
+    const GPU_num_devices = "GPU_num_devices"
+    const GPU_data_size_MB = "GPU_-N-_data_size_MB" 
 end
 
 mutable struct JCTiming
@@ -157,8 +162,7 @@ end
 
 
 
-export JCTiming, create_jctiming, JCTC, JCTiming_key
-
+export JCTiming, create_jctiming, JCTC, JCTiming_key,JCTiming_GPUkey
 
 
 

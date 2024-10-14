@@ -84,7 +84,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
     if iteration == 1
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+        s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
 
         j_ab_inv_time = @elapsed begin 
             LAPACK.potrf!('L', two_center_integrals)
@@ -113,20 +113,18 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
 
-        basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
 
         #save the basis function screen matrix to the shared timing object for debugging
-        Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
         calculate_exchange_block_screen_matrix(scf_data, scf_options, jc_timing)
 
         jc_timing.timings[JCTC.two_eri_time] = two_eri_time
         jc_timing.timings[JCTC.screening_metadata_time] = s_metadata_time
-        jc_timing.timings[JCTC.form_JAB_inv_time] = j_ab_inv_time
+        jc_timing.timings[JCTC.form_J_AB_inv_time] = j_ab_inv_time
         jc_timing.timings[JCTC.B_time] = B_time
         jc_timing.non_timing_data[JCTC.contraction_algorithm] = "screened cpu"
     end
-    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
-    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing)
+    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
+    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing, iteration)
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options, jc_timing::JCTiming)
@@ -222,8 +220,8 @@ function reduce_B_other_rank(B, rank)
     end    
 end
 
-function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing::JCTiming)
-    W_time = calculate_W_screened(scf_data, occupied_orbital_coefficients)
+function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing::JCTiming, iteration)
+    W_time = @elapsed calculate_W_screened(scf_data, occupied_orbital_coefficients)
     
     K_time = @elapsed begin
         if scf_options.df_screen_exchange
@@ -233,9 +231,8 @@ function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_co
         end
     end
 
-    jc_timing.timings[JCTC.W_time] = W_time
-    jc_timing.timings[JCTC.K_time] = K_time
-    
+    jc_timing.timings[JCTiming_key(JCTC.W_time, iteration)] = W_time    
+    jc_timing.timings[JCTiming_key(JCTC.K_time, iteration)] = K_time
 end
 
 function calculate_W_screened(scf_data, occupied_orbital_coefficients)
@@ -314,7 +311,7 @@ function copy_screened_density_to_array(scf_data)
     end
 end
 
-function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing::JCTiming)
+function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing::JCTiming, iteration)
     density_time = @elapsed begin 
         BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
         copy_screened_density_to_array(scf_data)
@@ -358,10 +355,9 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_
         copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
     end
 
-    jc_timing.timings[JCTC.density_time] = density_time
-    jc_timing.timings[JCTC.V_time] = V_time
-    jc_timing.timings[JCTC.J_time] = J_time
-   
+    jc_timing.timings[JCTiming_key(JCTC.density_time,iteration)] = density_time
+    jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
+    jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
 end
 
 function copy_screened_coulomb_to_fock!(scf_data, J, fock)

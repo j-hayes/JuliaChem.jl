@@ -21,8 +21,8 @@ include("../example_scripts/save_jc_timings.jl")
  values are close to the ones produced by non density fitted RHF
 ==================================================================#
 
-function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input_file, run_warmup=true)
-  try 
+function check_density_fitted_method_matches_RHF(denity_fitted_input_file::String, input_file::String, output_path::String,run_warmup=true)
+  # try 
 
     println("running density fitted file $denity_fitted_input_file")
 
@@ -35,9 +35,11 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
     # if run_warmup
       println("starting warm up")
       df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
+      df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
       
       timings = df_scf_results["Timings"]
-      save_jc_timings_to_hdf5(timings, "../testoutputs/water_test_jc_timings.h5")
+      timings.run_name = "run_name_test_blah"
+      save_jc_timings_to_hdf5(timings, joinpath(output_path, "water_timings_denseGPU.h5"))
       exit()
       GC.gc(true)
       CUDA.reclaim()
@@ -86,12 +88,12 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
 
     # Test.@test scf_results["Energy"] ≈ df_scf_results["Energy"] atol=.00015 #15 micro hartree tolerance
     # println("Test run successfully!")
-  catch e
-    println("check_density_fitted_method_matches_RHF Failed with exception:\n") 
-    display(e) 
-    flush(stdout)
-    exit()
-  end 
+  # catch e
+  #   println("check_density_fitted_method_matches_RHF Failed with exception:\n") 
+  #   display(e) 
+  #   flush(stdout)
+  #   exit()
+  # end 
   # JuliaChem.finalize()
 
 end
@@ -138,6 +140,8 @@ function main()
   df_rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df_gpu/gly")
   rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df/gly")
 
+  output_path = "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/testoutputs/"
+
   start_index = 1
   end_index = 18
   for i in start_index:end_index
@@ -154,7 +158,7 @@ function main()
           # df_gly_path = "/pscratch/sd/j/jhayes1/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
           # rhf_gly_path =  "/pscratch/sd/j/jhayes1/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
 
-          check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path, i == start_index && j == 1)
+          check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path, output_path, i == start_index && j == 1)
           display(CUDA.pool_status())
           GC.gc(true)
           CUDA.reclaim()

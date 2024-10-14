@@ -4,6 +4,7 @@
 import JuliaChem
 import MPI
 using JuliaChem.JCModules
+using JuliaChem.Shared.JCTC
 
 #================================#
 #== JuliaChem execution script ==#
@@ -58,7 +59,7 @@ function full_rhf(input_file; output=3)
         #== compute molecular properties such as dipole moment ==#
         properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, 
           keywords["prop"]; output=output)
-        
+
         return rhf_energy, properties
         
     else

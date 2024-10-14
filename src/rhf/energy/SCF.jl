@@ -606,7 +606,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     clear_gpu_data(scf_data)
   end
 
-  set_converge_properties(jc_timing, scf_converged, iter, E)
+  set_converge_properties!(jc_timing, scf_converged, iter, E)
 
 
   return E, scf_converged

@@ -9,6 +9,7 @@ module Energy
 
 using JuliaChem.JCModules
 using JuliaChem.Shared.Constants
+using JuliaChem.Shared.JCTC
 using JuliaChem.JERI
 
 using MPI
@@ -78,7 +79,7 @@ function run(mol::Molecule, basis_sets::CalculationBasisSets, scf_flags = Dict()
     println("                       ========================================                 ")
     println("--------------------------------------------------------------------------------")
   end
-
+  rhfenergy["Timings"].non_timing_data[JCTC.n_atoms] = string(length(mol))
   return rhfenergy 
 end
 export run
