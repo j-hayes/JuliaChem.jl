@@ -43,7 +43,6 @@ module SCF_Keywords
     module ContractionMode 
         const contraction_mode = "contraction_mode"
         const default = "default"
-        const tensor_operations = "TensorOperations" # use TensorOperations.jl library 
         const dense = "dense" # use BLAS library 
         const screened = "screened" # default 
     end 

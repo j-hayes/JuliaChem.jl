@@ -14,7 +14,7 @@ using Base.Threads
 using ThreadPinning
 using CUDA  
 include("../example_scripts/full-rhf-repl.jl")
-
+include("../example_scripts/save_jc_timings.jl")
 
 #==================================================================
  Script to check if the Density fitted method 
@@ -32,15 +32,20 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file, input
    # screened_cpu_time = @elapsed begin @time begin 
     #   screened_scf_results, screened_properties = full_rhf(input_file)    # screened cpu df-rhf
     # end end
-    if run_warmup
+    # if run_warmup
       println("starting warm up")
       df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
+      
+      timings = df_scf_results["Timings"]
+      save_jc_timings_to_hdf5(timings, "../testoutputs/water_test_jc_timings.h5")
+      exit()
       GC.gc(true)
       CUDA.reclaim()
       CUDA.synchronize()
       println("finished warm up")
+      
       # cpu_scf_results, cpu_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_cpu.json"), output=outputval)
-    end
+    # end
     # df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
 
 

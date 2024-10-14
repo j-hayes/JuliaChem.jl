@@ -60,8 +60,6 @@ mutable struct SCFData
     D
     D_tilde
     two_electron_fock
-    two_electron_fock_GPU
-    thread_two_electron_fock
     coulomb_intermediate
     density
     occupied_orbital_coefficients
@@ -112,7 +110,7 @@ function SCFData()
     sd = ScreeningData([], [], [], [], [], [], [], [], [], [], falses(1, 1), zeros(Int, 0), Array{Tuple{Int,Int}}(undef, 0),
         Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
     gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], CuArray{Float64}(undef, 0), [], 0, 0)
-    return SCFData([], [], [], [], [], [], [], [], [], [], [], [], sd, gpu_data, 0, 0, 0, 0)
+    return SCFData([], [], [], [], [], [], [], [], [], [], sd, gpu_data, 0, 0, 0, 0)
 end
 
 function clear_gpu_data(scf_data::SCFData)

@@ -1,6 +1,5 @@
 using Base.Threads
 using LinearAlgebra
-using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 two_center_integral_tag = 2000

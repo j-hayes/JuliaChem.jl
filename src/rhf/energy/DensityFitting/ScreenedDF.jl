@@ -1,102 +1,106 @@
 using Base.Threads
 using LinearAlgebra
-using TensorOperations
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
-using HDF5
 using ThreadPinning 
 using Serialization
+using JuliaChem.Shared.JCTC
 
 @inline function twoD_to1Dindex(i, j, p)
     return (i - 1) * p + j
 end
 
 
-function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
+    screening_time = @elapsed begin
+        max_P_P = get_max_P_P(two_center_integrals)
+        scf_data.screening_data.shell_screen_matrix,
+        scf_data.screening_data.basis_function_screen_matrix,
+        scf_data.screening_data.sparse_pq_index_map = schwarz_screen_itegrals_df(scf_data, sigma, max_P_P, basis_sets, jeri_engine_thread)
+    end 
 
-    max_P_P = get_max_P_P(two_center_integrals)
-    scf_data.screening_data.shell_screen_matrix,
-    scf_data.screening_data.basis_function_screen_matrix,
-    scf_data.screening_data.sparse_pq_index_map =
-        schwarz_screen_itegrals_df(scf_data, sigma, max_P_P, basis_sets, jeri_engine_thread)
-    basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
+    screning_metadata_time = @elapsed begin 
 
-    scf_data.screening_data.non_screened_p_indices_count = zeros(Int64, scf_data.μ)
-    scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
-    scf_data.screening_data.screened_indices_count = sum(basis_function_screen_matrix)
-    scf_data.screening_data.sparse_p_start_indices = zeros(Int64, scf_data.μ)
-    scf_data.screening_data.non_zero_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
-    scf_data.screening_data.non_zero_sparse_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
+        basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
+        scf_data.screening_data.non_screened_p_indices_count = zeros(Int64, scf_data.μ)
+        scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
+        scf_data.screening_data.screened_indices_count = sum(basis_function_screen_matrix)
+        scf_data.screening_data.sparse_p_start_indices = zeros(Int64, scf_data.μ)
+        scf_data.screening_data.non_zero_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
+        scf_data.screening_data.non_zero_sparse_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
 
-    for pp in 1:scf_data.μ
-        first_index = 1
-        while scf_data.screening_data.sparse_p_start_indices[pp] == 0
-            if scf_data.screening_data.basis_function_screen_matrix[first_index, pp] != 0
-                scf_data.screening_data.sparse_p_start_indices[pp] = scf_data.screening_data.sparse_pq_index_map[first_index, pp]
-                break
-            end
-            first_index += 1
-        end
-
-        scf_data.screening_data.non_screened_p_indices_count[pp] = sum(view(basis_function_screen_matrix, :, pp))
-        scf_data.screening_data.non_zero_coefficients[pp] = zeros(scf_data.occ, scf_data.screening_data.non_screened_p_indices_count[pp])
-
-
-        scf_data.screening_data.non_zero_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
-        scf_data.screening_data.non_zero_sparse_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
-
-        start_index = 0
-        end_index = 0
-        non_zero_index = 1
-        for r in 1:scf_data.μ
-            if scf_data.screening_data.basis_function_screen_matrix[r, pp]
-                if start_index == 0 
-                    start_index = r 
+        Threads.@threads for pp in 1:scf_data.μ # can this be done in parallel?? 
+            first_index = 1
+            while scf_data.screening_data.sparse_p_start_indices[pp] == 0
+                if scf_data.screening_data.basis_function_screen_matrix[first_index, pp] != 0
+                    scf_data.screening_data.sparse_p_start_indices[pp] = scf_data.screening_data.sparse_pq_index_map[first_index, pp]
+                    break
                 end
-                end_index = r
+                first_index += 1
             end
-            if start_index != 0 && (!scf_data.screening_data.basis_function_screen_matrix[r, pp] || r == scf_data.μ) 
-                push!(scf_data.screening_data.non_zero_ranges[pp], start_index:end_index)
-                range_length = end_index - start_index + 1
-                push!(scf_data.screening_data.non_zero_sparse_ranges[pp], non_zero_index:(non_zero_index + range_length - 1))
-                non_zero_index += range_length 
-                
-                start_index = 0
-                end_index = 0
+
+            scf_data.screening_data.non_screened_p_indices_count[pp] = sum(view(basis_function_screen_matrix, :, pp))
+            scf_data.screening_data.non_zero_coefficients[pp] = zeros(scf_data.occ, scf_data.screening_data.non_screened_p_indices_count[pp])
+
+
+            scf_data.screening_data.non_zero_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
+            scf_data.screening_data.non_zero_sparse_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
+
+            start_index = 0
+            end_index = 0
+            non_zero_index = 1
+            for r in 1:scf_data.μ
+                if scf_data.screening_data.basis_function_screen_matrix[r, pp]
+                    if start_index == 0 
+                        start_index = r 
+                    end
+                    end_index = r
+                end
+                if start_index != 0 && (!scf_data.screening_data.basis_function_screen_matrix[r, pp] || r == scf_data.μ) 
+                    push!(scf_data.screening_data.non_zero_ranges[pp], start_index:end_index)
+                    range_length = end_index - start_index + 1
+                    push!(scf_data.screening_data.non_zero_sparse_ranges[pp], non_zero_index:(non_zero_index + range_length - 1))
+                    non_zero_index += range_length 
+                    
+                    start_index = 0
+                    end_index = 0
+                end
             end
         end
     end
+    jc_timing.timings[JCTC.screening_time] = screening_time
+    jc_timing.timings[JCTC.screening_metadata_time] = screning_metadata_time
+    jc_timing.timings[JCTC.screened_indices_count] = scf_data.screening_data.screened_indices_count
+
 end
 
 
 function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
-    occupied_orbital_coefficients, iteration, scf_options::SCFOptions) where {T<:DFRHFTEIEngine,T2<:RHFTEIEngine}
-    comm = MPI.COMM_WORLD
-    n_ranks = MPI.Comm_size(comm)
-    rank = MPI.Comm_rank(comm)
+    occupied_orbital_coefficients, iteration, scf_options::SCFOptions, jc_timing::JCTiming) where {T<:DFRHFTEIEngine,T2<:RHFTEIEngine}
 
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
 
     if iteration == 1
-        two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
+        two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+        s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, scf_options)
 
-        
-        LAPACK.potrf!('L', two_center_integrals)
-        LAPACK.trtri!('L', 'N', two_center_integrals)
-        J_AB_invt = two_center_integrals
-        
+        j_ab_inv_time = @elapsed begin 
+            LAPACK.potrf!('L', two_center_integrals)
+            LAPACK.trtri!('L', 'N', two_center_integrals)
+            J_AB_invt = two_center_integrals
+        end
+        B_time = 0.0
         if MPI.Comm_size(MPI.COMM_WORLD) > 1 #todo update this to reduce communication?
-            calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options)
+            B_time = @elapsed calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options, jc_timing)
         else
             load = scf_options.load
             scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
-            scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
-            scf_options.load = load
-            BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
+            three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
             scf_options.load = load #todo remove this and just pass the load param
+            B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
+            jc_timing.timings[JCTC.three_eri_time] = three_eri_time
         end
         # deallocate unneeded memory
         two_center_integrals = zeros(0)
@@ -108,27 +112,31 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         scf_data.J = zeros(Float64, scf_data.screening_data.screened_indices_count)
         scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
-        scf_data.two_electron_fock_GPU = zeros(0)
-        scf_data.thread_two_electron_fock = zeros(0)
 
         basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
 
         #save the basis function screen matrix to the shared timing object for debugging
         Shared.Timing.other_timings["basis_function_screen_matrix"] = basis_function_screen_matrix
-        calculate_exchange_block_screen_matrix(scf_data, scf_options)
+        calculate_exchange_block_screen_matrix(scf_data, scf_options, jc_timing)
+
+        jc_timing.timings[JCTC.two_eri_time] = two_eri_time
+        jc_timing.timings[JCTC.screening_metadata_time] = s_metadata_time
+        jc_timing.timings[JCTC.form_JAB_inv_time] = j_ab_inv_time
+        jc_timing.timings[JCTC.B_time] = B_time
+        jc_timing.non_timing_data[JCTC.contraction_algorithm] = "screened cpu"
     end
-    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
+    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
+    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing)
 end
 
-function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options)
+function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options, jc_timing::JCTiming)
     comm = MPI.COMM_WORLD
     this_rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
 
     load = scf_options.load
     scf_options.load = "screened"
-    three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
+    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
     scf_options.load = load
     
     pq = size(three_center_integrals, 2)
@@ -174,6 +182,9 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
             reduce_B_other_rank(B_temp, recieve_rank)                
         end
     end
+
+    jc_timing.timings[JCTC.three_eri_time] = three_eri_time
+
 end
 
 function reduce_B_this_rank(B, rank)
@@ -211,24 +222,19 @@ function reduce_B_other_rank(B, rank)
     end    
 end
 
-function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients)
-    calculate_W_screened(scf_data, occupied_orbital_coefficients)
-   
-
-    p = scf_data.μ
-    n_occ = scf_data.occ
-    Q = scf_data.A
-
-    BLAS.gemm!('T', 'N', -1.0, reshape(scf_data.D_tilde, (Q*n_occ, p)), reshape(scf_data.D_tilde, (Q*n_occ, p)), 0.0, scf_data.two_electron_fock)
-    return
+function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing::JCTiming)
+    W_time = calculate_W_screened(scf_data, occupied_orbital_coefficients)
     
-    Shared.Timing.other_timings["K_block-$(scf_data.scf_iteration)"] = @elapsed begin
+    K_time = @elapsed begin
         if scf_options.df_screen_exchange
             calculate_K_lower_diagonal_block(scf_data, scf_options)
         else
             calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
         end
     end
+
+    jc_timing.timings[JCTC.W_time] = W_time
+    jc_timing.timings[JCTC.K_time] = K_time
     
 end
 
@@ -308,44 +314,54 @@ function copy_screened_density_to_array(scf_data)
     end
 end
 
-function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients)
-    BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing::JCTiming)
+    density_time = @elapsed begin 
+        BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+        copy_screened_density_to_array(scf_data)
+    end
+
     sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
 
-
-    copy_screened_density_to_array(scf_data)
-
-    p = scf_data.μ
-    scf_data.coulomb_intermediate .= 0.0
-    for pp in 1:(p-1) #todo use call_gemv to remove view usage?
-        range_start = sparse_pq_index_map[pp, pp]
-        range_end = scf_data.screening_data.sparse_p_start_indices[pp+1] -1
+    V_time = @elapsed begin 
+        p = scf_data.μ
+        scf_data.coulomb_intermediate .= 0.0
+        for pp in 1:(p-1) #todo use call_gemv to remove view usage?
+            range_start = sparse_pq_index_map[pp, pp]
+            range_end = scf_data.screening_data.sparse_p_start_indices[pp+1] -1
+            BLAS.gemv!('N', 1.0, 
+                view(scf_data.D, :, range_start:range_end), 
+                view(scf_data.density_array,  range_start:range_end),
+                1.0, scf_data.coulomb_intermediate) 
+        end
         BLAS.gemv!('N', 1.0, 
-            view(scf_data.D, :, range_start:range_end), 
-            view(scf_data.density_array,  range_start:range_end),
-            1.0, scf_data.coulomb_intermediate) 
+         view(scf_data.D, :, size(scf_data.D, 2)),
+         view(scf_data.density_array, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count),
+          1.0, scf_data.coulomb_intermediate)
     end
-    BLAS.gemv!('N', 1.0, 
-     view(scf_data.D, :, size(scf_data.D, 2)),
-     view(scf_data.density_array, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count),
-      1.0, scf_data.coulomb_intermediate)
-    
-    # do symm J 
-    scf_data.J .= 0.0
-    for pp in 1:(p-1) #todo use call_gemv to remove view usage?
-        range_start = sparse_pq_index_map[pp, pp]
-        range_end = scf_data.screening_data.sparse_p_start_indices[pp+1]-1
-        BLAS.gemv!('T', 2.0,
-            view(scf_data.D, :, range_start:range_end),
-            scf_data.coulomb_intermediate,
-            1.0, view(scf_data.J, range_start:range_end))
-    end
-    BLAS.gemv!('T', 2.0,
-        view(scf_data.D, :, size(scf_data.D, 2)),
-        scf_data.coulomb_intermediate,
-        1.0, view(scf_data.J, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count))
 
-    copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
+    J_time = @elapsed begin
+        # do symm J 
+        scf_data.J .= 0.0
+        for pp in 1:(p-1) #todo use call_gemv to remove view usage?
+            range_start = sparse_pq_index_map[pp, pp]
+            range_end = scf_data.screening_data.sparse_p_start_indices[pp+1]-1
+            BLAS.gemv!('T', 2.0,
+                view(scf_data.D, :, range_start:range_end),
+                scf_data.coulomb_intermediate,
+                1.0, view(scf_data.J, range_start:range_end))
+        end
+        BLAS.gemv!('T', 2.0,
+            view(scf_data.D, :, size(scf_data.D, 2)),
+            scf_data.coulomb_intermediate,
+            1.0, view(scf_data.J, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count))
+
+        copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
+    end
+
+    jc_timing.timings[JCTC.density_time] = density_time
+    jc_timing.timings[JCTC.V_time] = V_time
+    jc_timing.timings[JCTC.J_time] = J_time
+   
 end
 
 function copy_screened_coulomb_to_fock!(scf_data, J, fock)
@@ -366,7 +382,7 @@ function get_triangle_matrix_length(n)::Int
     return n * (n + 1) ÷ 2
 end
 
-function calculate_exchange_block_screen_matrix(scf_data, scf_options)
+function calculate_exchange_block_screen_matrix(scf_data, scf_options, jc_timing::JCTiming)
     n_threads = Threads.nthreads()  
     if scf_data.μ < 100 #if the # of basis functions is small just do a dense calculation with one block
         K_block_width = scf_data.μ
@@ -377,6 +393,7 @@ function calculate_exchange_block_screen_matrix(scf_data, scf_options)
             println("WARNING: K_block_width is less than 64, this may not be optimal for performance")
         end
     end
+
 
 
 
@@ -410,24 +427,28 @@ function calculate_exchange_block_screen_matrix(scf_data, scf_options)
         q_range = (qq-1)*K_block_width+1:qq*K_block_width
         q_start = (qq - 1) * K_block_width + 1
 
-        total_non_screened_indices = sum(
-            view(scf_data.screening_data.basis_function_screen_matrix, p_range, q_range))
-        
-        if total_non_screened_indices != 0 #skip where all are screened
+        if scf_options.df_screen_exchange          
+            total_non_screened_indices = sum(
+                view(scf_data.screening_data.basis_function_screen_matrix, p_range, q_range))
+            if total_non_screened_indices != 0 #skip where all are screened
+                push!(blocks_to_calculate, block_index) 
+                block_screen_matrix[pp, qq] = true
+            end
+        else
             push!(blocks_to_calculate, block_index) 
             block_screen_matrix[pp, qq] = true
         end
         block_index += 1
     end
     
-    Shared.Timing.other_timings["unscreened_exchange_blocks"] =  length(blocks_to_calculate)
-    Shared.Timing.other_timings["total_exchange_blocks"] =  lower_triangle_length
-
     scf_data.screening_data.block_screen_matrix = block_screen_matrix
     scf_data.screening_data.blocks_to_calculate = blocks_to_calculate
     scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes
-    
 
+
+    jc_timing.non_timing_data[JCTC.unscreened_exchange_blocks] = string(length(blocks_to_calculate))
+    jc_timing.non_timing_data[JCTC.total_exchange_blocks] = string(lower_triangle_length)
+    jc_timing.non_timing_data[JCTC.df_exchange_block_width] = string(scf_options.df_exchange_block_width)
 end
 
 function calculate_K_lower_diagonal_block(scf_data, scf_options)
