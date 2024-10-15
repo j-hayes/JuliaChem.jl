@@ -160,6 +160,7 @@ function print_scf_options(options::SCFOptions)
         println("DF Exchange Block Width: nbas ÷ ", options.df_exchange_n_blocks)
         println("DF Screening Sigma: ", options.df_screening_sigma)
         println("DF Screen Exchange: ", options.df_screen_exchange)
+        println("DF number of GPUs: ", options.num_devices)
         println("--------------------------------")
     end
 end

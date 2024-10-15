@@ -862,22 +862,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             # and will ref   device!(device_id - 1)reference it with a view referencing the front of the underlying array
             device_J_AB_invt[setup_device_id] = CUDA.zeros(Float64, (scf_data.A, scf_data.A))
 
-            #TODO FIX THIS
-            # if setup_device_id == 1 && rank == 0
-            #     J_AB_time = @elapsed begin
-            #         CUDA.copyto!(device_J_AB_invt[setup_device_id], two_center_integrals)
-            #         CUDA.synchronize()
-            #         CUSOLVER.potrf!('L', device_J_AB_invt[setup_device_id])
-            #         CUDA.synchronize()
-            #         CUSOLVER.trtri!('L', 'N', device_J_AB_invt[setup_device_id])
-            #         CUDA.synchronize()
-
-            #         if num_devices > 1 || n_ranks > 1
-            #             CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
-            #         end
-            #     end
-            #     jc_timing.timings[JCTC.form_J_AB_inv_time] = J_AB_time
-            # end
+           
             #todo calculate the three center integrals per device (probably could directly copy to the device while it is being calculated)
             device_three_center_integrals[setup_device_id] = CUDA.zeros(Float64, size(three_center_integrals[setup_device_id]))
             CUDA.copyto!(device_three_center_integrals[setup_device_id], three_center_integrals[setup_device_id])
@@ -890,24 +875,40 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
     end
 
     #CPU potrf and trtri #remove this when the GPU version is working
-    LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
-    LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
+    # LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
+    # LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
     
- 
-    # if MPI.Comm_size(COMM) > 1
-    #     #broadcast two_center_integrals to all ranks
-    #     MPI.Bcast!(two_center_integrals, 0, COMM)
-    # end
+    if rank == 0
+        CUDA.device!(0)
+        J_AB_time = @elapsed begin
+            CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)
+            CUDA.synchronize()
+            CUSOLVER.potrf!('L', device_J_AB_invt[1])
+            CUDA.synchronize()
+            CUSOLVER.trtri!('L', 'N', device_J_AB_invt[1])
+            CUDA.synchronize()
+        end
+
+        CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
+        CUDA.synchronize()
+        
+        jc_timing.timings[JCTC.form_J_AB_inv_time] = J_AB_time
+    end
+
+    if MPI.Comm_size(COMM) > 1
+        #broadcast two_center_integrals to all ranks
+        MPI.Bcast!(two_center_integrals, 0, COMM)
+    end
+    
 
     if n_ranks == 1 && num_devices == 1
         B_time = @elapsed begin
-            CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)    #todo update when the GPU version is working
-            CUDA.synchronize()
             CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
             CUDA.synchronize() 
-            CUDA.unsafe_free!(device_J_AB_invt[1])
-            CUDA.unsafe_free!(device_three_center_integrals[1])
         end
+        CUDA.unsafe_free!(device_J_AB_invt[1])
+        CUDA.unsafe_free!(device_three_center_integrals[1])
+        CUDA.reclaim()
         jc_timing.timings[JCTC.B_time] = B_time
         return
     end

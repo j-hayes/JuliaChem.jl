@@ -400,7 +400,6 @@ function calculate_exchange_block_screen_matrix(scf_data, scf_options, default_n
     end
 
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
-    println("triangle_length ")
 
     scf_data.screening_data.K_block_width = K_block_width
     
