@@ -874,10 +874,6 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
         end #spawn
     end
 
-    #CPU potrf and trtri #remove this when the GPU version is working
-    # LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
-    # LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
-    
     if rank == 0
         CUDA.device!(0)
         J_AB_time = @elapsed begin
