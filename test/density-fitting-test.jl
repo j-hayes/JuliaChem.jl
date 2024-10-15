@@ -8,11 +8,14 @@ using JuliaChem
 println("imported JuliaChem"); flush(stdout)
 using Test
 using JuliaChem.Shared
+using JuliaChem.Shared.JCTC
+
 using MPI
 using LinearAlgebra
 using Base.Threads
 using ThreadPinning
 using CUDA  
+
 include("../example_scripts/full-rhf-repl.jl")
 include("../example_scripts/save_jc_timings.jl")
 
@@ -35,11 +38,14 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file::Strin
     # if run_warmup
       println("starting warm up")
       df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
-      df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
+      run_time = @elapsed df_scf_results, density_fitted_properties = full_rhf(joinpath(@__DIR__, "../example_inputs/density_fitting/water_density_fitted_gpu.json"), output=outputval)
       
       timings = df_scf_results["Timings"]
       timings.run_name = "run_name_test_blah"
-      save_jc_timings_to_hdf5(timings, joinpath(output_path, "water_timings_denseGPU.h5"))
+      timings.run_time = run_time
+      name = "water_timings_$(timings.options[JCTC.contraction_mode])_$(timings.non_timing_data[JCTC.contraction_algorithm])"
+      println("saving to $(name)")
+      save_jc_timings_to_hdf5(timings, joinpath(output_path, "$(name).h5"))
       exit()
       GC.gc(true)
       CUDA.reclaim()

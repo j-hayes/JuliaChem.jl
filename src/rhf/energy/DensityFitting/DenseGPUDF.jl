@@ -123,16 +123,26 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
         end
     end    
 
-    jc_timing.timings[JCTiming_GPUkey(JCTC.V_time, 1, iteration)] = V_time
-    jc_timing.timings[JCTiming_GPUkey(JCTC.J_time, 1, iteration)] = J_time
-    jc_timing.timings[JCTiming_GPUkey(JCTC.W_time, 1, iteration)] = W_time
-    jc_timing.timings[JCTiming_GPUkey(JCTC.K_time, 1, iteration)] = K_time
-    jc_timing.timings[JCTiming_GPUkey(JCTC.density_time, 1, iteration)] = density_time
+
+
+    jc_timing.timings[JCTiming_key(JCTC.V_time, iteration)] = V_time
+    jc_timing.timings[JCTiming_key(JCTC.J_time, iteration)] = J_time
+    jc_timing.timings[JCTiming_key(JCTC.W_time, iteration)] = W_time
+    jc_timing.timings[JCTiming_key(JCTC.K_time, iteration)] = K_time
+    jc_timing.timings[JCTiming_key(JCTC.density_time, iteration)] = density_time
+    jc_timing.timings[JCTiming_key(JCTC.H_add_time, iteration)] = GPU_H_add_time
+
+    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_V_time, 1, iteration)] = V_time
+    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_J_time, 1, iteration)] = J_time
+    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_W_time, 1, iteration)] = W_time
+    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_K_time, 1, iteration)] = K_time
+    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_density_time, 1, iteration)] = density_time
+
     jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_H_add_time, 1, iteration)] = GPU_H_add_time
     jc_timing.timings[JCTiming_GPUkey(JCTC.gpu_fock_time, 1, iteration)] = gpu_fock_time
     jc_timing.timings[JCTiming_GPUkey(JCTC.total_fock_gpu_time, 1, iteration)] = total_fock_gpu_time
 
-    jc_timing.timings[JCTiming_GPUkey(JCTC.fock_gpu_cpu_copy_time, 1, iteration)] = copy_time
+    jc_timing.timings[JCTiming_GPUkey(JCTC.fock_gpu_cpu_copy_reduce_time, 1, iteration)] = copy_time
     jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense gpu"
 
    

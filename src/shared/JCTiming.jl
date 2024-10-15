@@ -1,5 +1,5 @@
 
-# Julia Chem Timing Constants 
+# JuliaChem Timing Constants 
 module JCTC
 
 
@@ -29,19 +29,25 @@ module JCTC
 
 
     #options constants 
-    const JCTC.density_fitting = "density_fitting"
-    const JCTC.contraction_mode = "contraction_mode"
-    const JCTC.load = "load"
-    const JCTC.guess = "guess"
-    const JCTC.energy_convergence = "energy_convergence"
-    const JCTC.density_convergence = "density_convergence"
-    const JCTC.df_energy_convergence = "df_energy_convergence"
-    const JCTC.df_density_convergence = "df_density_convergence"
-    const JCTC.max_iterations = "max_iterations"
-    const JCTC.df_max_iterations = "df_max_iterations"
-    const JCTC.df_exchange_block_width = "df_exchange_block_width"
-    const JCTC.df_screening_sigma = "df_screening_sigma"
-    const JCTC.df_screen_exchange = "df_screen_exchange"
+    const density_fitting = "density_fitting"
+    const contraction_mode = "contraction_mode"
+    const load = "load"
+    const guess = "guess"
+    const energy_convergence = "energy_convergence"
+    const density_convergence = "density_convergence"
+    const df_energy_convergence = "df_energy_convergence"
+    const df_density_convergence = "df_density_convergence"
+    const max_iterations = "max_iterations"
+    const df_max_iterations = "df_max_iterations"
+    const df_exchange_n_blocks = "df_exchange_n_blocks"
+    const df_screening_sigma = "df_screening_sigma"
+    const df_screen_exchange = "df_screen_exchange"
+    const df_force_dense = "df_force_dense"
+    const df_use_adaptive = "df_use_adaptive"
+    const df_use_K_sym = "df_use_K_sym"
+    const df_K_sym_type = "df_K_sym_type"
+    const num_devices = "num_devices"
+
 
     #iteration times 
     const iteration_time = "iteration_time-"#
@@ -50,21 +56,17 @@ module JCTC
 
     #fock build times
     const form_J_AB_inv_time = "form_J_AB_inv_time" 
-    const density_time = "density_time-" # CPU D  #GPU D S
-    const H_time = "H_time"# CPU D S #GPU C S 
-    const H_add_time = "H_add_time-"# CPU D S  #GPU
+    const density_time = "density_time-"
+    const H_time = "H_time" 
+    const H_add_time = "H_add_time-"
     const K_time = "K_time-"
     const W_time = "W_time-"
     const J_time = "J_time-"
     const V_time = "V_time-"
-    const screening_time = "screening_time"# CPU X S  #GPU
-    const fock_MPI_time = "fock_MPI_time-"# ALL 
-    const screening_metadata_time = "screening_metadata_time"# CPU X S  #GPU X S 
-    #
-
-
-
-
+    const screening_time = "screening_time"
+    const fock_MPI_time = "fock_MPI_time-"
+    const screening_metadata_time = "screening_metadata_time"
+    
     #DF specific
     const contraction_algorithm = "contraction_algorithm"
     const B_time = "B_time" 
@@ -81,23 +83,28 @@ module JCTC
     const DF_iteration_range_end = "DF_iteration_range_end"
 
     #GPU specific
-    const fock_gpu_cpu_copy_time = "fock_gpu_cpu_copy_time-"
-    const gpu_copy_J_time = "gpu_copy_J_time-"
-    const gpu_copy_sym_time = "gpu_copy_sym_time-"
-    const total_fock_gpu_time = "total_fock_gpu_time-" 
-    const GPU_K_time = "GPU_-N-_K_time-" 
-    const GPU_W_time = "GPU_-N-_W_time-" 
-    const GPU_J_time = "GPU_-N-_J_time-" 
-    const GPU_V_time = "GPU_-N-_V_time-" 
-    const gpu_fock_time = "GPU_-N-_fock_time-"
-
-
-    const GPU_H_add_time = "GPU_-N-_H_add_time-"
-    const GPU_non_zero_coeff_time = "GPU_-N-_non_zero_coeff_time-" 
-    const GPU_density_time = "GPU_-N-_density_time-"
     const GPU_screening_setup_time = "GPU_screening_setup_time" 
     const GPU_num_devices = "GPU_num_devices"
     const GPU_data_size_MB = "GPU_-N-_data_size_MB" 
+
+    const GPU_density_time = "GPU_-N-_density_time-"
+    const GPU_V_time = "GPU_-N-_V_time-" 
+    const GPU_J_time = "GPU_-N-_J_time-" 
+    const GPU_W_time = "GPU_-N-_W_time-" 
+    const GPU_K_time = "GPU_-N-_K_time-" 
+    const GPU_non_zero_coeff_time = "GPU_-N-_non_zero_coeff_time-" 
+
+    const GPU_H_add_time = "GPU_-N-_H_add_time-"
+    const gpu_fock_time = "GPU_-N-_fock_time-"
+
+    const gpu_copy_J_time = "gpu_copy_J_time-"
+    const gpu_copy_sym_time = "gpu_copy_sym_time-"
+    const total_fock_gpu_time = "total_fock_gpu_time-" 
+
+    const fock_gpu_cpu_copy_reduce_time = "fock_gpu_cpu_copy_reduce_time-"
+
+
+
 end
 
 mutable struct JCTiming
@@ -106,7 +113,8 @@ mutable struct JCTiming
     converged :: Bool
     scf_energy :: Float64
     non_timing_data :: Dict{String, String}
-    options :: Dict{String, String}
+    user_options :: Dict{String, String} #options specified by user + defaults
+    options :: Dict{String, String} #options used by the code
     timings :: Dict{String, Float64} # keys should be prefixed name_of_timing- then the iteration number
 end
 
@@ -117,6 +125,7 @@ function create_jctiming()
         false, # converged
         0.0, # scf_energy
         Dict{String, String}(), # non_timing_data
+        Dict{String, String}(), # user options
         Dict{String, String}(), # options
         Dict{String, Float64}() # timings
         )

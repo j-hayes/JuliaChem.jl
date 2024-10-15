@@ -8,8 +8,10 @@ module SCF_Keywords
     end
 
     module Screening
-        const df_exchange_block_width = "df_exchange_block_width"
-        const df_exchange_block_width_default = 10
+        const df_exchange_n_blocks = "df_exchange_n_blocks"
+        const df_exchange_n_blocks_default = 0
+        const df_exchange_n_blocks_cpu_default = 10
+        const df_exchange_n_blocks_gpu_default = 2
         const df_sigma = "df_sigma"
         const df_sigma_default = 1E-5
         const df_exchange_screen_mode = "df_exchange_screen"
@@ -53,8 +55,26 @@ module SCF_Keywords
         const sequential = "sequential"
         const dynamic = "dynamic"
     end
+
+    module GPUAlgorithms
+        const gpu_algorithm = "gpu_algorithm"
+        const default = "GPU"
+        const denseGPU = "denseGPU"
+        const df_force_dense = "df_force_dense"
+        const default_df_force_dense = false
+        const df_use_adaptive = "df_use_adaptive"
+        const df_use_adaptive_default = true # false == always use screening algorithm
+        const num_devices = "num_devices"
+        const default_num_devices = 1
+        const df_use_K_sym = "df_use_K_sym"
+        const df_use_K_sym_default = false 
+        const df_K_sym_type = "df_K_sym_type"
+        const df_K_sym_type_default = "square" 
+        const df_K_sym_type_square = "square" 
+        const df_K_sym_rect = "rect"
+    end
     
-    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence, Screening
+    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence, Screening, GPUAlgorithms
 end 
 
 

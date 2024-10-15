@@ -6,6 +6,7 @@ using Serialization
 using ThreadPinning 
 using Serialization
 using JuliaChem.Shared.JCTC
+using JuliaChem.Shared.Constants
 
 @inline function twoD_to1Dindex(i, j, p)
     return (i - 1) * p + j
@@ -111,11 +112,14 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
         scf_data.J = zeros(Float64, scf_data.screening_data.screened_indices_count)
         scf_data.K = zeros(Float64, size(scf_data.two_electron_fock))
+        scf_data.density = zeros(Float64, (scf_data.μ, scf_data.μ))
         scf_data.density_array = zeros(Float64, scf_data.screening_data.screened_indices_count)
 
 
         #save the basis function screen matrix to the shared timing object for debugging
-        calculate_exchange_block_screen_matrix(scf_data, scf_options, jc_timing)
+        calculate_exchange_block_screen_matrix(scf_data, scf_options, 
+            SCF_Keywords.Screening.df_exchange_n_blocks_cpu_default,
+            jc_timing)
 
         jc_timing.timings[JCTC.two_eri_time] = two_eri_time
         jc_timing.timings[JCTC.screening_metadata_time] = s_metadata_time
@@ -378,52 +382,60 @@ function get_triangle_matrix_length(n)::Int
     return n * (n + 1) ÷ 2
 end
 
-function calculate_exchange_block_screen_matrix(scf_data, scf_options, jc_timing::JCTiming)
+function calculate_exchange_block_screen_matrix(scf_data, scf_options, default_n_blocks, jc_timing::JCTiming, )
     n_threads = Threads.nthreads()  
+
+    if scf_options.df_exchange_n_blocks == 0
+        scf_options.df_exchange_n_blocks = default_n_blocks
+    end
+
     if scf_data.μ < 100 #if the # of basis functions is small just do a dense calculation with one block
         K_block_width = scf_data.μ
-        scf_options.df_exchange_block_width = 1
+        scf_options.df_exchange_n_blocks = 1
     else
-        K_block_width = scf_data.μ ÷ scf_options.df_exchange_block_width
+        K_block_width = scf_data.μ ÷ scf_options.df_exchange_n_blocks
         if K_block_width < 64
             println("WARNING: K_block_width is less than 64, this may not be optimal for performance")
         end
     end
 
-
-
-
-    lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
-
-    
+    lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
+    println("triangle_length ")
 
     scf_data.screening_data.K_block_width = K_block_width
-    scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, n_threads)
+    
+    jc_timing.non_timing_data[JCTC.total_exchange_blocks] = string(lower_triangle_length)
+    jc_timing.non_timing_data[JCTC.df_exchange_n_blocks] = string(scf_options.df_exchange_n_blocks)
     
     the_batch_index = 1
     exchange_batch_indexes = Array{Tuple{Int, Int}}(undef, lower_triangle_length)
-    for iii in 1:scf_options.df_exchange_block_width
+    for iii in 1:scf_options.df_exchange_n_blocks
         for jjj in 1:iii
             exchange_batch_indexes[the_batch_index] = (iii, jjj)
             the_batch_index+=1
         end
-        
     end
+    scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes
+
+
+    if scf_options.contraction_mode != SCF_Keywords.ContractionMode.screened && 
+        scf_options.contraction_mode != SCF_Keywords.ContractionMode.default
+        return #below setup is not necessary
+    end
+
+    #CPU only setup
+    scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, n_threads)
+
     total_non_screened_indices = 0
     blocks_to_calculate = Vector{Int}(undef, 0)
     block_index = 1
-    block_screen_matrix = zeros(Bool, scf_options.df_exchange_block_width, scf_options.df_exchange_block_width)
+    block_screen_matrix = zeros(Bool, scf_options.df_exchange_n_blocks, scf_options.df_exchange_n_blocks)
 
     while block_index <= lower_triangle_length
         pp, qq = exchange_batch_indexes[block_index]
-
-        p_range = (pp-1)*K_block_width+1:pp*K_block_width
-        p_start = (pp - 1) * K_block_width + 1
-
-        q_range = (qq-1)*K_block_width+1:qq*K_block_width
-        q_start = (qq - 1) * K_block_width + 1
-
-        if scf_options.df_screen_exchange          
+        if scf_options.df_screen_exchange     
+            p_range = (pp-1)*K_block_width+1:pp*K_block_width
+            q_range = (qq-1)*K_block_width+1:qq*K_block_width
             total_non_screened_indices = sum(
                 view(scf_data.screening_data.basis_function_screen_matrix, p_range, q_range))
             if total_non_screened_indices != 0 #skip where all are screened
@@ -439,12 +451,10 @@ function calculate_exchange_block_screen_matrix(scf_data, scf_options, jc_timing
     
     scf_data.screening_data.block_screen_matrix = block_screen_matrix
     scf_data.screening_data.blocks_to_calculate = blocks_to_calculate
-    scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes
-
 
     jc_timing.non_timing_data[JCTC.unscreened_exchange_blocks] = string(length(blocks_to_calculate))
-    jc_timing.non_timing_data[JCTC.total_exchange_blocks] = string(lower_triangle_length)
-    jc_timing.non_timing_data[JCTC.df_exchange_block_width] = string(scf_options.df_exchange_block_width)
+
+   
 end
 
 function calculate_K_lower_diagonal_block(scf_data, scf_options)
@@ -507,7 +517,7 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     end#sync
       
     BLAS.set_num_threads(blas_threads)
-    if p % scf_options.df_exchange_block_width == 0 # square blocks cover the entire pq space
+    if p % scf_options.df_exchange_n_blocks == 0 # square blocks cover the entire pq space
         return
     end
     # non square part of K not include in the blocks above if any are non screened put back after full block is working
@@ -515,7 +525,7 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     p_non_square_start = 1
 
     #non square part 
-    q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
+    q_nonsquare_range = p-(p%scf_options.df_exchange_n_blocks)+1:p
     q_nonsquare_start = q_nonsquare_range[1]
     M = p
     N = length(q_nonsquare_range)
@@ -565,7 +575,7 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
     exchange_blocks = scf_data.k_blocks
 
     K_linear_indices = LinearIndices(exchange_blocks)
-    lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)
+    lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
 
     Threads.@sync for thread in 1:n_threads
         Threads.@spawn begin
@@ -603,7 +613,7 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
     end#sync
       
     BLAS.set_num_threads(blas_threads)
-    if p % scf_options.df_exchange_block_width == 0 # square blocks cover the entire pq space
+    if p % scf_options.df_exchange_n_blocks == 0 # square blocks cover the entire pq space
         return
     end
     # non square part of K not include in the blocks above if any are non screened put back after full block is working
@@ -611,7 +621,7 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options)
     p_non_square_start = 1
 
     #non square part 
-    q_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
+    q_nonsquare_range = p-(p%scf_options.df_exchange_n_blocks)+1:p
     q_nonsquare_start = q_nonsquare_range[1]
     M = p
     N = length(q_nonsquare_range)

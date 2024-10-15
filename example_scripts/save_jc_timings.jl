@@ -8,7 +8,8 @@ function save_jc_timings_to_hdf5(jc_timing, file_path::String)
     # write stuff struct to hdf5 
     h5open("$(file_path)", "w") do file
         # write_dictionary_to_hdf5{String}(file, jc_timing.non_timing_data, "non_timing_data")
-        save_scf_options(file, jc_timing) # scf options
+        save_scf_options(file, jc_timing.options, JCTC.scf_options) # scf options
+        save_scf_options(file, jc_timing.user_options, "$(JCTC.scf_options)-user") # scf options
         save_run_level_data(file, jc_timing) #run level data
         save_timings(file, jc_timing)
         save_non_timing_data(file, jc_timing)
@@ -78,50 +79,65 @@ function sort_timings(jc_timing)
     return sorted_timings
 end
 
-function save_scf_options(file, jc_timing)
+function save_scf_options(file, options, file_name)
     # write the scf options to the hdf5 file
-    str_array = Array{String}(undef, 13, 2)
+    str_array = Array{String}(undef, 18, 2)
 
     str_array[1, 1] = JCTC.density_fitting
-    str_array[1, 2] = jc_timing.options[JCTC.density_fitting]
+    str_array[1, 2] = options[JCTC.density_fitting]
 
     str_array[2, 1] = JCTC.contraction_mode
-    str_array[2, 2] = jc_timing.options[JCTC.contraction_mode]
+    str_array[2, 2] = options[JCTC.contraction_mode]
 
     str_array[3, 1] = JCTC.load
-    str_array[3, 2] = jc_timing.options[JCTC.load]
+    str_array[3, 2] = options[JCTC.load]
 
     str_array[4, 1] = JCTC.guess
-    str_array[4, 2] = jc_timing.options[JCTC.guess]
+    str_array[4, 2] = options[JCTC.guess]
 
     str_array[5, 1] = JCTC.energy_convergence
-    str_array[5, 2] = string(jc_timing.options[JCTC.energy_convergence])
+    str_array[5, 2] = string(options[JCTC.energy_convergence])
 
     str_array[6, 1] = JCTC.density_convergence
-    str_array[6, 2] = string(jc_timing.options[JCTC.density_convergence])
+    str_array[6, 2] = string(options[JCTC.density_convergence])
 
     str_array[7, 1] = JCTC.df_energy_convergence
-    str_array[7, 2] = string(jc_timing.options[JCTC.df_energy_convergence])
+    str_array[7, 2] = string(options[JCTC.df_energy_convergence])
 
     str_array[8, 1] = JCTC.df_density_convergence
-    str_array[8, 2] = string(jc_timing.options[JCTC.df_density_convergence])
+    str_array[8, 2] = string(options[JCTC.df_density_convergence])
 
     str_array[9, 1] = JCTC.max_iterations
-    str_array[9, 2] = string(jc_timing.options[JCTC.max_iterations])
+    str_array[9, 2] = string(options[JCTC.max_iterations])
 
     str_array[10, 1] = JCTC.df_max_iterations
-    str_array[10, 2] = string(jc_timing.options[JCTC.df_max_iterations])
+    str_array[10, 2] = string(options[JCTC.df_max_iterations])
 
-    str_array[11, 1] = JCTC.df_exchange_block_width
-    str_array[11, 2] = string(jc_timing.options[JCTC.df_exchange_block_width])
+    str_array[11, 1] = JCTC.df_exchange_n_blocks
+    str_array[11, 2] = string(options[JCTC.df_exchange_n_blocks])
 
     str_array[12, 1] = JCTC.df_screening_sigma
-    str_array[12, 2] = string(jc_timing.options[JCTC.df_screening_sigma])
+    str_array[12, 2] = string(options[JCTC.df_screening_sigma])
 
     str_array[13, 1] = JCTC.df_screen_exchange
-    str_array[13, 2] = string(jc_timing.options[JCTC.df_screen_exchange])
+    str_array[13, 2] = string(options[JCTC.df_screen_exchange])
 
-    write(file, JCTC.scf_options, str_array)
+    str_array[14, 1] = JCTC.df_force_dense
+    str_array[14, 2] = string(options[JCTC.df_force_dense])
+
+    str_array[15, 1] = JCTC.df_use_adaptive
+    str_array[15, 2] = string(options[JCTC.df_use_adaptive])
+
+    str_array[16, 1] = JCTC.num_devices
+    str_array[16, 2] = string(options[JCTC.num_devices])
+
+    str_array[17, 1] = JCTC.df_use_K_sym
+    str_array[17, 2] = string(options[JCTC.df_use_K_sym])
+
+    str_array[18, 1] = JCTC.df_K_sym_type
+    str_array[18, 2] = string(options[JCTC.df_K_sym_type])
+
+    write(file, file_name, str_array)
 end
 
 
@@ -310,7 +326,7 @@ end
 #     jc_timing.options[JCTC.df_density_convergence] = "1e-6"
 #     jc_timing.options[JCTC.max_iterations] = "100"
 #     jc_timing.options[JCTC.df_max_iterations] = "100"
-#     jc_timing.options[JCTC.df_exchange_block_width] = "100"
+#     jc_timing.options[JCTC.df_exchange_n_blocks] = "100"
 #     jc_timing.options[JCTC.df_screening_sigma] = "1e-6"
 #     jc_timing.options[JCTC.df_screen_exchange] = "true"
 # end
@@ -332,7 +348,7 @@ end
 #     @test data_dict[JCTC.df_density_convergence] == "1e-6"
 #     @test data_dict[JCTC.max_iterations] == "100"
 #     @test data_dict[JCTC.df_max_iterations] == "100"
-#     @test data_dict[JCTC.df_exchange_block_width] == "100"
+#     @test data_dict[JCTC.df_exchange_n_blocks] == "100"
 #     @test data_dict[JCTC.df_screening_sigma] == "1e-6"
 #     @test data_dict[JCTC.df_screen_exchange] == "true"
     

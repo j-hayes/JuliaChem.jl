@@ -306,7 +306,6 @@ function add_shells!(bsed, basis_set_shells, shells_cxx, shells_cxx_added, symbo
         push!(shells_cxx[atomic_number+1], JERI.create_shell(new_shell_am-1, 
           vec(new_shell_exp),  vec(new_shell_coeff), vec(atom_center)))
       end 
-      #todo jackson make sure this vec() change above is something we want to do long term or fix the basis set as it is created into the hdf5 file
       basis_set_norb += new_shell.nbas
       shell_id += 1
       pos += new_shell.nbas

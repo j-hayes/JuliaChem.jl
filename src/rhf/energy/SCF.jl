@@ -15,8 +15,6 @@ const get_next_index_tag = 1111
 function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
 
-  Shared.reset_timing() #this should be moved to a move central location 
-
   # todo move all of these options to scf_options 
   # todo move this all to a function 
   debug::Bool = haskey(scf_flags, "debug") ? scf_flags["debug"] : false
@@ -36,12 +34,16 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
 
   jc_timing = create_jctiming() :: JCTiming
 
-  set_scf_options_data!(jc_timing, scf_options)
   set_threads_and_ranks!(jc_timing, Threads.nthreads(), MPI.Comm_size(MPI.COMM_WORLD))
 
-  return rhf_kernel(mol,basis_sets; output=output, debug=debug, 
+  set_user_scf_options_data!(jc_timing, scf_options)
+
+  kernel_result = rhf_kernel(mol, basis_sets; output=output, debug=debug,
     ndiis=ndiis, dele=dele, rmsd=rmsd,
     fdiff=fdiff, scf_options=scf_options, jc_timing)
+
+  set_scf_options_data!(jc_timing, scf_options) # scf_options can be overwritten by the various algorithms
+  return kernel_result
 end
 
 
@@ -453,33 +455,9 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       fock_build_end_time = time()
       jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = fock_build_end_time - fock_build_start_time 
     else
-      #todo move this to a DF file
-      if iter == 1
-        aux_basis_function_count = basis_sets.auxillary.norb
-        basis_function_count = basis_sets.primary.norb
-        electrons_count = Int64(basis_sets.primary.nels)
-        occupied_orbital_count = electrons_count÷2
-
-        indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
-        node_indicie_count = length(indicies)
-
-        scf_data.μ = basis_function_count
-        scf_data.A = aux_basis_function_count
-        scf_data.occ = occupied_orbital_count
-        if scf_options.contraction_mode != "GPU"
-          scf_data.D = zeros(Float64, (basis_function_count, basis_function_count, node_indicie_count))
-          scf_data.D_tilde = zeros(Float64, (basis_function_count,occupied_orbital_count,node_indicie_count))
-          scf_data.density = zeros(Float64, (basis_function_count, basis_function_count))
-          scf_data.coulomb_intermediate = zeros(Float64, node_indicie_count)
-        end
-        scf_data.two_electron_fock = zeros(Float64, (basis_function_count, basis_function_count))
-      end
-
-
       MPI.Bcast!(C, 0, comm)
-        fock_build_start_time =  time()        
-        F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C[:,1:scf_data.occ], iter, scf_options, H, jc_timing)
-        jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = time() - fock_build_start_time
+      fock_build_time = @elapsed F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
+      jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = fock_build_time
     end
     
     if debug && MPI.Comm_rank(comm) == 0

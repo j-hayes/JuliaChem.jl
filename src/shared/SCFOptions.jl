@@ -10,9 +10,15 @@ mutable struct SCFOptions
     df_density_convergence :: Float64
     max_iterations :: Int64
     df_max_iterations :: Int64
-    df_exchange_block_width :: Int64
+    df_exchange_n_blocks :: Int64
     df_screening_sigma :: Float64
     df_screen_exchange :: Bool
+    #GPU algorithm specific
+    df_force_dense :: Bool
+    df_use_adaptive :: Bool
+    num_devices :: Int64
+    df_use_K_sym :: Bool
+    df_K_sym_type :: String
 end 
 
 function create_default_scf_options()
@@ -27,9 +33,14 @@ function create_default_scf_options()
         SCF_Keywords.Convergence.density_default,
         SCF_Keywords.Convergence.max_iterations_default,
         SCF_Keywords.Convergence.df_max_iterations_default,
-        SCF_Keywords.Screening.df_exchange_block_width_default,
+        SCF_Keywords.Screening.df_exchange_n_blocks_default,
         SCF_Keywords.Screening.df_sigma_default,
-        SCF_Keywords.Screening.df_exchange_screen_mode_default
+        SCF_Keywords.Screening.df_exchange_screen_mode_default,
+        SCF_Keywords.GPUAlgorithms.default_df_force_dense,
+        SCF_Keywords.GPUAlgorithms.df_use_adaptive_default,
+        SCF_Keywords.GPUAlgorithms.default_num_devices,
+        SCF_Keywords.GPUAlgorithms.df_use_K_sym_default,
+        SCF_Keywords.GPUAlgorithms.df_K_sym_type
         )
 end
 
@@ -64,8 +75,8 @@ function create_scf_options(scf_flags)
     niter::Int = haskey(scf_flags, Convergence.max_iterations) ?
         scf_flags[Convergence.max_iterations] : Convergence.max_iterations_default
 
-    df_exchange_block_width::Int = haskey(scf_flags, Screening.df_exchange_block_width) ? 
-        scf_flags[Screening.df_exchange_block_width] : Screening.df_exchange_block_width_default 
+    df_exchange_n_blocks::Int = haskey(scf_flags, Screening.df_exchange_n_blocks) ? 
+        scf_flags[Screening.df_exchange_n_blocks] : Screening.df_exchange_n_blocks_default 
 
     df_screening_sigma::Float64 = haskey(scf_flags, Screening.df_sigma) ? 
         scf_flags[Screening.df_sigma] : Screening.df_sigma_default
@@ -82,6 +93,21 @@ function create_scf_options(scf_flags)
         scf_flags[Convergence.df_max_iterations] : Convergence.df_max_iterations_default        
     end
 
+    df_force_dense = haskey(scf_flags, GPUAlgorithms.df_force_dense) ? 
+        scf_flags[GPUAlgorithms.df_force_dense] : GPUAlgorithms.default_df_force_dense
+
+    df_use_adaptive = haskey(scf_flags, GPUAlgorithms.df_use_adaptive) ? 
+        scf_flags[GPUAlgorithms.df_use_adaptive] : GPUAlgorithms.df_use_adaptive_default
+    
+    df_num_devices = haskey(scf_flags, GPUAlgorithms.num_devices) ?
+        scf_flags[GPUAlgorithms.num_devices] : GPUAlgorithms.default_num_devices
+    
+    df_use_K_sym = haskey(scf_flags, GPUAlgorithms.df_use_K_sym) ?
+        scf_flags[GPUAlgorithms.df_use_K_sym] : GPUAlgorithms.df_use_K_sym_default
+
+    df_K_sym_type = haskey(scf_flags, GPUAlgorithms.df_K_sym_type) ?
+        scf_flags[GPUAlgorithms.df_K_sym_type] : GPUAlgorithms.df_K_sym_type_default
+
     return SCFOptions(
         do_density_fitting,
         contraction_mode,
@@ -93,9 +119,15 @@ function create_scf_options(scf_flags)
         df_density_convergence,
         niter,
         df_niter, 
-        df_exchange_block_width,
+        df_exchange_n_blocks,
         df_screening_sigma,
-        df_screen_exchange)
+        df_screen_exchange,
+        df_force_dense,
+        df_use_adaptive,
+        df_num_devices,
+        df_use_K_sym,
+        df_K_sym_type
+        )
 end
 
 function print_scf_options(options::SCFOptions)
@@ -117,7 +149,7 @@ function print_scf_options(options::SCFOptions)
         println("Contraction Mode: ", options.contraction_mode)
         println("DF Energy Convergence: ", options.df_energy_convergence)
         println("DF Density Convergence: ", options.df_density_convergence)
-        println("DF Exchange Block Width: nbas ÷ ", options.df_exchange_block_width)
+        println("DF Exchange Block Width: nbas ÷ ", options.df_exchange_n_blocks)
         println("DF Screening Sigma: ", options.df_screening_sigma)
         println("DF Screen Exchange: ", options.df_screen_exchange)
         println("--------------------------------")

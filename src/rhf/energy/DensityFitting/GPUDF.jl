@@ -6,6 +6,7 @@ using LinearAlgebra
 using Base.Threads
 using HDF5
 using JuliaChem.Shared.JCTC
+using JuliaChem.Shared.Constants.SCF_Keywords
 
 function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread::Vector{T2},
     basis_sets::CalculationBasisSets,
@@ -18,12 +19,11 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     p = scf_data.μ
     n_ooc = scf_data.occ
 
-    devices = CUDA.devices()
+
     #get environment variable for number of devices to use
-    num_devices = 1
-    if haskey(ENV, "JC_NUM_DEVICES")
-        num_devices = parse(Int64, ENV["JC_NUM_DEVICES"])
-    end
+    num_devices = scf_data.gpu_data.number_of_devices_used
+    
+
 
     # num_devices = Int64(length(devices))
     num_devices_global = num_devices*n_ranks  
@@ -31,42 +31,36 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2,1))
 
 
-    n_j_streams_per_device = 20
+    # n_j_streams_per_device = 20 # put back if J_sym is reimplemented 
 
     three_center_integrals = Array{Array{Float64}}(undef, num_devices)
-    use_K_rect = false
-    if haskey(ENV, "JC_USE_K_RECT")
-        use_K_rect = parse(Bool, ENV["JC_USE_K_RECT"])
-    end
+    use_K_rect = scf_options.df_use_K_sym && scf_options.df_K_sym_type == SCF_Keywords.GPUAlgorithms.df_K_sym_rect
+
     if iteration == 1
-        scf_options.df_exchange_block_width = 1
-        #get env variable to set the block width or not 
-        do_K_sym = false
-        if haskey(ENV, "JC_DF_DO_K_SYM")
-            do_K_sym = parse(Bool, ENV["JC_DF_DO_K_SYM"])
+
+        if num_devices > length(CUDA.devices())
+            error("Number of devices requested is greater than the number of devices available")
         end
-        do_adaptive = false
-        if haskey(ENV, "JC_USE_ADAPTIVE")
-            do_adaptive = parse(Bool, ENV["JC_USE_ADAPTIVE"])
-        end
-        #k rect
-        
-        if do_K_sym || do_adaptive    
+
+        if scf_options.df_use_adaptive && scf_options.df_exchange_n_blocks == 0
             if p >= 1600
-                scf_options.df_exchange_block_width = 12
+                scf_options.df_exchange_n_blocks = 12
             elseif p >= 1300
-                scf_options.df_exchange_block_width = 8
+                scf_options.df_exchange_n_blocks = 8
             elseif p >= 1200
-                scf_options.df_exchange_block_width = 4
-            elseif p > 800 || do_K_sym #if do_K_sym is true then we are using the symmetric algorithm default to 2 for small systems
-                scf_options.df_exchange_block_width = 2
+                scf_options.df_exchange_n_blocks = 4
+            elseif p > 800 || scf_options.df_use_K_sym #if df_use_K_sym is true then we are using the symmetric algorithm default to 2 for small systems
+                scf_options.df_exchange_n_blocks = 2
             end 
+        #else use the value set in the input file
         end
 
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         screening_time = @elapsed begin
             get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
-            calculate_exchange_block_screen_matrix(scf_data, scf_options,jc_timing)
+            calculate_exchange_block_screen_matrix(scf_data, scf_options, 
+            SCF_Keywords.Screening.df_exchange_n_blocks_gpu_default,
+            jc_timing)
         end
         load = scf_options.load
         scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
@@ -139,22 +133,22 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             scf_data.gpu_data.device_screened_density[device_id] = CUDA.zeros(Float64, (scf_data.screening_data.screened_indices_count))
             scf_data.gpu_data.device_coulomb[device_id] = CUDA.zeros(Float64, scf_data.screening_data.screened_indices_count)
             scf_data.gpu_data.device_coulomb_intermediate[device_id] = CUDA.zeros(Float64,(Q))
-            scf_data.gpu_data.device_stream_coulmob[device_id] = Array{CuArray{Float64}}(undef, n_j_streams_per_device)
-            scf_data.gpu_data.device_stream_coulmob_intermediate[device_id] = Array{CuArray{Float64}}(undef, n_j_streams_per_device)
+            # scf_data.gpu_data.device_stream_coulmob[device_id] = Array{CuArray{Float64}}(undef, n_j_streams_per_device)
+            # scf_data.gpu_data.device_stream_coulmob_intermediate[device_id] = Array{CuArray{Float64}}(undef, n_j_streams_per_device)
             
-            for stream_id in 1:n_j_streams_per_device
-                scf_data.gpu_data.device_stream_coulmob[device_id][stream_id] = CUDA.zeros(Float64, (scf_data.screening_data.screened_indices_count))
-                scf_data.gpu_data.device_stream_coulmob_intermediate[device_id][stream_id] = CUDA.zeros(Float64, (Q))
-            end
+            # for stream_id in 1:n_j_streams_per_device
+            #     scf_data.gpu_data.device_stream_coulmob[device_id][stream_id] = CUDA.zeros(Float64, (scf_data.screening_data.screened_indices_count))
+            #     scf_data.gpu_data.device_stream_coulmob_intermediate[device_id][stream_id] = CUDA.zeros(Float64, (Q))
+            # end
 
             scf_data.gpu_data.device_occupied_orbital_coefficients[device_id] = CUDA.zeros(Float64, (scf_data.occ, scf_data.μ))
             scf_data.gpu_data.device_non_zero_coefficients[device_id] = CUDA.zeros(Float64, n_ooc, p, p)
             scf_data.gpu_data.device_exchange_intermediate[device_id] =  CUDA.zeros(Float64, (Q, n_ooc, p))
-            lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)#should only be done on first iteration 
+            lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)#should only be done on first iteration 
             scf_data.gpu_data.device_K_block[device_id] = CUDA.zeros(Float64, (scf_data.screening_data.K_block_width, scf_data.screening_data.K_block_width, lower_triangle_length))
             
             ################   duplicated logic! move this to a shared place   ##########################
-            row_nonsquare_range = p-(p%scf_options.df_exchange_block_width)+1:p
+            row_nonsquare_range = p-(p%scf_options.df_exchange_n_blocks)+1:p
             scf_data.gpu_data.device_non_square_K_block[device_id] = CUDA.zeros(Float64, (length(row_nonsquare_range), p))
             ############################################################################################################
             
@@ -223,8 +217,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                     if use_K_rect 
                         K_times[device_id]  = @elapsed calculate_K_upper_diagonal_rectangle_blocks(fock, W, Q_length, device_id,
                         scf_data, scf_options, threads_per_device)
-                    elseif scf_options.df_exchange_block_width != 1 
-                        lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_block_width)#should only be done on first iteration 
+                    elseif scf_options.df_exchange_n_blocks != 1 
+                        lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)#should only be done on first iteration 
                         K_times[device_id]  = @elapsed calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id,
                         scf_data, scf_options, lower_triangle_length, threads_per_device)       
                     else
@@ -310,7 +304,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     jc_timing.timings[JCTiming_key(JCTC.fock_time, iteration)] = maximum(gpu_fock_times)
 
 
-    jc_timing.timings[JCTiming_key(JCTC.fock_gpu_cpu_copy_time, iteration)] = fock_copy_time
+    jc_timing.timings[JCTiming_key(JCTC.fock_gpu_cpu_copy_reduce_time, iteration)] = fock_copy_time
     jc_timing.timings[JCTiming_key(JCTC.total_fock_gpu_time, iteration)] = total_fock_gpu_time
 
 
@@ -535,33 +529,25 @@ end
 function copy_lower_to_upper_kernel(A ::CuDeviceArray{Float64})
     index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
-
-    
     for i = index:stride:size(A, 1)
-        for j = 1:size(A, 2)
+        for j = axes(A, 2)
             @inbounds A[j, i] = Float64(i > j) * A[i, j] + Float64(i < j)* A[j, i]  + Float64(i == j) * A[i, j] 
             # 1st term if (i,j) is in the lower triangle copy to (j,i) in the upper triangle else do nothing
             # 2nd term if (i,j) is in the upper triangle keep the value the same otherwise do nothing
             # 3rd term if on the diagonal keep the value the same else do nothing
         end
     end
-   
-
     return
 end
 
 function copy_upper_to_lower_kernel(A ::CuDeviceArray{Float64})
     index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
-
-    
     for i = index:stride:size(A, 1)
-        for j = i:size(A, 2)
+        for j = axes(A, 2)
             @inbounds A[j, i] = A[i, j] 
         end
     end
-   
-
     return
 end
 
@@ -577,92 +563,92 @@ function calculate_J_screened_GPU(J::CuArray,  B::CuArray, V::CuArray)
 end
 
 #calculate using lower trinagle only 
-function calculate_J_screened_symmetric_GPU(device_density::CuArray, 
-    host_J::Array{Float64,1}, J::CuArray, V::CuArray, B::CuArray, scf_data::SCFData, device_id::Int64, n_streams::Int64)
+# function calculate_J_screened_symmetric_GPU(device_density::CuArray, 
+#     host_J::Array{Float64,1}, J::CuArray, V::CuArray, B::CuArray, scf_data::SCFData, device_id::Int64, n_streams::Int64)
 
-    p = scf_data.μ
-    # sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
-    sparse_p_start_indices = scf_data.screening_data.sparse_p_start_indices
-    CUDA.fill!(V, 0.0)
-    CUDA.synchronize()
+#     p = scf_data.μ
+#     # sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
+#     sparse_p_start_indices = scf_data.screening_data.sparse_p_start_indices
+#     CUDA.fill!(V, 0.0)
+#     CUDA.synchronize()
 
-    last_index = scf_data.screening_data.screened_indices_count
+#     last_index = scf_data.screening_data.screened_indices_count
     
 
-    # for pp in 1:(p-1)
-    #     range_start = sparse_pq_index_map[pp, pp]
-    #     range_end = sparse_p_start_indices[pp+1] -1
-    #     CUBLAS.gemv!('N', 1.0, view(B, :, range_start:range_end), view(device_density,  range_start:range_end), 1.0, V) 
-    #     CUDA.synchronize()
-    # end
-    # CUBLAS.gemv!('N', 1.0, view(B, :, last_index:last_index),  view(device_density, last_index:last_index), 1.0, V)
+#     # for pp in 1:(p-1)
+#     #     range_start = sparse_pq_index_map[pp, pp]
+#     #     range_end = sparse_p_start_indices[pp+1] -1
+#     #     CUBLAS.gemv!('N', 1.0, view(B, :, range_start:range_end), view(device_density,  range_start:range_end), 1.0, V) 
+#     #     CUDA.synchronize()
+#     # end
+#     # CUBLAS.gemv!('N', 1.0, view(B, :, last_index:last_index),  view(device_density, last_index:last_index), 1.0, V)
     
-    Threads.@sync begin
-        for stream in 1:n_streams
-            Threads.@spawn begin
-                stream_V = scf_data.gpu_data.device_stream_coulmob_intermediate[device_id][stream]
-                CUDA.fill!(stream_V, 0.0)
-                CUDA.synchronize()
-                for pp in stream:n_streams:p-1
-                    range_start = sparse_p_start_indices[pp]
-                    range_end = sparse_p_start_indices[pp+1]-1
-                    CUBLAS.gemv!('N', 1.0, view(B, :, range_start:range_end), view(device_density,  range_start:range_end), 1.0, stream_V) 
-                    CUDA.synchronize()
-                end
-            end
-        end 
-        Threads.@spawn begin
-            CUBLAS.gemv!('N', 1.0, view(B, :, last_index:last_index),  view(device_density, last_index:last_index), 1.0, V)
-            CUDA.synchronize()
-        end
-    end
-    CUDA.synchronize()
-    for stream in 1:n_streams
-        stream_V = scf_data.gpu_data.device_stream_coulmob_intermediate[device_id][stream]
-        CUDA.axpy!(1.0, stream_V, V)
-        CUDA.synchronize()
-    end
+#     Threads.@sync begin
+#         for stream in 1:n_streams
+#             Threads.@spawn begin
+#                 stream_V = scf_data.gpu_data.device_stream_coulmob_intermediate[device_id][stream]
+#                 CUDA.fill!(stream_V, 0.0)
+#                 CUDA.synchronize()
+#                 for pp in stream:n_streams:p-1
+#                     range_start = sparse_p_start_indices[pp]
+#                     range_end = sparse_p_start_indices[pp+1]-1
+#                     CUBLAS.gemv!('N', 1.0, view(B, :, range_start:range_end), view(device_density,  range_start:range_end), 1.0, stream_V) 
+#                     CUDA.synchronize()
+#                 end
+#             end
+#         end 
+#         Threads.@spawn begin
+#             CUBLAS.gemv!('N', 1.0, view(B, :, last_index:last_index),  view(device_density, last_index:last_index), 1.0, V)
+#             CUDA.synchronize()
+#         end
+#     end
+#     CUDA.synchronize()
+#     for stream in 1:n_streams
+#         stream_V = scf_data.gpu_data.device_stream_coulmob_intermediate[device_id][stream]
+#         CUDA.axpy!(1.0, stream_V, V)
+#         CUDA.synchronize()
+#     end
 
 
-    CUDA.fill!(J, 0.0)
-    CUDA.synchronize()
+#     CUDA.fill!(J, 0.0)
+#     CUDA.synchronize()
 
-    Threads.@sync begin
-        for stream in 1:n_streams
-            Threads.@spawn begin
-                stream_J = scf_data.gpu_data.device_stream_coulmob[device_id][stream]
-                CUDA.fill!(stream_J, 0.0)
-                CUDA.synchronize()
+#     Threads.@sync begin
+#         for stream in 1:n_streams
+#             Threads.@spawn begin
+#                 stream_J = scf_data.gpu_data.device_stream_coulmob[device_id][stream]
+#                 CUDA.fill!(stream_J, 0.0)
+#                 CUDA.synchronize()
 
-                for pp in stream:n_streams:p-1
-                    range_start = sparse_p_start_indices[pp]
-                    range_end = sparse_p_start_indices[pp+1]-1
-                    CUBLAS.gemv!('T', 2.0, view(B, :, range_start:range_end), V, 1.0, view(stream_J, range_start:range_end))
-                    CUDA.synchronize()
-                end
-            end
-        end
-        Threads.@spawn begin
-            CUBLAS.gemv!('T', 2.0, view(B, :, last_index:last_index), V, 1.0, view(J, last_index:last_index))
-            CUDA.synchronize()
-        end
-    end        
+#                 for pp in stream:n_streams:p-1
+#                     range_start = sparse_p_start_indices[pp]
+#                     range_end = sparse_p_start_indices[pp+1]-1
+#                     CUBLAS.gemv!('T', 2.0, view(B, :, range_start:range_end), V, 1.0, view(stream_J, range_start:range_end))
+#                     CUDA.synchronize()
+#                 end
+#             end
+#         end
+#         Threads.@spawn begin
+#             CUBLAS.gemv!('T', 2.0, view(B, :, last_index:last_index), V, 1.0, view(J, last_index:last_index))
+#             CUDA.synchronize()
+#         end
+#     end        
 
-    for stream in 1:n_streams
-        stream_J = scf_data.gpu_data.device_stream_coulmob[device_id][stream]
-        CUDA.axpy!(1.0, stream_J, J)
-        CUDA.synchronize()
-    end
+#     for stream in 1:n_streams
+#         stream_J = scf_data.gpu_data.device_stream_coulmob[device_id][stream]
+#         CUDA.axpy!(1.0, stream_J, J)
+#         CUDA.synchronize()
+#     end
 
-    # for pp in 1:(p-1) 
-    #     range_start = sparse_p_start_indices[pp]
-    #     range_end = sparse_p_start_indices[pp+1]-1
-    #     CUBLAS.gemv!('T', 2.0, view(B, :, range_start:range_end), V, 1.0, view(J, range_start:range_end))
-    #     CUDA.synchronize()
-    # end
-    # CUBLAS.gemv!('T', 2.0, view(B, :, last_index:last_index), V, 1.0, view(J, last_index:last_index))
-    # CUDA.synchronize()
-end
+#     # for pp in 1:(p-1) 
+#     #     range_start = sparse_p_start_indices[pp]
+#     #     range_end = sparse_p_start_indices[pp+1]-1
+#     #     CUBLAS.gemv!('T', 2.0, view(B, :, range_start:range_end), V, 1.0, view(J, range_start:range_end))
+#     #     CUDA.synchronize()
+#     # end
+#     # CUBLAS.gemv!('T', 2.0, view(B, :, last_index:last_index), V, 1.0, view(J, last_index:last_index))
+#     # CUDA.synchronize()
+# end
 
 function calculate_W_screened_GPU(device_id, scf_data::SCFData, num_threads ::Int64)
     p = scf_data.μ
@@ -711,21 +697,18 @@ function calculate_K_upper_diagonal_rectangle_blocks(fock::CuArray{Float64,2}, W
     alpha = -1.0
     beta = 0.0
 
-    n_blocks = 2
-
-    if p > 1600
-        n_blocks = 16
-    elseif p > 800
-        n_blocks = 8
-    elseif p > 400
-        n_blocks = 4
+    if scf_options.df_exchange_n_blocks == 0
+        n_blocks = 2
+        if p > 1600
+            n_blocks = 16
+        elseif p > 800
+            n_blocks = 8
+        elseif p > 400
+            n_blocks = 4
+        end
+    else
+        n_blocks = scf_options.df_exchange_n_blocks
     end
-
-    if haskey(ENV, "JC_K_RECT_N_BLOCKS")
-        n_blocks = parse(Int64, ENV["JC_K_RECT_N_BLOCKS"])
-    end
-
-
 
     block_width = p÷n_blocks
 
@@ -833,10 +816,10 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         end
     end
 
-    if p % scf_options.df_exchange_block_width != 0 # if square blocks don't cover the entire pq space
+    if p % scf_options.df_exchange_n_blocks != 0 # if square blocks don't cover the entire pq space
         col_non_square_range = 1:p    
         #non square part that didn't fit in blocks
-        row_non_square_range = p-(p%scf_options.df_exchange_block_width)+1:p
+        row_non_square_range = p-(p%scf_options.df_exchange_n_blocks)+1:p
         
         M = length(row_non_square_range)
         N = p

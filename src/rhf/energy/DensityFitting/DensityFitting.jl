@@ -22,49 +22,42 @@ indices for all tensor contractions
 
 function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_engine_thread ::Vector{T2},
   basis_sets::CalculationBasisSets,
-  occupied_orbital_coefficients, iteration, scf_options::SCFOptions, H::Array{Float64},
+  coefficients, iteration, scf_options::SCFOptions, H::Array{Float64},
   jc_timing::JCTiming) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
   comm = MPI.COMM_WORLD
   rank = MPI.Comm_rank(comm)
 
-  
- 
-  if scf_options.contraction_mode == "GPU"  # screened symmetric algorithm with adaptive use of denseGPU algorithm for small systems
-    #get environment variable for use dense 
-    use_dense = false
-    if haskey(ENV, "JC_USE_DENSE")
-      use_dense = parse(Bool, ENV["JC_USE_DENSE"])
-    end
-    use_adaptive = false
-    num_devices = 1
-    if haskey(ENV, "JC_USE_ADAPTIVE")
-      use_adaptive = parse(Bool, ENV["JC_USE_ADAPTIVE"])
-    end
-    if haskey(ENV, "JC_NUM_DEVICES")
-      num_devices = parse(Int64, ENV["JC_NUM_DEVICES"])
-    end
 
-    if use_dense || num_devices == 1 && use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
-      df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-      basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
-    else
-      df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-      basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
-    end    
-  elseif scf_options.contraction_mode == "denseGPU" # dense algorithm
-    df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
+
+  if iteration == 1
+    aux_basis_function_count = basis_sets.auxillary.norb
+    basis_function_count = basis_sets.primary.norb
+    occupied_orbital_count = Int64(basis_sets.primary.nels)÷2
+  
+    indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
+  
+    scf_data.μ = basis_function_count
+    scf_data.A = aux_basis_function_count
+    scf_data.occ = occupied_orbital_count
+
+    scf_data.two_electron_fock = zeros(Float64, (scf_data.μ, scf_data.μ))
+    allocate_memory_density_fitting_dense(scf_data, scf_options, indicies)   
+  end
+
+  occupied_orbital_coefficients = coefficients[:,1:scf_data.occ]
+ 
+  if scf_options.contraction_mode == "GPU" || scf_options.contraction_mode == "denseGPU"
+    run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else # CPU
-    if scf_options.contraction_mode == "dense"
+    if scf_options.contraction_mode == "dense" || scf_options.df_force_dense
       df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+      basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
+    else   #default contraction mode is now scf_options.contraction_mode == "screened"
+      df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
     end
     
-    #default contraction mode is now scf_options.contraction_mode == "screened"
-    df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
-    basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
-   
     if rank == 0
       H_add_time = @elapsed scf_data.two_electron_fock .+= H # add the core hamiltonian to the two electron fock matrix
       jc_timing.timings[JCTiming_key(JCTC.H_add_time,iteration)] = H_add_time
@@ -80,17 +73,48 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   return scf_data.two_electron_fock
 end
 
-function allocate_memory_density_fitting_dense(scf_data, indicies)
+function run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
+  df_force_dense = scf_options.df_force_dense || scf_options.contraction_mode == "denseGPU"
+
+  df_use_adaptive = scf_options.df_use_adaptive
+  num_devices = scf_options.num_devices
+
+  if iteration == 1
+
+    if num_devices > 1 && df_force_dense
+      scf_options.num_devices = 1
+      println("WARNING: Dense GPU algorithm only supports 1 rank 1 GPU device runs, running on rank 0 only with one device")
+    end
+    scf_data.gpu_data.number_of_devices_used = num_devices
+
+  end
+
+  if df_force_dense && num_devices == 1 || num_devices == 1 && df_use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
+    df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+      basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
+  else
+    df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
+      basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
+  end
+end
+
+
+function allocate_memory_density_fitting_dense(scf_data, scf_options, indicies)
+
+  if scf_options.contraction_mode != "dense"
+    return
+  end
+
+  
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ
   scf_data.D = zeros(Float64, (μμ, μμ, AA))
   scf_data.D_tilde = zeros(Float64, (μμ, AA,ii))
-  scf_data.coulomb_intermediate = zeros(Float64, AA)
-  scf_data.two_electron_fock = zeros(Float64, (μμ, μμ))
-  scf_data.density = zeros(Float64, (μμ, μμ))
 
-  return
+  scf_data.density = zeros(Float64, (μμ, μμ))
+  scf_data.coulomb_intermediate = zeros(Float64, AA)
+  scf_data.density = zeros(Float64, (μμ, μμ))
 end
 
 function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, basis_sets::CalculationBasisSets,
@@ -98,7 +122,6 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
   comm = MPI.COMM_WORLD
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
   if iteration == 1
-    allocate_memory_density_fitting_dense(scf_data, indicies)
     two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
     calculate_B!(scf_data, two_center_integrals, three_center_integrals, indicies, jc_timing)

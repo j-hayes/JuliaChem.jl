@@ -3,21 +3,33 @@ using JuliaChem.JCModules
 using JuliaChem.Shared
 using JuliaChem.Shared.JCTC
 
-function set_scf_options_data!(timing::JCTiming,scf_options::SCFOptions)
-    timing.options[JCTC.density_fitting] = string(scf_options.density_fitting)
-    timing.options[JCTC.contraction_mode] = scf_options.contraction_mode
-    timing.options[JCTC.load] = scf_options.load
-    timing.options[JCTC.guess] = scf_options.guess
-    timing.options[JCTC.energy_convergence] = string(scf_options.energy_convergence)
-    timing.options[JCTC.density_convergence] = string(scf_options.density_convergence)
-    timing.options[JCTC.df_energy_convergence] = string(scf_options.df_energy_convergence)
-    timing.options[JCTC.df_density_convergence] = string(scf_options.df_density_convergence)
-    timing.options[JCTC.max_iterations] = string(scf_options.max_iterations)
-    timing.options[JCTC.df_max_iterations] = string(scf_options.df_max_iterations)
-    timing.options[JCTC.df_exchange_block_width] = string(scf_options.df_exchange_block_width)
-    timing.options[JCTC.df_screening_sigma] = string(scf_options.df_screening_sigma)
-    timing.options[JCTC.df_screen_exchange] = string(scf_options.df_screen_exchange)
+function set_user_scf_options_data!(timing::JCTiming,scf_options::SCFOptions)
+    set_options(timing.user_options, scf_options)
+end
 
+function set_scf_options_data!(timing::JCTiming,scf_options::SCFOptions)
+    set_options(timing.options, scf_options)
+end
+
+function set_options(dictionary::Dict{String, String}, scf_options::SCFOptions)
+    dictionary[JCTC.density_fitting] = string(scf_options.density_fitting)
+    dictionary[JCTC.contraction_mode] = scf_options.contraction_mode
+    dictionary[JCTC.load] = scf_options.load
+    dictionary[JCTC.guess] = scf_options.guess
+    dictionary[JCTC.energy_convergence] = string(scf_options.energy_convergence)
+    dictionary[JCTC.density_convergence] = string(scf_options.density_convergence)
+    dictionary[JCTC.df_energy_convergence] = string(scf_options.df_energy_convergence)
+    dictionary[JCTC.df_density_convergence] = string(scf_options.df_density_convergence)
+    dictionary[JCTC.max_iterations] = string(scf_options.max_iterations)
+    dictionary[JCTC.df_max_iterations] = string(scf_options.df_max_iterations)
+    dictionary[JCTC.df_exchange_n_blocks] = string(scf_options.df_exchange_n_blocks)
+    dictionary[JCTC.df_screening_sigma] = string(scf_options.df_screening_sigma)
+    dictionary[JCTC.df_screen_exchange] = string(scf_options.df_screen_exchange)
+    dictionary[JCTC.df_force_dense] = string(scf_options.df_force_dense)
+    dictionary[JCTC.df_use_adaptive] = string(scf_options.df_use_adaptive)
+    dictionary[JCTC.num_devices] = string(scf_options.num_devices)
+    dictionary[JCTC.df_use_K_sym] = string(scf_options.df_use_K_sym)
+    dictionary[JCTC.df_K_sym_type] = string(scf_options.df_K_sym_type)
 end
 
 function set_threads_and_ranks!(timing::JCTiming, n_threads::Int, n_ranks::Int)
@@ -48,4 +60,4 @@ function set_converge_properties!(jc_timing, scf_converged, n_iterations, scf_en
     jc_timing.scf_energy = scf_energy
 end
 
-export set_scf_options_data!, set_threads_and_ranks!, set_converged!, set_basis_info!, set_converge_properties!
+export set_scf_options_data!, set_user_scf_options_data!, set_threads_and_ranks!, set_converged!, set_basis_info!, set_converge_properties!
