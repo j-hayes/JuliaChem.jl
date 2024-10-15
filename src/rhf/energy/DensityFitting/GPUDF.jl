@@ -109,7 +109,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         scf_data.gpu_data.host_fock = Array{Array{Float64,2}}(undef, num_devices)
         scf_data.density = zeros(Float64, (scf_data.μ,scf_data.μ ))
 
-        scf_data.screening_data.non_zero_coefficients = zeros(Float64, n_ooc, p, p)
+        scf_data.non_zero_coefficients = zeros(Float64, n_ooc, p, p)
 
         
         Threads.@threads for device_id in 1:num_devices
@@ -311,7 +311,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 end
 
 
-#todo to remove branching I need a map from screened[1d index] to unscreened 2d[p,q] indices 
+#to remove branching I need a map from screened[1d index] to unscreened 2d[p,q] indices 
+#not a huge performance hit at the moment so not proritiezed 
 function form_screened_density_kernel!(screened_density::CuDeviceArray{Float64}, density::CuDeviceArray{Float64}, 
     sparse_pq_index_map::CuDeviceArray{Int64}, p::Int64)
     
@@ -350,11 +351,6 @@ function form_screened_density!(scf_data::SCFData, device_id::Int64)
 
 end
 
-# todo this could be sped up a bit 
-# there is some parallelism that could be exploited here, and better yet merge this with the code in ScreenedDF.jl that forms the original ranges, 
-# the slowest bits have been sped up 
-# it is staying relatively constant scaling as the system size increases
-# if it becomes a problem, this can be revisisted 
 function setup_gpu_screening_data!(scf_data::SCFData, num_devices::Int64)
     n_ranges = 0
     p = scf_data.μ
@@ -413,8 +409,6 @@ function setup_gpu_screening_data!(scf_data::SCFData, num_devices::Int64)
             CUDA.copyto!(scf_data.gpu_data.device_range_sparse_start[device_id], range_sparse_start)
             CUDA.copyto!(scf_data.gpu_data.device_range_sparse_end[device_id], range_sparse_end)
             CUDA.synchronize() 
-
-
         end
     end
 
@@ -450,7 +444,6 @@ function create_sparse_to_p_q_kernel(sparse_to_p::CuDeviceArray{Int64},
 
 end
 
-#todo make this a kernel and copy from ranges that are stored on the device to avoid CPU threading 
 function form_nozero_coefficient_matrix!(scf_data::SCFData, device_id :: Int64)
     CUDA.device!(device_id-1)
     
@@ -466,7 +459,6 @@ function form_nozero_coefficient_matrix!(scf_data::SCFData, device_id :: Int64)
         scf_data.gpu_data.device_range_start[device_id],
         scf_data.gpu_data.device_range_end[device_id],
         scf_data.gpu_data.device_range_sparse_start[device_id],
-        scf_data.gpu_data.device_range_sparse_end[device_id],
         n_ranges)
     CUDA.synchronize()
 end
@@ -477,7 +469,6 @@ function build_non_zero_coefficients_kernel(non_zero_coefficients::CuDeviceArray
         device_range_start::CuDeviceArray{Int64},
         device_range_end::CuDeviceArray{Int64},
         device_range_sparse_start::CuDeviceArray{Int64},
-        device_range_sparse_end::CuDeviceArray{Int64},
         n_ranges::Int64)
 
     index = (blockIdx().x - 1) * blockDim().x + threadIdx().x
@@ -871,6 +862,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             # and will ref   device!(device_id - 1)reference it with a view referencing the front of the underlying array
             device_J_AB_invt[setup_device_id] = CUDA.zeros(Float64, (scf_data.A, scf_data.A))
 
+            #TODO FIX THIS
             # if setup_device_id == 1 && rank == 0
             #     J_AB_time = @elapsed begin
             #         CUDA.copyto!(device_J_AB_invt[setup_device_id], two_center_integrals)
@@ -897,7 +889,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
         end #spawn
     end
 
-    #CPU potrf and trtri
+    #CPU potrf and trtri #remove this when the GPU version is working
     LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
     LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
     
@@ -909,7 +901,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
 
     if n_ranks == 1 && num_devices == 1
         B_time = @elapsed begin
-            CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)    
+            CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)    #todo update when the GPU version is working
             CUDA.synchronize()
             CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
             CUDA.synchronize() 

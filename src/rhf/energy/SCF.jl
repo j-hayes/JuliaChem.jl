@@ -521,8 +521,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     ΔE = E - E_old
 
     if do_density_fitting && !density_fitting_converged 
-      #todo the density fitting convergence values should be a parameter
-        
       density_fitting_converged = 
         Base.abs_float(ΔE) <= scf_options.df_energy_convergence &&
         D_rms <= scf_options.df_density_convergence

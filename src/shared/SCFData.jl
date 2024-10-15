@@ -4,13 +4,9 @@ mutable struct ScreeningData
     basis_function_screen_matrix
     sparse_p_start_indices
     non_screened_p_indices_count
-    #non_zero_coefficients belongs in scf_data not screening todo move
-    non_zero_coefficients # GTFOCK paper equation 4 "In order to use optimized matrix multiplication library functions to compute W(i, Q), for each p, we need a dense matrix consisting of the nonzero rows of C(r, i)."
     screened_triangular_indicies
     shell_screen_matrix
     screened_triangular_indicies_to_2d
-    r_ranges #todo rename
-    B_ranges #todo rename
     block_screen_matrix::Array{Bool,2}
     blocks_to_calculate::Array{Int,1}
     exchange_batch_indexes::Array{Tuple{Int,Int}}
@@ -34,7 +30,7 @@ mutable struct SCFGPUData
     device_coulomb::Array{Union{Nothing,CuArray{Float64}},1}
     device_stream_coulmob::Array{Union{Nothing,Array{CuArray{Float64}}},1}
     device_coulomb_intermediate::Array{Union{Nothing,CuArray{Float64}},1}
-    device_stream_coulmob_intermediate::Array{Union{Nothing,Array{CuArray{Float64}}},1} #todo this data could be shared between stream V and J 
+    device_stream_coulmob_intermediate::Array{Union{Nothing,Array{CuArray{Float64}}},1} #todo this data could be shared between stream V and J #todo remove if J sym algorithm is not implemented for GPU
     device_density::Array{Union{Nothing,CuArray{Float64}},1}
     device_screened_density::Array{Union{Nothing,CuArray{Float64}},1}
     device_non_zero_coefficients::Array{Union{Nothing,CuArray{Float64}},1}
@@ -63,6 +59,7 @@ mutable struct SCFData
     coulomb_intermediate
     density
     occupied_orbital_coefficients
+    non_zero_coefficients # GTFOCK paper equation 4 "In order to use optimized matrix multiplication library functions to compute W(i, Q), for each p, we need a dense matrix consisting of the nonzero rows of C(r, i)."
     density_array
     J
     K
@@ -107,100 +104,10 @@ function initialize!(gpu_data::SCFGPUData, num_devices::Int64)
 end
 
 function SCFData()
-    sd = ScreeningData([], [], [], [], [], [], [], [], [], [], falses(1, 1), zeros(Int, 0), Array{Tuple{Int,Int}}(undef, 0),
+    sd = ScreeningData([], [], [], [], [], [], [], falses(1, 1), zeros(Int, 0), Array{Tuple{Int,Int}}(undef, 0),
         Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
     gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], CuArray{Float64}(undef, 0), [], 0, 0)
-    return SCFData([], [], [], [], [], [], [], [], [], [], sd, gpu_data, 0, 0, 0, 0)
-end
-
-function clear_gpu_data(scf_data::SCFData)
-    # number_of_gpus = scf_data.gpu_data.number_of_devices_used
-    # gpu_data::SCFGPUData = scf_data.gpu_data
-
-    # for device_id in 1:number_of_gpus
-    #     CUDA.device!(device_id - 1)
-    #     if !isnothing(gpu_data.device_fock)
-    #         CUDA.unsafe_free!(gpu_data.device_fock[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_B)
-    #         CUDA.unsafe_free!(gpu_data.device_B[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_B_send_buffers) && length(gpu_data.device_B_send_buffers) >= device_id
-    #         CUDA.unsafe_free!(gpu_data.device_B_send_buffers[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_fock)
-    #         CUDA.unsafe_free!(gpu_data.device_fock[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_exchange_intermediate)
-    #         CUDA.unsafe_free!(gpu_data.device_exchange_intermediate[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_occupied_orbital_coefficients)
-    #         CUDA.unsafe_free!(gpu_data.device_occupied_orbital_coefficients[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_coulomb)
-    #         CUDA.unsafe_free!(gpu_data.device_coulomb[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_stream_coulmob)
-    #         for stream in gpu_data.device_stream_coulmob[device_id]
-    #             CUDA.unsafe_free!(stream)
-    #         end
-    #     end
-    #     if !isnothing(gpu_data.device_coulomb_intermediate)
-    #         CUDA.unsafe_free!(gpu_data.device_coulomb_intermediate[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_stream_coulmob_intermediate)
-    #         for stream in gpu_data.device_stream_coulmob_intermediate[device_id]
-    #             CUDA.unsafe_free!(stream)
-    #         end
-    #     end
-    #     if !isnothing(gpu_data.device_density)
-    #         CUDA.unsafe_free!(gpu_data.device_density[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_screened_density)
-    #         CUDA.unsafe_free!(gpu_data.device_screened_density[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_non_zero_coefficients) 
-    #         CUDA.unsafe_free!(gpu_data.device_non_zero_coefficients[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_K_block)
-    #         CUDA.unsafe_free!(gpu_data.device_K_block[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_non_square_K_block)
-    #         CUDA.unsafe_free!(gpu_data.device_non_square_K_block[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_H)
-    #         CUDA.unsafe_free!(gpu_data.device_H)
-    #     end
-    #     if !isnothing(gpu_data.sparse_pq_index_map)
-    #         CUDA.unsafe_free!(gpu_data.sparse_pq_index_map[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_range_p)
-    #         CUDA.unsafe_free!(gpu_data.device_range_p[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_range_start)
-    #         CUDA.unsafe_free!(gpu_data.device_range_start[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_range_end)
-    #         CUDA.unsafe_free!(gpu_data.device_range_end[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_range_sparse_start)
-    #         CUDA.unsafe_free!(gpu_data.device_range_sparse_start[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_range_sparse_end)
-    #         CUDA.unsafe_free!(gpu_data.device_range_sparse_end[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_sparse_to_p)
-    #         CUDA.unsafe_free!(gpu_data.device_sparse_to_p[device_id])
-    #     end
-    #     if !isnothing(gpu_data.device_sparse_to_q)
-    #         CUDA.unsafe_free!(gpu_data.device_sparse_to_q[device_id])
-    #     end
-    # end
-    # GC.gc(true)
-    # for device_id in 1:number_of_gpus
-    #     CUDA.device!(device_id - 1)
-    #     CUDA.reclaim()
-    # end
+    return SCFData([], [], [], [], [],[], [], [], [], [], [], sd, gpu_data, 0, 0, 0, 0)
 end
 
 export SCFData, initialize!, SCFGPUData, ScreeningData, clear_gpu_data

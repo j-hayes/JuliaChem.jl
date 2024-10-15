@@ -25,7 +25,7 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
 
         basis_function_screen_matrix = scf_data.screening_data.basis_function_screen_matrix
         scf_data.screening_data.non_screened_p_indices_count = zeros(Int64, scf_data.μ)
-        scf_data.screening_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
+        scf_data.non_zero_coefficients = Vector{Array}(undef, scf_data.μ)
         scf_data.screening_data.screened_indices_count = sum(basis_function_screen_matrix)
         scf_data.screening_data.sparse_p_start_indices = zeros(Int64, scf_data.μ)
         scf_data.screening_data.non_zero_ranges = Vector{Array{UnitRange{Int}}}(undef, scf_data.μ)
@@ -42,7 +42,7 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
             end
 
             scf_data.screening_data.non_screened_p_indices_count[pp] = sum(view(basis_function_screen_matrix, :, pp))
-            scf_data.screening_data.non_zero_coefficients[pp] = zeros(scf_data.occ, scf_data.screening_data.non_screened_p_indices_count[pp])
+            scf_data.non_zero_coefficients[pp] = zeros(scf_data.occ, scf_data.screening_data.non_screened_p_indices_count[pp])
 
 
             scf_data.screening_data.non_zero_ranges[pp] = Array{UnitRange{Int}}(undef, 0)
@@ -264,13 +264,13 @@ function calculate_W_screened(scf_data, occupied_orbital_coefficients)
                 non_zero_r_index = 1
                 for r in 1:p
                     if scf_data.screening_data.basis_function_screen_matrix[r, pp]
-                        scf_data.screening_data.non_zero_coefficients[pp][:, non_zero_r_index] .= view(occupied_orbital_coefficients, :, r)
+                        scf_data.non_zero_coefficients[pp][:, non_zero_r_index] .= view(occupied_orbital_coefficients, :, r)
                         non_zero_r_index += 1
                     end
                 end
                 K = scf_data.screening_data.non_screened_p_indices_count[pp]
                 A_ptr = pointer(scf_data.D, linear_indicesB[1, scf_data.screening_data.sparse_p_start_indices[pp]])
-                B_ptr = pointer(scf_data.screening_data.non_zero_coefficients[pp], 1)
+                B_ptr = pointer(scf_data.non_zero_coefficients[pp], 1)
                 C_ptr = pointer(scf_data.D_tilde, linear_indicesW[1, 1, pp])
                 call_gemm!(Val(false), Val(true), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
 

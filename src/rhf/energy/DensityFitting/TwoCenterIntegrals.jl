@@ -164,7 +164,7 @@ end
                     end
                 end
             end
-            lock(mutex_mpi_worker) do #todo should we lock things not on root rank? will this effect performance enough to matter
+            lock(mutex_mpi_worker) do 
                 aux_shell_index_to_process = get_next_task_aux!(top_index, two_center_integral_tag, aux_indicies_processed, rank)
             end
             if aux_shell_index_to_process < 1

@@ -66,11 +66,19 @@ function create_scf_options(scf_flags)
     density_convergence = haskey(scf_flags, Convergence.density) ?
         scf_flags[Convergence.density] : Convergence.density_default
 
-    df_energy_convergence = haskey(scf_flags, Convergence.density_fitting_energy) ?
+
+    if guess == Guess.density_fitting
+        df_energy_convergence = haskey(scf_flags, Convergence.density_fitting_energy) ?
         scf_flags[Convergence.density_fitting_energy] : Convergence.energy_default
 
-    df_density_convergence = haskey(scf_flags, Convergence.density_fitting_density) ?
+        df_density_convergence = haskey(scf_flags, Convergence.density_fitting_density) ?
         scf_flags[Convergence.density_fitting_density] : Convergence.density_default
+    else
+        df_energy_convergence = energy_convergence
+        df_density_convergence = density_convergence
+    end
+
+  
   
     niter::Int = haskey(scf_flags, Convergence.max_iterations) ?
         scf_flags[Convergence.max_iterations] : Convergence.max_iterations_default

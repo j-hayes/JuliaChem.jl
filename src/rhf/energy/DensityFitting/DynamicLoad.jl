@@ -168,7 +168,6 @@ end
     return indicies
   end
   
-#   todo replace this with returning a list of ranges? https://stackoverflow.com/questions/40196070/index-array-with-multiple-ranges? probably won't do anything from a performance standpoint
   function static_load_rank_indicies(rank, n_ranks, basis_sets)
     shell_aux_indicies = get_df_static_shell_indices(basis_sets, n_ranks, rank)
     basis_indicies, rank_basis_index_map = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
@@ -183,7 +182,7 @@ end
     shell_aux_indicies = (rank*shells_per_rank)+1:min((rank+1)*shells_per_rank, number_of_shells)
     if rank == n_ranks - 1 # grab the remaining shells and give them to the last rank. 
         shell_aux_indicies = (rank*shells_per_rank)+1:number_of_shells
-    end # todo evenly distribute the remaining shells to the ranks.
+    end 
     shell_aux_indicies = collect(shell_aux_indicies)
     basis_indicies, rank_basis_index_map = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
     return shell_aux_indicies, basis_indicies, rank_basis_index_map

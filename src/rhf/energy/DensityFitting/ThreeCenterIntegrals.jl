@@ -74,8 +74,6 @@ end
     shell_3_nbasis = shell_3.nbas
     bf_3_pos = shell_3.pos
 
-    #todo make the cartesian index match how the array is stored (μ ,ν, A)
-
     number_of_integrals = n12 * shell_3_nbasis
     return s1, s2, s3, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos, number_of_integrals #todo make this a struct
 end

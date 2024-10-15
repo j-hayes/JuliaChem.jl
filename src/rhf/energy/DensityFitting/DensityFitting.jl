@@ -27,6 +27,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
 
   comm = MPI.COMM_WORLD
   rank = MPI.Comm_rank(comm)
+  n_ranks = MPI.Comm_size(comm)
 
 
 
@@ -50,7 +51,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   if scf_options.contraction_mode == "GPU" || scf_options.contraction_mode == "denseGPU"
     run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else # CPU
-    if scf_options.contraction_mode == "dense" || scf_options.df_force_dense
+    if scf_options.contraction_mode == "dense" || scf_options.df_force_dense && n_ranks == 1
       df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
     else   #default contraction mode is now scf_options.contraction_mode == "screened"
@@ -122,6 +123,7 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
   comm = MPI.COMM_WORLD
   indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
   if iteration == 1
+    
     two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
     calculate_B!(scf_data, two_center_integrals, three_center_integrals, indicies, jc_timing)
@@ -151,9 +153,11 @@ function calculate_B!(scf_data, two_center_integrals, three_center_integrals, in
     end
 
   end
-  B_time = @elapsed BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,scf_data.A)), two_center_integrals, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
+  B_time = @elapsed BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,AA)), two_center_integrals, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
 
   #TODO make this a TRMM! for 1 rank case 
+  #TODO multiple rank case
+
   jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
   jc_timing.timings[JCTC.B_time] = B_time
 end
