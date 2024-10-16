@@ -29,11 +29,16 @@ function full_rhf(input_file; output=3)
   println("         Application of Julia to Hartree-Fock Calculations.\" J. Chem.          ") 
   println("                     Theory Compute. 2020, 16, 8, 5006-5013.                    ")
   println("                                                                                ")
+  println("                                                                                ")
+  println("           Density Fitting Restricted Hartree Fock                              ")
+  println("               implemented by Jackson Hayes <jhayes1@iastate.edu                ")
+  println("                                                                                ")
   println("       For questions on usage, email David Poole at davpoole@iastate.edu.       ")
-  println("                             Jackson                                            ")
+  println("                                                                                ")
   println("--------------------------------------------------------------------------------")
   end 
-
+  rhf_energy = nothing
+  properties = nothing
   try
     #== read in input file ==#
     molecule, driver, model, keywords = JuliaChem.JCInput.run(input_file;       
@@ -47,6 +52,7 @@ function full_rhf(input_file; output=3)
     JuliaChem.JCMolecule.run(mol)
 
     #== calculation driver ==# 
+    
     if driver == "energy"
         #== perform scf calculation ==#
         if haskey(keywords, "scf")         
@@ -59,8 +65,6 @@ function full_rhf(input_file; output=3)
         #== compute molecular properties such as dipole moment ==#
         properties = JuliaChem.JCRHF.Properties.run(mol, basis, rhf_energy, 
           keywords["prop"]; output=output)
-
-        return rhf_energy, properties
         
     else
       throw("Exception: Only energy calculations are currently supported!")
@@ -71,6 +75,7 @@ function full_rhf(input_file; output=3)
     println(msg)          
     exit()                                                                                                                            
   end 
+  
   if MPI.Comm_rank(MPI.COMM_WORLD) == 0
   println("--------------------------------------------------------------------------------")
   println("                      Your calculation has run to completion!                   ")
@@ -80,4 +85,5 @@ function full_rhf(input_file; output=3)
   println("                       ========================================                 ")
   println("--------------------------------------------------------------------------------")
   end
+  return rhf_energy, properties
 end
