@@ -1,8 +1,8 @@
 #=============================#
 #== put needed modules here ==#
 #=============================#
-# ENV["MKL_DYNAMIC"] = false
-# using MKL
+ENV["MKL_DYNAMIC"] = false
+using MKL
 println("starting density fitting test"); flush(stdout)
 using JuliaChem
 println("imported JuliaChem"); flush(stdout)
@@ -13,7 +13,7 @@ using JuliaChem.Shared.JCTC
 using MPI
 using LinearAlgebra
 using Base.Threads
-using ThreadPinning
+# using ThreadPinning
 using CUDA  
 
 include("../example_scripts/full-rhf-repl.jl")
@@ -44,6 +44,7 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file::Strin
       timings.run_name = "run_name_test_blah"
       timings.run_time = run_time
       name = "water_timings_$(timings.options[JCTC.contraction_mode])_$(timings.non_timing_data[JCTC.contraction_algorithm])"
+      name = replace(name, " "=> "_")
       println("saving to $(name)")
       save_jc_timings_to_hdf5(timings, joinpath(output_path, "$(name).h5"))
       exit()
@@ -143,10 +144,10 @@ function main()
   # check_density_fitted_method_matches_RHF(df_path, rhf_path, true)
 
 
-  df_rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df_gpu/gly")
-  rhf_path = joinpath(@__DIR__,  "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/example_inputs/gly/df/gly")
+  df_rhf_path = joinpath(@__DIR__,  "/home/jackson/source/JuliaChem.jl/example_inputs/gly/df_gpu/gly")
+  rhf_path = joinpath(@__DIR__,  "/home/jackson/source/JuliaChem.jl/example_inputs/gly/df/gly")
 
-  output_path = "/pscratch/sd/j/jhayes1/source/JuliaChem.jl/testoutputs/"
+  output_path = "/home/jackson/source/JuliaChem.jl/testoutputs/"
 
   start_index = 1
   end_index = 18
@@ -161,8 +162,8 @@ function main()
           rhf_gly_path = rhf_path * string(i) * ".json"
 
 
-          # df_gly_path = "/pscratch/sd/j/jhayes1/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
-          # rhf_gly_path =  "/pscratch/sd/j/jhayes1/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
+          # df_gly_path = "/home/jackson/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
+          # rhf_gly_path =  "/home/jackson/source/benchmark_JC/JuliaChem-Benchmarks/DF-RHF-Benchmark/S22_3/cc-pvdz/ammonia_trimer.json"
 
           check_density_fitted_method_matches_RHF(df_gly_path, rhf_gly_path, output_path, i == start_index && j == 1)
           display(CUDA.pool_status())

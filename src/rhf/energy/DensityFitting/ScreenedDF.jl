@@ -96,10 +96,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         if MPI.Comm_size(MPI.COMM_WORLD) > 1 #todo update this to reduce communication?
             B_time = @elapsed calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options, jc_timing)
         else
-            load = scf_options.load
-            scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
             three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data)
-            scf_options.load = load #todo remove this and just pass the load param
             B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
             jc_timing.timings[JCTC.three_eri_time] = three_eri_time
         end

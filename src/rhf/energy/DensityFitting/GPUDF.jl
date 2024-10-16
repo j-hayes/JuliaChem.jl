@@ -62,16 +62,14 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             SCF_Keywords.Screening.df_exchange_n_blocks_gpu_default,
             jc_timing)
         end
-        load = scf_options.load
-        scf_options.load = "screened" #todo make calculate_three_center_integrals know that it is screening without changing load param
         
         three_eri_time = @elapsed begin
             for device_id in 1:num_devices #the method being called uses many threads do not need to thread by device
                 global_device_id = device_id + (rank)*num_devices
-                three_center_integrals[device_id] = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data, global_device_id-1,num_devices_global)
+                three_center_integrals[device_id] = calculate_three_center_integrals(jeri_engine_thread_df,
+                     basis_sets, scf_options, scf_data, global_device_id-1,num_devices_global, true)
             end
         end
-        scf_options.load = load
 
         calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
        

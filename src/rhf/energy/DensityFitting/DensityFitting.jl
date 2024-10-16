@@ -125,7 +125,7 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
   if iteration == 1
     
     two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
+    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
     calculate_B!(scf_data, two_center_integrals, three_center_integrals, indicies, jc_timing)
 
         
@@ -134,8 +134,8 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
     jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense cpu"
 
   end  
-  calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing, iteration)
   calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  indicies, jc_timing, iteration)
+  calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing, iteration)
 end
 
 
@@ -153,7 +153,15 @@ function calculate_B!(scf_data, two_center_integrals, three_center_integrals, in
     end
 
   end
-  B_time = @elapsed BLAS.gemm!('N', 'T', 1.0, reshape(three_center_integrals, (μμ*νν,AA)), two_center_integrals, 0.0, reshape(scf_data.D, (μμ*νν,AA)))
+  scf_data.D = three_center_integrals
+
+  B_time = @elapsed begin
+    BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ*νν)))
+  end
+
+  # B_time = @elapsed BLAS.gemm!('N', 'N', 1.0, two_center_integrals, reshape(three_center_integrals, (AA,μμ*νν)), 0.0, reshape(scf_data.D, (AA,μμ*νν)))
+  #       CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt, device_three_center_integrals, device_B[1])   
+
 
   #TODO make this a TRMM! for 1 rank case 
   #TODO multiple rank case
@@ -163,23 +171,41 @@ function calculate_B!(scf_data, two_center_integrals, three_center_integrals, in
 end
 
 function calculate_coulomb!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming, iteration)
-  AA = length(indicies)
-  density_time = @elapsed BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-  V_time = @elapsed BLAS.gemv!('T', 1.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), reshape(scf_data.density, scf_data.μ*scf_data.μ), 0.0, scf_data.coulomb_intermediate)
-  J_time = @elapsed BLAS.gemv!('N', 2.0, reshape(scf_data.D, (scf_data.μ*scf_data.μ,AA)), scf_data.coulomb_intermediate , 1.0, reshape(scf_data.two_electron_fock, scf_data.μ^2))
+  Q = length(indicies)
+  pq = scf_data.μ^2
+  B = scf_data.D
+  V = scf_data.coulomb_intermediate
+  fock = scf_data.two_electron_fock
+  density = scf_data.density 
 
+  density_time = @elapsed BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, density)
+  V_time = @elapsed begin
+    BLAS.gemv!('N', 1.0, reshape(B, (Q, pq)), reshape(density, pq), 0.0, V)
+  end
+  J_time = @elapsed begin
+    BLAS.gemv!('T', 2.0, reshape(B, (Q, pq)), V, 0.0, reshape(fock, pq))
+  end
   jc_timing.timings[JCTiming_key(JCTC.density_time,iteration)] = density_time
   jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
   jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
 end
 
 function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming, iteration)
-  AA = length(indicies)
-  μμ = scf_data.μ
-  ii = scf_data.occ
-  W_time = @elapsed BLAS.gemm!('T', 'N' , 1.0, reshape(scf_data.D, (μμ, μμ*AA)), occupied_orbital_coefficients, 0.0, reshape(scf_data.D_tilde, (μμ*AA,ii)))
-  K_time = @elapsed BLAS.gemm!('N', 'T', -1.0, reshape(scf_data.D_tilde, (μμ, ii*AA)), reshape(scf_data.D_tilde, (μμ, ii*AA)), 0.0, scf_data.two_electron_fock)
+  Q = length(indicies)
+  p = scf_data.μ
+  n_ooc = scf_data.occ
 
+  ooc = occupied_orbital_coefficients
+  B = scf_data.D
+  W = scf_data.D_tilde
+  fock = scf_data.two_electron_fock
+
+  W_time = @elapsed begin
+    BLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q * p, p)), 0.0, reshape(W, (n_ooc, Q * p)))
+  end
+  K_time = @elapsed begin
+    BLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q, p)), reshape(W, (n_ooc * Q, p)), 1.0, fock)
+  end
   jc_timing.timings[JCTiming_key(JCTC.W_time,iteration)] = W_time
   jc_timing.timings[JCTiming_key(JCTC.K_time,iteration)] = K_time
 

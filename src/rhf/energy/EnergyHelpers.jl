@@ -316,7 +316,8 @@ end
 
 
 
-@inline function axial_normalization_factor_screened!(eri_quartet_batch::Array{Float64},
+#axial normialization for 3-center integrals screened
+@inline function axial_normalization_factor_screened!(eris::Array{Float64},
   μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
   nμ::Int, nν::Int, nλ::Int,
   μ::Int,ν::Int,λ::Int, sparse_pq_index_map, rank_basis_index_map) 
@@ -343,41 +344,45 @@ end
           normalization_factor = 1.0
         end
         aux_index =  rank_basis_index_map[μ+μsize]
-        eri_quartet_batch[aux_index,screened_index] *= normalization_factor 
+        eris[aux_index,screened_index] *= normalization_factor 
         if ν+νsize != λ+λsize
           inverted_screened_index = sparse_pq_index_map[λ+λsize, ν+νsize] 
-          eri_quartet_batch[aux_index,inverted_screened_index] = eri_quartet_batch[aux_index,screened_index] 
+          eris[aux_index,inverted_screened_index] = eris[aux_index,screened_index] 
         end 
       end 
     end
   end 
 end
 
-@inline function axial_normalization_factor(eri_quartet_batch::Array{Float64},
-  μsh::JCModules.Shell, νsh::JCModules.Shell, λsh::JCModules.Shell,
-  nμ::Int, nν::Int, nλ::Int,
-  μ::Int,ν::Int,λ::Int) 
+#axial normialization for 3-center integrals
+#Q = auxiliary basis index
+#p = primary basis index
+#q = primary basis index
+@inline function axial_normalization_factor(eris::Array{Float64},
+  Qsh::JCModules.Shell, psh::JCModules.Shell, qsh::JCModules.Shell,
+  nQ::Int, np::Int, nq::Int,
+  Q::Int,p::Int,q::Int) 
 
-  amμ = μsh.am
-  amν = νsh.am
-  amλ = λsh.am
+  amQ = Qsh.am
+  amp = psh.am
+  amq = qsh.am
 
   
   
-  for μsize::Int64 in 0:(nμ-1) 
-    μnorm = get_axial_normalization_factor(μsize+1,amμ)
-    for νsize::Int64 in 0:(nν-1)
-      νnorm = get_axial_normalization_factor(νsize+1,amν)
-      μνnorm = μnorm*νnorm
-      for λsize::Int64 in 0:(nλ-1)
-        λnorm = get_axial_normalization_factor(λsize+1,amλ)
-        normalization_factor = μνnorm*λnorm        
-        if amμ < 3 && amν < 3 && amλ < 3 
+  for Qsize::Int64 in 0:(nQ-1) 
+    Qnorm = get_axial_normalization_factor(Qsize+1,amQ)
+    for psize::Int64 in 0:(np-1)
+      pnorm = get_axial_normalization_factor(psize+1,amp)
+      Qpnorm = Qnorm*pnorm
+      for qsize::Int64 in 0:(nq-1)
+        qnorm = get_axial_normalization_factor(qsize+1,amq)
+        normalization_factor = Qpnorm*qnorm        
+        if amQ < 3 && amp < 3 && amq < 3 
           normalization_factor = 1.0
         end
-        eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize] *= normalization_factor # moved AUX to third index
-        if ν+νsize > λ+λsize
-          eri_quartet_batch[λ+λsize,ν+νsize,μ+μsize] =  eri_quartet_batch[ν+νsize,λ+λsize,μ+μsize]  # moved AUX to third index #this logic is funky to have here for symmetry. This step should be combined with the copy step to be less confusing and more performant
+        eris[Q+Qsize, p+psize,q+qsize] *= normalization_factor
+        if p+psize > q+qsize
+          eris[Q+Qsize,q+qsize,p+psize] = eris[Q+Qsize, p+psize,q+qsize]
         end
       end 
     end

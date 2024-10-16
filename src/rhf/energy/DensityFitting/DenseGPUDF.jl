@@ -32,7 +32,7 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
 
     if iteration == 1
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
+        three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
 
 
         calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf_data, num_devices, jc_timing)
@@ -105,7 +105,6 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
         end
         K_time = @elapsed begin
             CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q, p)), reshape(W, (n_ooc * Q, p)), 1.0, fock)
-            CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], fock) 
             CUDA.synchronize()          
         end
         GPU_H_add_time = @elapsed begin
@@ -115,7 +114,6 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
         end
         copy_time = @elapsed begin
             CUDA.copyto!(scf_data.gpu_data.host_fock[1], scf_data.gpu_data.device_fock[device_id])
-        
             scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
             for device_id in 2:num_devices
                 axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
@@ -170,9 +168,6 @@ function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf
 
     pq = scf_data.μ^2
     
-    three_center_integrals = permutedims(three_center_integrals, [3,1,2]) #TODO this shouldn't be necessary it should be formed in this shape for 1 rank 1 device run
-
-
     device_three_center_integrals = CUDA.zeros(Float64, (scf_data.A, pq))
     device_B[1] = CUDA.zeros(Float64, (scf_data.A, pq))
     CUDA.synchronize()
