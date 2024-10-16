@@ -94,4 +94,20 @@ function get_max_P_P(two_center_integrals)
     return maxP
 end
 
-export schwarz_screen_itegrals_df, get_max_P_P
+function setup_unscreened_screening_matricies(basis_sets, scf_data)
+    basis = basis_sets.primary
+    basis_set_length = length(basis)
+    scf_data.screening_data.shell_screen_matrix = ones(Bool,basis_set_length, basis_set_length) # true means keep the shell pair, false means it is screened
+    scf_data.screening_data.basis_function_screen_matrix = ones(Bool,scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
+    scf_data.screening_data.screened_indices_count = scf_data.μ^2
+    scf_data.screening_data.sparse_pq_index_map = zeros(Int64, (scf_data.μ, scf_data.μ))
+
+    Threads.@threads for pp in 1:scf_data.μ
+      for qq in 1:scf_data.μ
+        #2D index to 1D index row major (why is this row major?)
+        scf_data.screening_data.sparse_pq_index_map[pp, qq] = pp + (qq - 1) * scf_data.μ
+      end
+    end
+end
+
+export schwarz_screen_itegrals_df, get_max_P_P, setup_unscreened_screening_matricies

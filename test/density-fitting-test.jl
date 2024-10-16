@@ -29,7 +29,7 @@ function check_density_fitted_method_matches_RHF(denity_fitted_input_file::Strin
 
     println("running density fitted file $denity_fitted_input_file")
 
-    outputval = 2
+    outputval = 3
 
     #startup compilation runs
    # screened_cpu_time = @elapsed begin @time begin 

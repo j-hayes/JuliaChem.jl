@@ -27,19 +27,17 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
     n_ooc = scf_data.occ
     Q = scf_data.A
 
-    num_devices = 1 
+    num_devices = scf_options.num_devices
     scf_data.gpu_data.number_of_devices_used = num_devices
 
     if iteration == 1
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-        three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
+   
 
-
-        calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf_data, num_devices, jc_timing)
+        calculate_B_dense_GPU(two_center_integrals, scf_data, num_devices, jc_timing)
 
         #clear the memory 
         two_center_integrals = nothing
-        three_center_integrals = nothing
 
         scf_data.gpu_data.device_fock = Array{CuArray{Float64}}(undef, num_devices)
         scf_data.gpu_data.device_coulomb_intermediate = Array{CuArray{Float64}}(undef, num_devices)
@@ -61,7 +59,6 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
         CUDA.synchronize()
 
         jc_timing.timings[JCTiming_key(JCTC.two_eri_time, 1)] = two_eri_time
-        jc_timing.timings[JCTiming_key(JCTC.three_eri_time, 1)] = three_eri_time
         jc_timing.non_timing_data[JCTC.GPU_num_devices] = string(num_devices)
         jc_timing.non_timing_data[JCTiming_GPUkey(JCTC.GPU_data_size_MB, 1)] = string(get_gpu_data_size_dense_MB(scf_data))
     end
@@ -146,47 +143,108 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
    
 end
 
-function calculate_B_dense_GPU(two_center_integrals, three_center_integrals, scf_data, num_devices, jc_timing::JCTiming)
+function calculate_B_dense_GPU(two_center_integrals, scf_data, num_devices, jc_timing::JCTiming)
 
 
     scf_data.gpu_data.device_B = Array{CuArray{Float64}}(undef, num_devices)
     device_B = scf_data.gpu_data.device_B
     device_three_center_integrals = Array{CuArray{Float64}}(undef, num_devices)
     scf_data.gpu_data.device_B_send_buffers = Array{CuArray{Float64}}(undef, num_devices)
+    device_J_AB_invt = Array{CuArray{Float64}}(undef, num_devices)
+    
+    #always do J_AB_INV on the first device
+    Threads.@threads for device_id in 1:num_devices
+        CUDA.device!(device_id-1)
+        device_J_AB_invt[device_id] = CUDA.zeros(Float64, (scf_data.A, scf_data.A))
+        CUDA.synchronize()
+        CUDA.copyto!(device_J_AB_invt, two_center_integrals)
+        CUDA.synchronize()
+
+    end
+    
     CUDA.device!(0)
-
-    device_J_AB_invt = CUDA.zeros(Float64, (scf_data.A, scf_data.A))
-    CUDA.copyto!(device_J_AB_invt, two_center_integrals)
-    CUDA.synchronize()
-
     form_J_AB_inv_time = @elapsed begin
         CUSOLVER.potrf!('L', device_J_AB_invt)
         CUDA.synchronize()
         CUSOLVER.trtri!('L', 'N',  device_J_AB_invt)
         CUDA.synchronize()
     end
+    jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
+
 
     pq = scf_data.μ^2
-    
-    device_three_center_integrals = CUDA.zeros(Float64, (scf_data.A, pq))
-    device_B[1] = CUDA.zeros(Float64, (scf_data.A, pq))
-    CUDA.synchronize()
-    CUDA.copyto!(device_three_center_integrals, three_center_integrals)
-    CUDA.synchronize()
+    if num_devices == 1
+        three_eri_time = @elapsed other_device_three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
 
-    B_time = @elapsed begin
-        CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt, device_three_center_integrals, device_B[1])   
-
+        device_three_center_integrals[1] = CUDA.zeros(Float64, (scf_data.A, pq))
+        device_B[1] = CUDA.zeros(Float64, (scf_data.A, pq))
         CUDA.synchronize()
+        CUDA.copyto!(device_three_center_integrals[1], other_device_three_center_integrals)
+        CUDA.synchronize()
+        
+        B_time = @elapsed begin
+            
+            CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt, device_three_center_integrals[1], device_B[1])   
+            CUDA.synchronize()
+        end
+        jc_timing.timings[JCTiming_key(JCTC.three_eri_time, 1)] = three_eri_time
+        jc_timing.timings[JCTC.B_time] = B_time
+
+        CUDA.unsafe_free!(device_J_AB_invt)
+        CUDA.unsafe_free!(device_three_center_integrals)
+        CUDA.reclaim()
+    else
+        setup_unscreened_screening_matricies(basis_sets, scf_data)
+        #copy J_AB_INV to all devices
+        CUDA.copyto!(two_center_integrals, device_J_AB_invt)
+        Threads.@threads for device_id in 2:num_devices
+            CUDA.device!(device_id-1)
+            CUDA.copyto!(device_J_AB_invt[device_id], two_center_integrals)
+            CUDA.synchronize()
+        end
+
+        device_Q_index_lengths = zeros(Int, num_devices)
+        aux_ranges = Array{UnitRange{Int}}(undef, num_devices)
+        Threads.@threads for device in 1:num_devices
+            rank_shell_aux_indicies, 
+            rank_aux_indicies, 
+            rank_basis_index_map = static_load_rank_indicies(rank,n_ranks,basis_sets) 
+            device_Q_index_lengths[device] = length(rank_aux_indicies)
+            aux_ranges[device] = rank_aux_indicies
+        end
+
+        max_device_Q_range_length = maximum(device_Q_index_lengths)
+
+        Threads.@threads for device_id in 1:num_devices
+            CUDA.device!(device_id-1)
+            device_three_center_integrals[device_id] = CUDA.zeros(Float64, (max_device_Q_range_length*pq))
+            device_B[device_id] = CUDA.zeros(Float64, (device_Q_index_lengths[device_id],pq))
+        end
+
+
+        
+        for other_device in 0:num_devices-1
+            other_rank_shell_aux_indicies, 
+            other_rank_aux_indicies,
+            other_rank_basis_index_map = static_load_rank_indicies(other_device,n_ranks,basis_sets) 
+      
+            three_eri_time = @elapsed begin
+              other_device_three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
+                scf_data, other_device, n_ranks, true, false)
+            end
+            Threads.@threads for device_id in 1:num_devices
+                CUDA.device!(device_id-1)
+                rank_aux_indicies = aux_ranges[device_id]
+                three_eri_view = view(device_three_center_integrals[device_id], 1:(device_Q_index_lengths[device_id]*pq))
+                reshape_three_eri_view = reshape(three_eri_view, (device_Q_index_lengths[device_id], pq))
+                CUDA.copyto!(reshape_three_eri_view, other_device_three_center_integrals)
+                CUBLAS.gemm!('N', 'N', 1.0, device_J_AB_invt[rank_aux_indicies,other_rank_aux_indicies], device_three_center_integrals[device_id], 
+                    1.0, device_B[device_id])
+                # BLAS.gemm!('N', 'N', 1.0, two_center_integrals[rank_aux_indicies,other_rank_aux_indicies], three_center_integrals, 1.0, scf_data.D)
+            end
+        end      
     end
 
-    #free up memory
-    CUDA.unsafe_free!(device_J_AB_invt)
-    CUDA.unsafe_free!(device_three_center_integrals)
-    CUDA.reclaim()
-
-    jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
-    jc_timing.timings[JCTC.B_time] = B_time
 end
 
 function calculate_device_ranges_dense(scf_data, num_devices)
