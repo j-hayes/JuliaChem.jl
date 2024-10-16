@@ -20,7 +20,7 @@ using Printf
 #allow new CalculationBasisSets to be passed, primary basis will be selected
 function run(mol::Molecule, basis_sets::CalculationBasisSets, rhf_energy, 
   keywords; output=0)
-  return run(mol, basis_sets.primary, rhf_energy, keywords)
+  return run(mol, basis_sets.primary, rhf_energy, keywords; output=output)
 end
 
 function run(mol::Molecule, basis::Basis, rhf_energy, 
@@ -124,7 +124,9 @@ function run(mol::Molecule, basis::Basis, rhf_energy,
       #== initial setup ==#
       D = rhf_energy["Density"] 
       S = rhf_energy["Overlap"]
-      
+
+      mulliken_pop = compute_population_analysis(mol, basis, D, S)
+
       #== compute mulliken charges ==# 
       if MPI.Comm_rank(comm) == 0 && output >= 2
         println("----------------------------------------          ")
@@ -132,17 +134,14 @@ function run(mol::Molecule, basis::Basis, rhf_energy,
         println("----------------------------------------          ")
         println(" ")
         println("Atom #     Symbol       Mulliken Pop.         Charge        ") 
-      end  
-  
-      mulliken_pop = compute_population_analysis(mol, basis, D, S)
- 
-      for (iatom, atom) in enumerate(mol) 
-        atom_pop = mulliken_pop[iatom]
-        @printf("  %d           %s           %.6f          %.6f     \n", 
-          iatom, atom.symbol, atom_pop, atom.atom_id - atom_pop) 
-      end
-      println()
 
+        for (iatom, atom) in enumerate(mol) 
+          atom_pop = mulliken_pop[iatom]
+          @printf("  %d           %s           %.6f          %.6f     \n", 
+            iatom, atom.symbol, atom_pop, atom.atom_id - atom_pop) 
+        end
+        println()
+      end  
       properties["Mulliken Population"] = mulliken_pop
       #properties["Lowdin Population"] = lowdin_pop
     end
@@ -156,6 +155,8 @@ function run(mol::Molecule, basis::Basis, rhf_energy,
         basis.basis_cxx) 
 
       P = rhf_energy["Density"] 
+      dipole = compute_dipole(mol, basis, P, jeri_prop_engine)
+      dipole_moment = sqrt(dipole[1]^2 + dipole[2]^2 + dipole[3]^2)
 
       #== compute dipole moment ==#
       if MPI.Comm_rank(comm) == 0 && output >= 2
@@ -164,14 +165,11 @@ function run(mol::Molecule, basis::Basis, rhf_energy,
         println("----------------------------------------          ")
         println(" ")
         println("Dipole:       X           Y           Z         Tot. (D)        ") 
-      end  
-  
-      dipole = compute_dipole(mol, basis, P, jeri_prop_engine)
-      dipole_moment = sqrt(dipole[1]^2 + dipole[2]^2 + dipole[3]^2)
-  
-      @printf("          %.6f   %.6f    %.6f    %.6f     \n", 
+
+        @printf("          %.6f   %.6f    %.6f    %.6f     \n", 
         dipole[1], dipole[2], dipole[3], dipole_moment)
-      println()
+        println()
+      end  
  
       properties["Dipole"] = (x = dipole[1], y = dipole[2], z = dipole[3], 
         moment = dipole_moment)  

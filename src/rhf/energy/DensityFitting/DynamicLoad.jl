@@ -157,17 +157,20 @@ end
 
   
   
-  @inline function get_df_static_shell_indices(basis_sets, n_ranks, rank)
+@inline function get_df_static_shell_indices(basis_sets, n_ranks, rank)
     number_of_shells = length(basis_sets.auxillary)
-    indicies = zeros(Int64, 0)
-    i = rank+1
-    while i <= number_of_shells
-      push!(indicies, i)
-      i += n_ranks
+    n_indices = number_of_shells ÷ n_ranks
+
+    begin_index = n_indices * rank + 1
+    end_index = begin_index + n_indices - 1
+    if rank == n_ranks - 1
+        end_index = number_of_shells
     end
-    return indicies
+    
+    return begin_index:end_index
   end
   
+
   function static_load_rank_indicies(rank, n_ranks, basis_sets)
     shell_aux_indicies = get_df_static_shell_indices(basis_sets, n_ranks, rank)
     basis_indicies, rank_basis_index_map = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
@@ -206,21 +209,7 @@ end
     return basis_indicies, rank_basis_index_map
   end
 
-# move these to a static load file
-    function get_df_static_basis_indices(basis_sets, comm_size, rank)
-    number_of_shells = length(basis_sets.auxillary)
-    indicies = []
-    i = rank+1
-    while i <= number_of_shells
-      pos = basis_sets.auxillary[i].pos
-      end_index = pos + basis_sets.auxillary[i].nbas-1
-      for index in pos:end_index
-        push!(indicies, index)
-      end
-      i += comm_size
-    end
-    return indicies
-  end
+
 
   function get_static_gatherv_data(rank, n_ranks, basis_sets, inner_basis_function_length) :: Tuple{Int64, Int64, Int64, Int64, Int64}
     aux_basis_length = length(basis_sets.auxillary)

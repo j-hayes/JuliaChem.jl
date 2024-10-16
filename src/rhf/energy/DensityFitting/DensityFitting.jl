@@ -36,14 +36,14 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     basis_function_count = basis_sets.primary.norb
     occupied_orbital_count = Int64(basis_sets.primary.nels)÷2
   
-    indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
+    shell_aux_indicies, aux_indicies, basis_index_map = static_load_rank_indicies(rank, n_ranks, basis_sets)
   
     scf_data.μ = basis_function_count
     scf_data.A = aux_basis_function_count
     scf_data.occ = occupied_orbital_count
 
     scf_data.two_electron_fock = zeros(Float64, (scf_data.μ, scf_data.μ))
-    allocate_memory_density_fitting_dense(scf_data, scf_options, indicies)   
+    allocate_memory_density_fitting_dense(scf_data, scf_options, aux_indicies)   
   end
 
   occupied_orbital_coefficients = coefficients[:,1:scf_data.occ]
@@ -51,7 +51,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   if scf_options.contraction_mode == "GPU" || scf_options.contraction_mode == "denseGPU"
     run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else # CPU
-    if scf_options.contraction_mode == "dense" || scf_options.df_force_dense && n_ranks == 1
+    if scf_options.contraction_mode == "dense" || scf_options.df_force_dense 
       df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
     else   #default contraction mode is now scf_options.contraction_mode == "screened"
@@ -110,7 +110,7 @@ function allocate_memory_density_fitting_dense(scf_data, scf_options, indicies)
   AA = length(indicies)
   μμ = scf_data.μ
   ii = scf_data.occ
-  scf_data.D = zeros(Float64, (μμ, μμ, AA))
+  scf_data.D = zeros(Float64, (AA,μμ, μμ))
   scf_data.D_tilde = zeros(Float64, (μμ, AA,ii))
 
   scf_data.density = zeros(Float64, (μμ, μμ))
@@ -121,43 +121,84 @@ end
 function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, basis_sets::CalculationBasisSets,
     occupied_orbital_coefficients, iteration, scf_options::SCFOptions, jc_timing::JCTiming) where {T<:DFRHFTEIEngine}
   comm = MPI.COMM_WORLD
-  indicies = get_df_static_basis_indices(basis_sets, MPI.Comm_size(comm), MPI.Comm_rank(comm))
+  shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_rank(comm),MPI.Comm_size(comm),basis_sets) #todo only do this on iteration 1
+  
   if iteration == 1
     
     two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
-    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
-    calculate_B!(scf_data, two_center_integrals, three_center_integrals, indicies, jc_timing)
-
+    calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
         
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time,iteration)] = two_eri_time
-    jc_timing.timings[JCTiming_key(JCTC.three_eri_time,iteration)] = three_eri_time
     jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense cpu"
 
   end  
-  calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  indicies, jc_timing, iteration)
-  calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing, iteration)
+  calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  aux_indicies, jc_timing, iteration)
+  calculate_exchange!(scf_data, occupied_orbital_coefficients, aux_indicies, jc_timing, iteration)
 end
 
 
-function calculate_B!(scf_data, two_center_integrals, three_center_integrals, indicies, jc_timing::JCTiming)
+function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
+  scf_options::SCFOptions, jeri_engine_thread_df::Vector{T},
+  basis_sets::CalculationBasisSets) where {T<:DFRHFTEIEngine}
   μμ = scf_data.μ
   νν = scf_data.μ
-  AA = length(indicies)
 
-  form_J_AB_inv_time = @elapsed begin 
+  n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+  rank = MPI.Comm_rank(MPI.COMM_WORLD)
+
+  form_J_AB_inv_time = @elapsed begin
     LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
     LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
+  end
 
-    if MPI.Comm_size(MPI.COMM_WORLD) > 1
-      two_center_integrals = two_center_integrals[:,indicies]
+  B_time = 0.0
+  three_eri_time = 0.0
+  three_center_integrals = []
+ 
+  if n_ranks == 1  #single rank case
+    AA = scf_data.A
+    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
+    scf_data.D = three_center_integrals
+    B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
+  else
+    basis = basis_sets.primary
+    basis_set_length = length(basis)
+    scf_data.screening_data.shell_screen_matrix = ones(Bool,basis_set_length, basis_set_length) # true means keep the shell pair, false means it is screened
+    scf_data.screening_data.basis_function_screen_matrix = ones(Bool,scf_data.μ, scf_data.μ) # true means keep the basis function pair, false means it is screened
+    scf_data.screening_data.screened_indices_count = scf_data.μ^2
+    scf_data.screening_data.sparse_pq_index_map = zeros(Int64, (scf_data.μ, scf_data.μ))
+
+    Threads.@threads for pp in 1:scf_data.μ
+      for qq in 1:scf_data.μ
+        #2D index to 1D index row major (why is this row major?)
+        scf_data.screening_data.sparse_pq_index_map[pp, qq] = pp + (qq - 1) * scf_data.μ
+      end
     end
 
-  end
-  scf_data.D = three_center_integrals
+    rank_shell_aux_indicies, 
+    rank_aux_indicies, 
+    rank_basis_index_map = static_load_rank_indicies(rank,n_ranks,basis_sets) 
+    AA = length(rank_aux_indicies)
 
-  B_time = @elapsed begin
-    BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ*νν)))
+    scf_data.D = zeros(Float64, (AA, μμ * νν))
+
+    for other_rank in 0:n_ranks-1
+      other_rank_shell_aux_indicies, 
+      other_rank_aux_indicies,
+      other_rank_basis_index_map = static_load_rank_indicies(other_rank,n_ranks,basis_sets) 
+
+      three_eri_time = @elapsed begin
+        three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
+          scf_data, other_rank, n_ranks, true, false)
+      end
+      BLAS.gemm!('N', 'N', 1.0, two_center_integrals[rank_aux_indicies,other_rank_aux_indicies], three_center_integrals, 1.0, scf_data.D)
+    end
+
+    #print the first row of the three center integrals
+  
   end
+
+
 
   # B_time = @elapsed BLAS.gemm!('N', 'N', 1.0, two_center_integrals, reshape(three_center_integrals, (AA,μμ*νν)), 0.0, reshape(scf_data.D, (AA,μμ*νν)))
   #       CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt, device_three_center_integrals, device_B[1])   
@@ -168,6 +209,7 @@ function calculate_B!(scf_data, two_center_integrals, three_center_integrals, in
 
   jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
   jc_timing.timings[JCTC.B_time] = B_time
+  jc_timing.timings[JCTC.three_eri_time] = three_eri_time
 end
 
 function calculate_coulomb!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming, iteration)

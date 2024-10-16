@@ -21,7 +21,7 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
 end
 
 function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, 
-    scf_data::SCFData, rank::Int, n_ranks::Int, use_screened::Bool)
+    scf_data::SCFData, rank::Int, n_ranks::Int, use_screened::Bool, do_mpi_gather::Bool=false)
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     auxilliary_basis_shell_count = length(basis_sets.auxillary)
@@ -44,9 +44,7 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
             cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
             calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], shell_screen_matrix, sparse_pq_index_map, cartesian_indices, jeri_engine_thread[1], basis_sets)
         elseif scf_options.load == "static"
-            calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
-        elseif scf_options.load == "dynamic"
-            calculate_three_center_integrals_dynamic!(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
+            calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, rank, n_ranks, do_mpi_gather)
         else
             error("integral threading load type: $(scf_options.load) not supported")
         end
@@ -124,7 +122,7 @@ end
     end
 end
 
-
+#only for debugging purposes 
 function calculate_three_center_integrals_sequential!(three_center_integrals, integral_buffer, shell_screen_matrix, basis_screen_matrix, cartesian_indices, engine, basis_sets)
     for cartesian_index in cartesian_indices
         calculate_three_center_integrals_kernel!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer)
@@ -132,10 +130,8 @@ function calculate_three_center_integrals_sequential!(three_center_integrals, in
 end
 
 
-function calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer)
+function calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, rank, n_ranks, do_mpi_gather)
     comm = MPI.COMM_WORLD
-    rank = MPI.Comm_rank(comm)
-    n_ranks = MPI.Comm_size(comm)
     nthreads = Threads.nthreads()
     basis_length = length(basis_sets.primary)
     
@@ -163,7 +159,7 @@ function calculate_three_center_integrals_static(three_center_integrals, jeri_en
             end
         end
     end
-    if n_ranks > 1
+    if n_ranks > 1 && do_mpi_gather
         # MPI.Allreduce!(three_center_integrals, MPI.SUM, comm)
         gather_and_reduce_three_center_integrals(three_center_integrals, load_balance_indicies, rank_basis_indicies, comm)
     end
@@ -181,73 +177,6 @@ function gather_and_reduce_three_center_integrals(three_center_integrals, load_b
     reorder_mpi_gathered_matrix(three_center_integrals, 
         rank_indicies, set_data_3D!, set_temp_3D!, zeros(Float64,number_of_primary_basis_functions , number_of_primary_basis_functions))
 end
-
-
-
-function calculate_three_center_integrals_dynamic!(three_center_integrals, 
-    jeri_engine_thread, basis_sets, thead_integral_buffer)
-    comm = MPI.COMM_WORLD
-    n_threads = Threads.nthreads()
-    rank = MPI.Comm_rank(comm)
-    n_ranks = MPI.Comm_size(comm)
-    n_aux_shells = length(basis_sets.auxillary)
-    n_primary_shells = length(basis_sets.primary)
-    number_of_primary_basis_functions = size(three_center_integrals, 1)
-    
-    # all threads get pre determined first index to process this is the next lowest index for processing
-    top_index, aux_indicies_processed = setup_dynamic_load_indicies(n_aux_shells, n_ranks)
-    aux_shell_index_to_process = aux_indicies_processed[rank+1][1] # each rank starts with the (aux_shell_index_to_process = n_aux_shells - rank) a predetermined index to process first to start load balancing evenly without an extra mpi message.
-    n_worker_threads = get_number_of_dynamic_worker_threads(rank, n_ranks)
-    
-    if n_worker_threads > n_primary_shells
-        n_worker_threads = n_primary_shells
-    end
-
-    @sync begin 
-        mutex_mpi_worker = Base.Threads.ReentrantLock() # lock for the use of the messaging and the top_index variable
-        if rank == 0 && n_ranks > 1
-            Threads.@spawn setup_integral_coordinator_aux(three_center_integral_tag,
-                mutex_mpi_worker, top_index, aux_indicies_processed)
-        end
-        while true
-            @sync begin
-                for thread in 1:n_worker_threads
-                    Threads.@spawn begin
-                        number_of_indicies_to_process = n_primary_shells ÷ n_threads
-                        start_index = (thread - 1) * number_of_indicies_to_process + 1
-                        end_index = start_index + number_of_indicies_to_process - 1
-                        if thread == n_worker_threads
-                            end_index = n_primary_shells
-                        end
-                        integral_buffer = thead_integral_buffer[thread]
-                        engine = jeri_engine_thread[thread]
-                        for j_index in start_index:end_index # proecess the threads portion of the second index
-                            for i_index in 1:n_primary_shells # process all of the first index for (j_index,aux_shell_index_to_process) pair
-                                shell_index = CartesianIndex(aux_shell_index_to_process, i_index, j_index)
-                                calculate_three_center_integrals_kernel!(three_center_integrals, engine, shell_index, basis_sets, integral_buffer)
-                            end
-                        end
-                    end
-                end
-            end
-            lock(mutex_mpi_worker) do 
-                aux_shell_index_to_process = get_next_task_aux!(top_index, three_center_integral_tag, aux_indicies_processed, rank)
-            end
-            if aux_shell_index_to_process < 1
-                break
-            end
-        end
-    end
-    if n_ranks > 1
-        aux_indicies_processed = broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
-        rank_basis_indices, indicies_per_rank = get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks,basis_sets, number_of_primary_basis_functions^2)       
-        three_center_integral_buff = MPI.VBuffer(three_center_integrals, indicies_per_rank) # buffer set up with the correct size for each rank
-        MPI.Allgatherv!(three_center_integrals[ :,:,rank_basis_indices[rank+1]], three_center_integral_buff, comm) # gather the data from each rank into the buffer
-        reorder_mpi_gathered_matrix(three_center_integrals, rank_basis_indices, set_data_3D!, set_temp_3D!, zeros(Float64, number_of_primary_basis_functions , number_of_primary_basis_functions))
-    end
-end
-
-
 
 
 @inline function copy_integral_result!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis)

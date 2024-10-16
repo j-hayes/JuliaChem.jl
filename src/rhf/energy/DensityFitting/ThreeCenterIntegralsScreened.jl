@@ -37,6 +37,7 @@ function calculate_three_center_integrals_screened!(rank, n_ranks,
                 for μ in 1:basis_length
                     for ν in 1:μ 
                         if shell_screen_matrix[μ, ν] == false
+                            println("skipping shell $(μ) $(ν)")
                             continue 
                         end
                         cartesian_index = CartesianIndex(aux_index, μ, ν)
@@ -50,6 +51,23 @@ function calculate_three_center_integrals_screened!(rank, n_ranks,
     end
     return three_center_integrals
 end
+
+
+#calculate only the integrals that pass Schwarz screening
+#sparse_pq_index_map is a map of the non screened pq pairs to where in the screned matrix they should go in the 1D pq index, could be dense or triangular 
+@inline function calculate_three_center_integrals_kernel_screened!(three_center_integrals, engine, cartesian_index, basis_sets, integral_buffer, sparse_pq_index_map, rank_basis_index_map)
+    s1, s2, s3,
+    shell_1, shell_2, shell_3,
+    shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
+    bf_1_pos, bf_2_pos, bf_3_pos, 
+    number_of_integrals = get_indexes_eri_block(cartesian_index, basis_sets)
+    
+    JERI.compute_eri_block_df(engine, integral_buffer, s1, s2, s3, number_of_integrals, 0)
+    copy_integral_result_screened!(three_center_integrals, integral_buffer, bf_1_pos, bf_2_pos, bf_3_pos, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, sparse_pq_index_map, rank_basis_index_map)
+    axial_normalization_factor_screened!(three_center_integrals, shell_1, shell_2, shell_3, shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, bf_1_pos, bf_2_pos, bf_3_pos, sparse_pq_index_map, rank_basis_index_map)
+
+end
+
 
 @inline function copy_integral_result_screened!(three_center_integrals, values, bf_1_pos, bf_2_pos, bf_3_pos, 
     shell_1_nbasis, shell_2_nbasis, shell_3_nbasis, 
