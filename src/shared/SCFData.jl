@@ -50,6 +50,7 @@ mutable struct SCFGPUData
     device_sparse_to_q::Array{CuArray{Int64,1},1}
     n_screened_occupied_orbital_ranges::Int64
     number_of_devices_used::Int64
+    device_Q_index_lengths::Array{Int,1}
 end
 
 mutable struct SCFData
@@ -106,7 +107,7 @@ end
 function SCFData()
     sd = ScreeningData([], [], [], [], [], [], [], falses(1, 1), zeros(Int, 0), Array{Tuple{Int,Int}}(undef, 0),
         Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
-    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], CuArray{Float64}(undef, 0), [], 0, 0)
+    gpu_data = SCFGPUData([], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], CuArray{Float64}(undef, 0), [], 0, 0, [])
     return SCFData([], [], [], [], [],[], [], [], [], [], [], sd, gpu_data, 0, 0, 0, 0)
 end
 

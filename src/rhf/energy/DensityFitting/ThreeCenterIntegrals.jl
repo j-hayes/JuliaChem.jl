@@ -43,10 +43,11 @@ function calculate_three_center_integrals(jeri_engine_thread, basis_sets::Calcul
         if scf_options.load == "sequential"
             cartesian_indices = CartesianIndices((auxilliary_basis_shell_count, basis_shell_count, basis_shell_count))
             calculate_three_center_integrals_sequential!(three_center_integrals, thead_integral_buffer[1], shell_screen_matrix, sparse_pq_index_map, cartesian_indices, jeri_engine_thread[1], basis_sets)
-        elseif scf_options.load == "static"
-            calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, rank, n_ranks, do_mpi_gather)
         else
-            error("integral threading load type: $(scf_options.load) not supported")
+            if MPI.Comm_rank(MPI.COMM_WORLD) == 0 && scf_options.load != "static"
+                println("integral threading load type: $(scf_options.load) not supported, defaulting to static")
+            end
+            calculate_three_center_integrals_static(three_center_integrals, jeri_engine_thread, basis_sets, thead_integral_buffer, rank, n_ranks, do_mpi_gather)
         end
     end
     

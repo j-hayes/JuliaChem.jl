@@ -180,15 +180,7 @@ end
   end
 
   function static_load_rank_indicies_3_eri(rank, n_ranks, basis_sets)
-    number_of_shells = length(basis_sets.auxillary)
-    shells_per_rank = number_of_shells ÷ n_ranks 
-    shell_aux_indicies = (rank*shells_per_rank)+1:min((rank+1)*shells_per_rank, number_of_shells)
-    if rank == n_ranks - 1 # grab the remaining shells and give them to the last rank. 
-        shell_aux_indicies = (rank*shells_per_rank)+1:number_of_shells
-    end 
-    shell_aux_indicies = collect(shell_aux_indicies)
-    basis_indicies, rank_basis_index_map = get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
-    return shell_aux_indicies, basis_indicies, rank_basis_index_map
+    return static_load_rank_indicies(rank, n_ranks, basis_sets)
   end
 
   function get_basis_indicies_for_shell_indicies(shell_aux_indicies, basis_sets)
@@ -200,33 +192,16 @@ end
             push!(basis_indicies, index)
         end
     end  
-    rank_basis_indicies = sort(basis_indicies)
-    #make a map between the index in the sorted list and the original index
+
+    rank_basis_indicies = basis_indicies[1]:basis_indicies[end]
+    # make a map between the index in the sorted list and the original index
     rank_basis_index_map = Dict{Int64,Int64}()
     for (i, rank_basis_index) in enumerate(rank_basis_indicies)
         rank_basis_index_map[rank_basis_index] = i
     end
-    return basis_indicies, rank_basis_index_map
+    return rank_basis_indicies, rank_basis_index_map
   end
 
-
-
-  function get_static_gatherv_data(rank, n_ranks, basis_sets, inner_basis_function_length) :: Tuple{Int64, Int64, Int64, Int64, Int64}
-    aux_basis_length = length(basis_sets.auxillary)
-    begin_index = aux_basis_length÷n_ranks * rank + 1
-    end_index = begin_index + aux_basis_length÷n_ranks - 1
-    if rank == n_ranks - 1
-        end_index = aux_basis_length
-    end
-
-    begin_aux_basis_func_index = basis_sets.auxillary[begin_index].pos
-    end_aux_basis_func_index = basis_sets.auxillary[end_index].pos + basis_sets.auxillary[end_index].nbas-1
-    
-    thread_number_of_basis_functions = end_aux_basis_func_index - begin_aux_basis_func_index + 1
-    thread_number_of_basis_functions *= inner_basis_function_length
-
-    return begin_index, end_index, begin_aux_basis_func_index, end_aux_basis_func_index, thread_number_of_basis_functions
-end
 
 function static_load_thread_index_offset(thread, n_indicies_per_thread)
     return (thread - 1) * n_indicies_per_thread
@@ -234,69 +209,4 @@ end
 
 function static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
     return thread != nthreads ?   n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
-end
-
-function get_number_of_dynamic_worker_threads(rank, n_ranks)
-    n_worker_threads = Threads.nthreads()
-    if rank == 0 && n_ranks == 1
-        n_worker_threads = Threads.nthreads()
-    elseif rank == 0
-        n_worker_threads -= 1
-    end
-    return n_worker_threads
-end
-
-function setup_dynamic_load_indicies(n_aux_shells, n_ranks)
-    top_index = [n_aux_shells]
-    aux_indicies_processed = [[] for i in 1:n_ranks]
-    i=1
-    while true
-        push!(aux_indicies_processed[i], top_index[1])    
-        if i == n_ranks || top_index[1] < 1
-            break
-        end
-        top_index[1] -= 1  
-        i += 1
-    end
-    return top_index, aux_indicies_processed
-end
-
-
-
-function get_allranks_basis_indicies_for_shell_indicies!(aux_indicies_processed, n_ranks, basis_sets, indicies_per_aux_index)
-    rank_basis_indices = Vector{Vector{Int64}}(undef, 0)
-    
-    indicies_per_rank = zeros(Int64, n_ranks) # number of basis functions calculated on each
-    for i in 1:n_ranks
-        basis_indicies = get_basis_indicies_for_shell_indicies(aux_indicies_processed[i], basis_sets)
-        indicies_per_rank[i] = length(basis_indicies)*indicies_per_aux_index
-        push!(rank_basis_indices, basis_indicies)
-    end
-    return rank_basis_indices, indicies_per_rank
-end
-
-
-function broadcast_processed_index_list(aux_indicies_processed, n_ranks, n_aux_shells)
-    comm = MPI.COMM_WORLD
-    aux_indicies_mpi = zeros(Int64, n_aux_shells+n_ranks)
-    i = 1
-    for r in 1:n_ranks
-        for index in aux_indicies_processed[r]
-            aux_indicies_mpi[i] = index
-            i+=1
-        end
-        aux_indicies_mpi[i] = 0
-        i+=1
-    end
-    MPI.Bcast!(aux_indicies_mpi, 0, comm)
-    aux_indicies_processed = [[] for i in 1:n_ranks]
-    rank_index = 0
-    for index in aux_indicies_mpi
-        if index == 0
-            rank_index += 1
-            continue
-        end
-        push!(aux_indicies_processed[rank_index+1], index)
-    end
-    return aux_indicies_processed
 end

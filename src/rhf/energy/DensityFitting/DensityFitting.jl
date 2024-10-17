@@ -80,17 +80,12 @@ function run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread
   df_use_adaptive = scf_options.df_use_adaptive
   num_devices = scf_options.num_devices
 
-  if iteration == 1
+  # if iteration == 1
+  #   scf_data.gpu_data.number_of_devices_used = num_devices
 
-    if num_devices > 1 && df_force_dense
-      scf_options.num_devices = 1
-      println("WARNING: Dense GPU algorithm only supports 1 rank 1 GPU device runs, running on rank 0 only with one device")
-    end
-    scf_data.gpu_data.number_of_devices_used = num_devices
+  # end
 
-  end
-
-  if df_force_dense && num_devices == 1 || num_devices == 1 && df_use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
+  if df_force_dense || df_use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
     df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else
