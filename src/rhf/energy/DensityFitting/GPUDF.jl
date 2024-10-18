@@ -174,20 +174,18 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
     W_times = zeros(Float64, num_devices)
     K_times = zeros(Float64, num_devices)
-    H_times = zeros(Float64, num_devices)
     gpu_copy_J_time = zeros(Float64, num_devices)
     gpu_copy_sym_time = zeros(Float64, num_devices)
     density_times = zeros(Float64, num_devices)
     gpu_fock_times = zeros(Float64, num_devices)
     non_zero_coeff_times  = zeros(Float64, num_devices)
-    device_start = zeros(Float64, num_devices)
-    device_time = zeros(Float64, num_devices)
+    H_add_time = 0.0
+    
     fock_copy_time = 0.0
 
 
     n_threads = Threads.nthreads()
     threads_per_device = Int64((n_threads - num_devices) ÷ num_devices) 
-    start_all = time()
     
     total_fock_gpu_time = @elapsed begin 
         Threads.@sync for device_id in 1:num_devices
@@ -299,7 +297,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     jc_timing.timings[JCTiming_key(JCTC.V_time, iteration)] = maximum(V_times)
     jc_timing.timings[JCTiming_key(JCTC.J_time, iteration)] = maximum(J_times)
     jc_timing.timings[JCTiming_key(JCTC.fock_time, iteration)] = maximum(gpu_fock_times)
-    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_H_add_time, 1, iteration)] = H_times[device_id]
+    jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_H_add_time, 1, iteration)] = H_add_time
 
 
     jc_timing.timings[JCTiming_key(JCTC.fock_gpu_cpu_copy_reduce_time, iteration)] = fock_copy_time

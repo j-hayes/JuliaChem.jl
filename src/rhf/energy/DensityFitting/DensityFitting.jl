@@ -65,8 +65,6 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     end
   end
 
- 
-
   if MPI.Comm_size(comm) > 1
     MPI_time = @elapsed MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
     jc_timing.timings[JCTiming_key(JCTC.fock_MPI_time,iteration)] = MPI_time
@@ -77,15 +75,7 @@ end
 function run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   df_force_dense = scf_options.df_force_dense || scf_options.contraction_mode == "denseGPU"
 
-  df_use_adaptive = scf_options.df_use_adaptive
-  num_devices = scf_options.num_devices
-
-  # if iteration == 1
-  #   scf_data.gpu_data.number_of_devices_used = num_devices
-
-  # end
-
-  if df_force_dense || df_use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank only uses one device
+  if df_force_dense || scf_options.df_use_adaptive && scf_data.μ < 800 && rank == 0 && MPI.Comm_size(comm) == 1 # used for small systems on runs with a single rank
     df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else
@@ -119,13 +109,11 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
   shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_rank(comm),MPI.Comm_size(comm),basis_sets) #todo only do this on iteration 1
   
   if iteration == 1
-    
     two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
         
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time,iteration)] = two_eri_time
     jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense cpu"
-
   end  
   calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  aux_indicies, jc_timing, iteration)
   calculate_exchange!(scf_data, occupied_orbital_coefficients, aux_indicies, jc_timing, iteration)
@@ -156,7 +144,7 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
     scf_data.D = three_center_integrals
     B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
   else
-    
+
     setup_unscreened_screening_matricies(basis_sets, scf_data)
 
     rank_shell_aux_indicies, 
@@ -181,15 +169,6 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
     #print the first row of the three center integrals
   
   end
-
-
-
-  # B_time = @elapsed BLAS.gemm!('N', 'N', 1.0, two_center_integrals, reshape(three_center_integrals, (AA,μμ*νν)), 0.0, reshape(scf_data.D, (AA,μμ*νν)))
-  #       CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt, device_three_center_integrals, device_B[1])   
-
-
-  #TODO make this a TRMM! for 1 rank case 
-  #TODO multiple rank case
 
   jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
   jc_timing.timings[JCTC.B_time] = B_time
