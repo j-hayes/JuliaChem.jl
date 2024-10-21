@@ -386,8 +386,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
   jeri_engine_thread_df = do_density_fitting ? [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] : []
   jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
-    
-  scf_data = SCFData()
+  gpu_data = SCFGPUDataNone()
+  if scf_options.contraction_mode == "GPU"
+    gpu_data = get_default_gpu_data_cuda() #CUDA GPU
+  end
+  scf_data = SCFData(gpu_data)
 
   density_fitting_converged = false
 
@@ -578,7 +581,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
   end
 
-  if do_density_fitting && scf_options.contraction_mode == "GPU"
+  if do_density_fitting && (scf_options.contraction_mode == "GPU" || scf_options.contraction_mode == "denseGPU")
     clear_gpu_data(scf_data)
   end
 
