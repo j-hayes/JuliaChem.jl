@@ -84,19 +84,22 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
 
     if iteration == 1
+        n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
+        rank = MPI.Comm_rank(MPI.COMM_WORLD)
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
         s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
-
+        
         j_ab_inv_time = @elapsed begin 
             LAPACK.potrf!('L', two_center_integrals)
             LAPACK.trtri!('L', 'N', two_center_integrals)
             J_AB_invt = two_center_integrals
         end
         B_time = 0.0
-        if MPI.Comm_size(MPI.COMM_WORLD) > 1 #todo update this to reduce communication?
+        if n_ranks > 1 #todo update this to reduce communication?
             B_time = @elapsed calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options, jc_timing)
         else
-            three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, scf_data, true)
+            three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
+                scf_data, rank, n_ranks, true, false)
             B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
             jc_timing.timings[JCTC.three_eri_time] = three_eri_time
         end

@@ -140,7 +140,9 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
  
   if n_ranks == 1  #single rank case
     AA = scf_data.A
-    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
+    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
+    scf_data, rank,n_ranks, false, false)
+    
     scf_data.D = three_center_integrals
     B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
   else

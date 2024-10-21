@@ -6,20 +6,6 @@ using MPI
 
 three_center_integral_tag = 3000
 
-#no screening
-function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, use_screened::Bool)
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
-    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, SCFData(), rank, n_ranks, use_screened) ##todo this should all be one interface after refactor
-end
-
-function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, 
-    scf_data::SCFData, use_screened::Bool)
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-    n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
-    return calculate_three_center_integrals(jeri_engine_thread, basis_sets, scf_options, scf_data, rank, n_ranks, use_screened)
-end
-
 function calculate_three_center_integrals(jeri_engine_thread, basis_sets::CalculationBasisSets, scf_options::SCFOptions, 
     scf_data::SCFData, rank::Int, n_ranks::Int, use_screened::Bool, do_mpi_gather::Bool=false)
     aux_basis_function_count = basis_sets.auxillary.norb
