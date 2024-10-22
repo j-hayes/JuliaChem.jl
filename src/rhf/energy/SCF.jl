@@ -536,9 +536,6 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
         
         if scf_options.guess == Guess.density_fitting # density fitting guess done proceed to RHF 
           jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) for thread in 1:nthreads ]
-          if MPI.Comm_rank(comm) == 0 && output >= 2
-            println("------------ done with density fitted iterations --------------")
-          end
         else # Density Fitting RHF done 
           break 
         end
@@ -553,6 +550,13 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     if MPI.Comm_rank(comm) == 0 && output >= 2
       #println(iter,"     ", E,"     ", ΔE,"     ", D_rms)
       @printf("%d      %.10f      %.10f      %.10f      %.10f \n", iter, E, ΔE, D_rms, iteration_time)
+    end
+
+    if scf_options.guess == Guess.density_fitting # density fitting guess done proceed to RHF 
+      jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx) for thread in 1:nthreads ]
+      if MPI.Comm_rank(comm) == 0 && output >= 2
+        println("------------ done with density fitted iterations --------------")
+      end 
     end
     
     if maximum_iterations_exceeded(iter, scf_options)
