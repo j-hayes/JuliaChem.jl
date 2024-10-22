@@ -69,6 +69,9 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     MPI_time = @elapsed MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
     jc_timing.timings[JCTiming_key(JCTC.fock_MPI_time,iteration)] = MPI_time
   end  
+
+  calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)
+
   return scf_data.two_electron_fock
 end
 
@@ -216,4 +219,8 @@ function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, 
   jc_timing.timings[JCTiming_key(JCTC.W_time,iteration)] = W_time
   jc_timing.timings[JCTiming_key(JCTC.K_time,iteration)] = K_time
 
+end
+
+function calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)
+  jc_timing.non_timing_data[JCTiming_key(JCTC.scf_data_size_MB, iteration)] = string(Base.summarysize(scf_data) / 1024^2)
 end
