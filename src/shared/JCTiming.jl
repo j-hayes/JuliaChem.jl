@@ -25,7 +25,6 @@ module JCTC
     const n_threads = "n_threads" 
     const n_ranks = "n_ranks"
     const n_iterations = "n_iterations"
-    const size_scf_data_MB = "size_scf_data_MB"
 
 
     #options constants 
@@ -77,6 +76,7 @@ module JCTC
     const screened_indices_count = "screened_indices_count" 
     const unscreened_exchange_blocks = "unscreened_exchange_blocks" 
     const total_exchange_blocks = "total_exchange_blocks" 
+    const scf_data_size_MB = "scf_data_size_MB-"
 
     #DF Guess specific
     const DF_iteration_range_start = "DF_iteration_range_start"

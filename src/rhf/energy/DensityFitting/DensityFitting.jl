@@ -69,6 +69,9 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     MPI_time = @elapsed MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
     jc_timing.timings[JCTiming_key(JCTC.fock_MPI_time,iteration)] = MPI_time
   end  
+
+  calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)
+
   return scf_data.two_electron_fock
 end
 
@@ -140,7 +143,9 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
  
   if n_ranks == 1  #single rank case
     AA = scf_data.A
-    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
+    three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
+    scf_data, rank,n_ranks, false, false)
+    
     scf_data.D = three_center_integrals
     B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
   else
@@ -214,4 +219,8 @@ function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, 
   jc_timing.timings[JCTiming_key(JCTC.W_time,iteration)] = W_time
   jc_timing.timings[JCTiming_key(JCTC.K_time,iteration)] = K_time
 
+end
+
+function calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)
+  jc_timing.non_timing_data[JCTiming_key(JCTC.scf_data_size_MB, iteration)] = string(Base.summarysize(scf_data) / 1024^2)
 end

@@ -3,6 +3,8 @@ module Shared
     
     Base.include(@__MODULE__,"./Constants.jl")
     Base.include(@__MODULE__,"./SCFOptions.jl")
+    Base.include(@__MODULE__,"./GPUData.jl")
+    Base.include(@__MODULE__,"./GPUData_cuda.jl")
     Base.include(@__MODULE__,"./SCFData.jl")
     Base.include(@__MODULE__,"./Indicies.jl")
 
