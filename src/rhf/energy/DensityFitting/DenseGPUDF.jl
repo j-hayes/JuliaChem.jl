@@ -120,9 +120,9 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
      
             end # end gpu_fock_time
         end # end Threads.@threads
+        
+     
     end # end total_fock_gpu_time
-
-
 
 
     fock_copy_time = @elapsed begin
@@ -135,6 +135,8 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
             axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
         end
     end
+
+ 
 
 
     for device_id in 1:num_devices
@@ -195,8 +197,8 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
 
     pq = scf_data.μ^2
     if num_devices == 1
-        three_eri_time = @elapsed other_device_three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, false)
-
+        three_eri_time = @elapsed other_device_three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
+        scf_data, 0, 1, false, false)
         device_three_center_integrals[1] = CUDA.zeros(Float64, (scf_data.A, pq))
         device_B[1] = CUDA.zeros(Float64, (scf_data.A, pq))
         CUDA.synchronize()

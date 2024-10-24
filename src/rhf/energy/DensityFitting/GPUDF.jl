@@ -262,20 +262,19 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                 end # gpu fock time elapsed
             end #spawn     
         end#sync
-
-        fock_copy_time = @elapsed begin
-            Threads.@threads for device_id in 1:num_devices
-                CUDA.device!(device_id-1)
-                CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
-                CUDA.synchronize()
-            end
-            scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
-            for device_id in 2:num_devices
-                axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
-            end 
-        end #copy_time elapsed 
     end# total fock gpu time elapsed
 
+    fock_copy_time = @elapsed begin
+        Threads.@threads for device_id in 1:num_devices
+            CUDA.device!(device_id-1)
+            CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
+            CUDA.synchronize()
+        end
+        scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
+        for device_id in 2:num_devices
+            axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
+        end 
+    end #copy_time elapsed 
 
 
     for device_id in 1:num_devices

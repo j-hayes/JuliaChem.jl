@@ -6,6 +6,7 @@ module JCTC
     #file names when saving to hdf5 or other key value store 
     const run_level_data = "run_level_data"
     const scf_options = "scf_options"
+    const scf_options_user = "scf_options-user"
     const timings = "timings"
     const non_timing_data = "non_timing_data"
     #...
