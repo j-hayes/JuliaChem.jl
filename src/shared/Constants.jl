@@ -36,10 +36,10 @@ module SCF_Keywords
         const density_default = 1E-3
 
         const max_iterations = "niter"
-        const max_iterations_default = 30
+        const max_iterations_default = 10
 
         const df_max_iterations = "df_niter"
-        const df_max_iterations_default = 30
+        const df_max_iterations_default = 10
     end
 
     module ContractionMode 

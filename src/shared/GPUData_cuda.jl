@@ -38,7 +38,7 @@ mutable struct SCFGPUData_cuda <: SCFGPUData
 end
 
 function get_default_gpu_data_cuda() :: SCFGPUData_cuda
-    return SCFGPUData([], [], [], [], [], [], [], [], [],
+    return SCFGPUData_cuda([], [], [], [], [], [], [], [], [],
         [], [], [], [], [], [], [], [], [], [], [],
         [], [], [], [], [], [], [],
         CuArray{Float64}(undef, 0), [], 0, 0, [])
@@ -76,4 +76,4 @@ function initialize!(gpu_data::SCFGPUData_cuda, num_devices::Int64)
 
 end
 
-export SCFGPUData, initialize!
+export initialize!, get_default_gpu_data_cuda, SCFGPUData_cuda

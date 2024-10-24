@@ -43,4 +43,4 @@ function SCFData(gpu_data::SCFGPUData)
     return SCFData([], [], [], [], [],[], [], [], [], [], [], sd, gpu_data, 0, 0, 0, 0)
 end
 
-export SCFData, ScreeningData, clear_gpu_data
+export SCFData, ScreeningData

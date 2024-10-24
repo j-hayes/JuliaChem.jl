@@ -21,13 +21,11 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
 
     #get environment variable for number of devices to use
-    num_devices = scf_data.gpu_data.number_of_devices_used
-    
-
+    num_devices = scf_options.num_devices
+    scf_data.gpu_data.number_of_devices_used = num_devices
 
     # num_devices = Int64(length(devices))
     num_devices_global = num_devices*n_ranks  
-    scf_data.gpu_data.number_of_devices_used = num_devices
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2,1))
 
 
@@ -40,19 +38,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
         if num_devices > length(CUDA.devices())
             error("Number of devices requested is greater than the number of devices available")
-        end
-
-        if scf_options.df_use_adaptive && scf_options.df_exchange_n_blocks == 0
-            if p >= 1600
-                scf_options.df_exchange_n_blocks = 12
-            elseif p >= 1300
-                scf_options.df_exchange_n_blocks = 8
-            elseif p >= 1200
-                scf_options.df_exchange_n_blocks = 4
-            elseif p > 800 || scf_options.df_use_K_sym #if df_use_K_sym is true then we are using the symmetric algorithm default to 2 for small systems
-                scf_options.df_exchange_n_blocks = 2
-            end 
-        #else use the value set in the input file
         end
 
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
@@ -73,6 +58,19 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
         calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
        
+        if scf_options.df_use_adaptive && scf_options.df_exchange_n_blocks == 0
+            QQ = maximum(scf_data.gpu_data.device_Q_range_lengths)
+            if QQ >= 3300
+                scf_options.df_exchange_n_blocks = 12
+            elseif QQ >= 3000
+                scf_options.df_exchange_n_blocks = 8
+            elseif QQ >= 2500
+                scf_options.df_exchange_n_blocks = 4
+            elseif QQ > 1750 || scf_options.df_use_K_sym #if df_use_K_sym is true then we are using the symmetric algorithm default to 2 for small systems
+                scf_options.df_exchange_n_blocks = 2
+            end 
+        #else use the value set in the input file
+        end
 
         #clear the memory 
         two_center_integrals = nothing
@@ -658,6 +656,9 @@ function calculate_W_screened_GPU(device_id, scf_data::SCFData, num_threads ::In
                         scf_data.screening_data.sparse_p_start_indices[pp]+K-1)
                     B_cu = view(non_zero_coefficients, :,1:K,pp)
                     C_cu = view(W, :,:,pp)
+                    # println("dimensions of A_cu: ", size(A_cu))
+                    # println("dimensions of B_cu: ", size(B_cu))
+                    # println("dimensions of C_cu: ", size(C_cu))
                     CUBLAS.gemm!('N','T', alpha, A_cu, B_cu, beta, C_cu)
                 end
             end
@@ -870,22 +871,31 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
         end #spawn
     end
 
-    if rank == 0
-        CUDA.device!(0)
-        J_AB_time = @elapsed begin
-            CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)
-            CUDA.synchronize()
-            CUSOLVER.potrf!('L', device_J_AB_invt[1])
-            CUDA.synchronize()
-            CUSOLVER.trtri!('L', 'N', device_J_AB_invt[1])
-            CUDA.synchronize()
-        end
+    # if rank == 0
+    #     CUDA.device!(0)
+    #     J_AB_time = @elapsed begin
+    #         CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)
+    #         CUDA.synchronize()
+    #         CUSOLVER.potrf!('L', device_J_AB_invt[1])
+    #         CUDA.synchronize()
+    #         CUSOLVER.trtri!('L', 'N', device_J_AB_invt[1])
+    #         CUDA.synchronize()
+    #     end
 
-        CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
-        CUDA.synchronize()
+    #     CUDA.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
+    #     CUDA.synchronize()
         
-        jc_timing.timings[JCTC.form_J_AB_inv_time] = J_AB_time
+    #     jc_timing.timings[JCTC.form_J_AB_inv_time] = J_AB_time
+    # end
+
+    LinearAlgebra.LAPACK.potrf!('L', two_center_integrals)
+    LinearAlgebra.LAPACK.trtri!('L', 'N', two_center_integrals)
+
+    for device_id_two_eri in 1:num_devices
+        CUDA.device!(device_id_two_eri-1)
+        CUDA.copyto!(device_J_AB_invt[device_id_two_eri], two_center_integrals)
     end
+
 
     if MPI.Comm_size(COMM) > 1
         #broadcast two_center_integrals to all ranks

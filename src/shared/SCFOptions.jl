@@ -157,10 +157,20 @@ function print_scf_options(options::SCFOptions)
         println("Contraction Mode: ", options.contraction_mode)
         println("DF Energy Convergence: ", options.df_energy_convergence)
         println("DF Density Convergence: ", options.df_density_convergence)
-        println("DF Exchange Block Width: nbas ÷ ", options.df_exchange_n_blocks)
+        if options.df_exchange_n_blocks == 0 && options.contraction_mode == "GPU"
+            println("DF Exchange Block Width: adaptive")
+        else
+            println("DF Exchange Block Width: nbas ÷ ", options.df_exchange_n_blocks)
+        end
         println("DF Screening Sigma: ", options.df_screening_sigma)
         println("DF Screen Exchange: ", options.df_screen_exchange)
-        println("DF number of GPUs: ", options.num_devices)
+        if options.contraction_mode == "GPU"
+            println("DF Force Dense: ", options.df_force_dense)
+            println("DF Use Adaptive: ", options.df_use_adaptive)
+            println("DF Use K Symmetry: ", options.df_use_K_sym)
+            println("DF K Symmetry Type: ", options.df_K_sym_type)
+            println("DF number of GPUs: ", options.num_devices)
+        end
         println("--------------------------------")
     end
 end
