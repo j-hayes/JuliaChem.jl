@@ -85,11 +85,7 @@ function initialize!(gpu_data::SCFGPUData_cuda, num_devices::Int64)
 
 end
 
-function GPU_trtri!(gpu_type::CUDA_GPU, uplo::Char, diag::Char, A::CuArray{Float64})
 
-    CUBLAS.trtri!(uplo, diag, A)
-
-end
 
 function GPU_num_devices(gpu_type::CUDA_GPU) :: Int64
     return length(CUDA.devices())

@@ -398,6 +398,12 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     elseif AMD_GPU_enabled()
       gpu_data = get_default_gpu_data_AMD(scf_options.num_devices) #AMD GPU
       println("using AMD GPU")
+    elseif oneAPI_GPU_enabled()
+      gpu_data = get_default_gpu_dataoneAPI(scf_options.num_devices) #oneAPI GPU
+      println("using oneAPI GPU")
+    else
+      println("No GPU available")
+      exit(0)
     end
   end
 

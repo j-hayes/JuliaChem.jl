@@ -1,12 +1,17 @@
-using CUDA
-using CUDA.CUBLAS
-using CUDA.CUSOLVER
+# using CUDA
+# using CUDA.CUBLAS
+# using CUDA.CUSOLVER
 # import CUDA.CUSOLVER: potrf!, trtri!, 
 # import CUDA.CUBLAS: gemm!, gemm!, gemv!
 
-using AMDGPU
-import AMDGPU.rocSOLVER: potrf!
-import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
+# using AMDGPU
+# import AMDGPU.rocSOLVER: potrf!
+# import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
+
+using oneAPI
+using oneAPI.oneMKL
+import oneAPI.oneMKL: potrf!
+import oneAPI.oneMKL: gemm!, gemv!, trmm!
 
 using LinearAlgebra
 using Base.Threads
@@ -120,8 +125,6 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
      
             end # end gpu_fock_time
         end # end Threads.@threads
-        
-     
     end # end total_fock_gpu_time
 
 
@@ -175,16 +178,8 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
     end
     
    
-    form_J_AB_inv_time = @elapsed begin
-        copyto!(device_J_AB_invt[1], two_center_integrals)
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)
-        potrf!('L', device_J_AB_invt[1])
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)
-        GPU_trtri!(scf_data.gpu_data.GPU_Type, 'L', 'N',  device_J_AB_invt[1])
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)        
-
-    end
-    jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
+    jc_timing.timings[JCTC.form_J_AB_inv_time] =
+        @elapsed GPU_calculate_J_AB_INV!(scf_data.gpu_data.GPU_Type, two_center_integrals, device_J_AB_invt[1])
 
     pq = scf_data.μ^2
     if num_devices == 1
@@ -200,7 +195,8 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
         copyto!(host_three_eri, device_three_center_integrals[1])
         
         B_time = @elapsed begin
-            trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
+            # trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
+            trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1])
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
             device_B[1] = device_three_center_integrals[1]
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
