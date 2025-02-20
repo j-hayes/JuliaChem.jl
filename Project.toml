@@ -4,6 +4,7 @@ authors = ["davpoolechem <davpoole@iastate.edu>", "j-hayes <jhayes1@iastate.edu>
 version = "0.4.3"
 
 [deps]
+AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 BinDeps = "9e28174c-4ba2-5203-b857-d8d62c4213ee"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
@@ -23,3 +24,4 @@ boost_jll = "28df3c45-c428-5900-9ff8-a3135698ca75"
 cuTENSOR = "011b41b2-24ef-40a8-b3eb-fa098493e9e1"
 libcxxwrap_julia_jll = "3eaa8342-bff7-56a5-9981-c04077f7cee7"
 libint_jll = "5fdff7f3-485e-5122-bc58-379aa217adcc"
+oneAPI = "8f75cd03-7ff8-4ecb-9b8f-daf728133b1b"
