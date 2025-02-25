@@ -80,6 +80,8 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
     gpu_fock_times = zeros(Float64, num_devices)
     density_times = zeros(Float64, num_devices)
     GPU_H_add_time = 0.0
+
+
     total_fock_gpu_time = @elapsed begin
         Threads.@threads for device_id in 1:num_devices
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
@@ -179,7 +181,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
     
    
     jc_timing.timings[JCTC.form_J_AB_inv_time] =
-        @elapsed GPU_calculate_J_AB_INV!(scf_data.gpu_data.GPU_Type, two_center_integrals, device_J_AB_invt[1])
+        @elapsed calculate_J_AB_INV_GPU!(scf_data.gpu_data.GPU_Type, two_center_integrals, device_J_AB_invt[1])
 
     pq = scf_data.μ^2
     if num_devices == 1
@@ -190,17 +192,9 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
         copyto!(device_three_center_integrals[1], other_device_three_center_integrals)
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
-
-        host_three_eri = zeros(Float64, scf_data.A, pq)
-        copyto!(host_three_eri, device_three_center_integrals[1])
         
         B_time = @elapsed begin
-            # trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
-            trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1])
-            GPU_synchronize(scf_data.gpu_data.GPU_Type)
-            device_B[1] = device_three_center_integrals[1]
-            GPU_synchronize(scf_data.gpu_data.GPU_Type)
-
+            trmm_GPU!(scf_data.gpu_data.GPU_Type, 'L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])
         end
         jc_timing.timings[JCTiming_key(JCTC.three_eri_time, 1)] = three_eri_time
         jc_timing.timings[JCTC.B_time] = B_time

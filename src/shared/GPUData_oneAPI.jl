@@ -17,6 +17,7 @@ function get_default_gpu_dataoneAPI(num_devices) :: SCFGPUData_generic
         [], [], [], [], [],
         [], 0, 0, [], oneAPI_GPU())
     initialize_generic!(oneAF64, oneAI64, gpu_data, num_devices, oneAPI_GPU())
+    GPU_synchronize(gpu_data.GPU_Type)
     return gpu_data
 end
 
@@ -45,7 +46,7 @@ end
 
 
 function GPU_num_devices(gpu_type::oneAPI_GPU) :: Int64
-    return length(AMDGPU.devices())
+    return length(oneAPI.devices())
 end
 
 

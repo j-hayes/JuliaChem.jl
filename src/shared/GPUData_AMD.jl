@@ -17,6 +17,7 @@ function get_default_gpu_data_AMD(num_devices) :: SCFGPUData_generic
         [], [], [], [], [],
         [], 0, 0, [], AMD_GPU())
     initialize_generic!(RocAF64, RocAI64, gpu_data, num_devices, AMD_GPU())
+    GPU_synchronize(gpu_data.GPU_Type)
     return gpu_data
 end
 

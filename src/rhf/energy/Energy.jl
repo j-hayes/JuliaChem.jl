@@ -30,6 +30,10 @@ Base.include(@__MODULE__,"./DensityFitting/DenseGPUDF.jl")
 Base.include(@__MODULE__,"./DensityFitting/J_AB_AMDGPU.jl")
 Base.include(@__MODULE__,"./DensityFitting/J_AB_CUDA.jl")
 Base.include(@__MODULE__,"./DensityFitting/J_AB_oneAPI.jl")
+Base.include(@__MODULE__,"./DensityFitting/GPU/screened_matricies_CUDA.jl")
+Base.include(@__MODULE__,"./DensityFitting/GPU/screened_matricies_AMDGPU.jl")
+Base.include(@__MODULE__,"./DensityFitting/GPU/screened_matricies_oneAPI.jl")
+
 
 
 """

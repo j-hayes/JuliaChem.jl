@@ -44,6 +44,7 @@ function get_default_gpu_data_cuda(num_devices) :: SCFGPUData_cuda
         [], [], [], [], [], [],
         CuArray{Float64}(undef, 0), [], 0, 0, [])
         initialize_generic!(CUDAAF64, CUDAAI64, gpu_data, num_devices, CUDA_GPU())
+        GPU_synchronize(gpu_data.GPU_Type)
     return gpu_data
 end
 

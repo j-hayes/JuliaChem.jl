@@ -73,7 +73,7 @@ module SCF_Keywords
         const df_K_sym_type_square = "square" 
         const df_K_sym_rect = "rect"
         const df_adaptive_basis_limit = "df_adaptive_basis_limit"
-        const df_adaptive_basis_limit_default = 800
+        const df_adaptive_basis_limit_default = 100
         const df_GPU_K_block_opeartions_threshold = "df_GPU_K_block_opeartions_threshold"
         const df_GPU_K_block_opeartions_threshold_default = Int64(16^10)
         const df_max_num_GPU_exchange_blocks = "df_max_num_GPU_exchange_blocks"

@@ -6,7 +6,7 @@ function GPU_trtri!(gpu_type::CUDA_GPU, uplo::Char, diag::Char, A::CuArray{Float
     CUBLAS.trtri!(uplo, diag, A)
 end
 
-function GPU_calculate_J_AB_INV!(gpu_type::CUDA_GPU, two_center_integrals::Array{Float64}, gpu_two_center_integrals::CuArray{Float64})
+function calculate_J_AB_INV_GPU!(gpu_type::CUDA_GPU, two_center_integrals::Array{Float64}, gpu_two_center_integrals::CuArray{Float64})
     copyto!(device_J_AB_invt[1], two_center_integrals)
     GPU_synchronize(gpu_type)
     CUSOLVER.potrf!('L', device_J_AB_invt[1])

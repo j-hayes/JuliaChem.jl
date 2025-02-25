@@ -13,7 +13,9 @@ module Shared
 
     Base.include(@__MODULE__,"./JCTiming.jl")
     Base.include(@__MODULE__,"./JCTiming_Setters.jl")
-    
+    Base.include(@__MODULE__,"./trmm_AMDGPU.jl")
+    Base.include(@__MODULE__,"./trmm_CUDA.jl")
+    Base.include(@__MODULE__,"./trmm_oneAPI.jl")
    
 
     global Timing::JCTiming # module singleton variable for timing 
