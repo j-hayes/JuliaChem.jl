@@ -1,6 +1,6 @@
-# using CUDA
-# using CUDA.CUBLAS
-# using CUDA.CUSOLVER
+using CUDA
+using CUDA.CUBLAS
+using CUDA.CUSOLVER
 # import CUDA.CUSOLVER: potrf!, trtri!, 
 # import CUDA.CUBLAS: gemm!, gemm!, gemv!
 
@@ -8,10 +8,10 @@
 # import AMDGPU.rocSOLVER: potrf!
 # import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
 
-using oneAPI
-using oneAPI.oneMKL
-import oneAPI.oneMKL: potrf!
-import oneAPI.oneMKL: gemm!, gemv!, trmm!
+# using oneAPI
+# using oneAPI.oneMKL
+# import oneAPI.oneMKL: potrf!
+# import oneAPI.oneMKL: gemm!, gemv!, trmm!
 
 using LinearAlgebra
 using Base.Threads

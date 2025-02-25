@@ -22,6 +22,7 @@ function get_default_gpu_dataoneAPI(num_devices) :: SCFGPUData_generic
 end
 
 function oneAPI_GPU_enabled()
+    # return false
     return oneAPI.functional()
 end
 

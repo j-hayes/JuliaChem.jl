@@ -1,14 +1,14 @@
 using MPI
 using CUDA
-# using CUDA.CUBLAS
-# using CUDA.CUSOLVER
+using CUDA.CUBLAS
+using CUDA.CUSOLVER
 
 # using AMDGPU
 # import AMDGPU.rocSOLVER: potrf!
 # import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
 
-using oneAPI
-using oneAPI.oneMKL
+# using oneAPI
+# using oneAPI.oneMKL
 # import oneAPI.oneMKL: trmm!, gemm!, gemv!
 
 using LinearAlgebra
@@ -286,7 +286,7 @@ function form_screened_density!(scf_data::SCFData, device_id::Int64)
     density = scf_data.gpu_data.device_density[device_id]
     screened_density = scf_data.gpu_data.device_screened_density[device_id]
     occupied_orbital_coefficients = scf_data.gpu_data.device_occupied_orbital_coefficients[device_id]
-    oneAPI.oneMKL.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, density)
+    CUDA.CUBLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, density)
     GPU_synchronize(scf_data.gpu_data.GPU_Type)
   
     sparse_pq_index_map = scf_data.gpu_data.sparse_pq_index_map[device_id]
@@ -381,12 +381,12 @@ end
 
 
 function calculate_V_screened_GPU(V, B, density, gpu_type::GPU_Type)
-    oneAPI.oneMKL.gemv!('N', 1.0, B, density, 0.0, V)
+    CUDA.CUBLAS.gemv!('N', 1.0, B, density, 0.0, V)
     GPU_synchronize(gpu_type)
 end
 
 function calculate_J_screened_GPU(J, B, V, gpu_type::GPU_Type)
-    oneAPI.oneMKL.gemv!('T', 2.0, B, V, 0.0, J)
+    CUDA.CUBLAS.gemv!('T', 2.0, B, V, 0.0, J)
     GPU_synchronize(gpu_type)
 end
 
@@ -412,7 +412,7 @@ function calculate_W_screened_GPU(device_id, scf_data::SCFData, num_threads ::In
         B_cu = view(non_zero_coefficients, :,1:K,pp)
         C_cu = view(W, :,:,pp)
 
-        oneAPI.oneMKL.gemm!('N','T', alpha, A_cu, B_cu, beta, C_cu)
+        CUDA.CUBLAS.gemm!('N','T', alpha, A_cu, B_cu, beta, C_cu)
     end
 
     GPU_synchronize(scf_data.gpu_data.GPU_Type)
@@ -420,7 +420,7 @@ function calculate_W_screened_GPU(device_id, scf_data::SCFData, num_threads ::In
 end
 
 function calcululate_K_no_sym_GPU!(fock, W, p::Int64, n_ooc::Int64, Q::Int64, device_id::Int64, gpu_type::GPU_Type)
-    oneAPI.oneMKL.gemm!('T', 'N', -1.0, reshape(W, (Q*n_ooc, p)), reshape(W, (Q*n_ooc, p)), 0.0, fock)
+    CUDA.CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (Q*n_ooc, p)), reshape(W, (Q*n_ooc, p)), 0.0, fock)
     GPU_synchronize(gpu_type)
 end
 
@@ -464,7 +464,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         A = reshape(view(W, :,:, p_range), (K, K_block_width))
         B = reshape(view(W, :,:, q_range), (K, K_block_width))
 
-        oneAPI.oneMKL.gemm!(transA, transB, alpha, A, B, beta, exchange_block)
+        CUDA.CUBLAS.gemm!(transA, transB, alpha, A, B, beta, exchange_block)
         copyto!(view(fock, p_range, q_range), exchange_block)
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
@@ -486,7 +486,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         C_non_square = scf_data.gpu_data.device_non_square_K_block[device_id]
         
     
-        oneAPI.oneMKL.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square) #W^T[M, Q*n_ooc] * W[Q*n_ooc, N] = C_non_square[M, N]
+        CUDA.CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square) #W^T[M, Q*n_ooc] * W[Q*n_ooc, N] = C_non_square[M, N]
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
         copyto!(view(fock, row_non_square_range,:), C_non_square)  #non contiguous memory access on the GPU bad, should use the other triangle side
@@ -605,10 +605,10 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
 
 
                         if global_send_device_id == global_recieve_device_id
-                            oneAPI.oneMKL.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id], 1.0, device_B[rank_recieve_device_id])
+                            CUDA.CUBLAS.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id], 1.0, device_B[rank_recieve_device_id])
                         else
                             send_B_view = view(device_B_send_buffers[r_send_device_id], 1:array_size)
-                            oneAPI.oneMKL.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id],
+                            CUDA.CUBLAS.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id],
                                 0.0, reshape(send_B_view, (rec_device_Q_range_length, pq)))
                         end
                         GPU_synchronize(scf_data.gpu_data.GPU_Type)

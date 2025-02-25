@@ -20,7 +20,7 @@ function form_screened_density_kernel_cuda!(screened_density::CuDeviceArray{Floa
     end  
 end
 
-function form_screened_density_GPU!(gpu_type::CUDA_GPU, screened_density::CuDeviceArray{Float64}, density::CuDeviceArray{Float64}, sparse_pq_index_map::CuDeviceArray{Int64}, p::Int64)
+function form_screened_density_GPU!(gpu_type::CUDA_GPU, screened_density::CuArray{Float64}, density::CuArray{Float64}, sparse_pq_index_map::CuArray{Int64}, p::Int64)
     numblocks = ceil(Int64, p/256)
     threads = min(256, p)
 
@@ -47,16 +47,16 @@ function create_sparse_to_p_q_kernel_cuda(sparse_to_p ::CuDeviceArray{Int64},
     end
 end
 
-function create_sparse_to_p_q_GPU!(gpu_type::CUDA_GPU, device_sparse_to_p::CuDeviceArray{Int64}, device_sparse_to_q::CuDeviceArray{Int64},
-    sparse_pq_index_map::CuDeviceArray{Int64}, p::Int64, n_screened_occupied_orbital_ranges::Int64)
+function create_sparse_to_p_q_GPU!(gpu_type::CUDA_GPU, device_sparse_to_p::CuArray{Int64}, device_sparse_to_q::CuArray{Int64},
+    sparse_pq_index_map::CuArray{Int64}, p::Int64, n_screened_occupied_orbital_ranges::Int64)
 
     n_ranges = n_screened_occupied_orbital_ranges
     numblocks = ceil(Int64, n_ranges/256)
     threads = min(256, n_ranges)
   
-    @cuda threads=threads blocks=numblocks create_sparse_to_p_q_kernel(device_sparse_to_p[device_id],
-        device_sparse_to_q[device_id], 
-        sparse_pq_index_map[device_id], p)
+    @cuda threads=threads blocks=numblocks create_sparse_to_p_q_kernel_cuda(device_sparse_to_p,
+        device_sparse_to_q, 
+        sparse_pq_index_map, p)
     GPU_synchronize(gpu_type)
 end
 
@@ -84,16 +84,19 @@ function build_non_zero_coefficients_kernel_cuda(non_zero_coefficients::CuDevice
    end
 end
 
-function form_nozero_coefficient_matrix_GPU!()
+function form_nozero_coefficient_matrix_GPU!(gpu_type::CUDA_GPU, device_non_zero_coefficients::CuArray{Float64},
+    device_occupied_orbital_coefficients::CuArray{Float64}, device_range_p::CuArray{Int64},
+    device_range_start::CuArray{Int64}, device_range_end::CuArray{Int64}, device_range_sparse_start::CuArray{Int64},
+    n_ranges::Int64)
     numblocks = ceil(Int64, n_ranges/256)
     threads = min(256, n_ranges)
 
-    @cuda threads=threads blocks=numblocks build_non_zero_coefficients_kernel_cuda(device_non_zero_coefficients[device_id], 
-        device_occupied_orbital_coefficients[device_id], 
-        device_range_p[device_id],
-        device_range_start[device_id],
-        device_range_end[device_id],
-        device_range_sparse_start[device_id],
+    @cuda threads=threads blocks=numblocks build_non_zero_coefficients_kernel_cuda(device_non_zero_coefficients, 
+        device_occupied_orbital_coefficients, 
+        device_range_p,
+        device_range_start,
+        device_range_end,
+        device_range_sparse_start,
         n_ranges)
 
     GPU_synchronize(gpu_type)
@@ -117,13 +120,13 @@ function copy_screened_J_to_fock_upper_triangle_cuda(fock::CuDeviceArray{Float64
     return
 end
 
-function copy_screened_J_to_fock_GPU!(gpu_type::CUDA_GPU, fock::CuDeviceArray{Float64}, J::CuDeviceArray{Float64}, 
-    device_sparse_to_p::CuDeviceArray{Int64}, device_sparse_to_q::CuDeviceArray{Int64}, scf_data::SCFData) 
+function copy_screened_J_to_fock_GPU!(gpu_type::CUDA_GPU, fock::CuArray{Float64}, J::CuArray{Float64}, 
+    device_sparse_to_p::CuArray{Int64}, device_sparse_to_q::CuArray{Int64}, screened_indices_count::Int64) 
 
-    numblocks = ceil(Int64, scf_data.screening_data.screened_indices_count/256)
-    threads = min(256, scf_data.screening_data.screened_indices_count)
+    numblocks = ceil(Int64, screened_indices_count/256)
+    threads = min(256, screened_indices_count)
     @cuda threads=threads blocks=numblocks copy_screened_J_to_fock_upper_triangle_cuda(fock, J, device_sparse_to_p, 
-        device_sparse_to_q, scf_data.screening_data.screened_indices_count)
+        device_sparse_to_q, screened_indices_count)
                    
 end
 
@@ -139,7 +142,7 @@ function copy_upper_to_lower_kernel_cuda(A ::CuDeviceArray{Float64})
     return
 end
 
-function copy_upper_to_lower_GPU!(gpu_type::CUDA_GPU, fock::CuDeviceArray{Float64}, p::Int64, screened_indices_count::Int64)
+function copy_upper_to_lower_GPU!(gpu_type::CUDA_GPU, fock::CuArray{Float64}, p::Int64, screened_indices_count::Int64)
    numblocks = ceil(Int64, screened_indices_count/256)
    threads = min(256, screened_indices_count)
    @cuda threads=threads blocks=numblocks copy_upper_to_lower_kernel_cuda(fock)    
