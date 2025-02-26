@@ -81,23 +81,36 @@ function rhf_kernel(mol::Molecule,
   #== compute nuclear repulsion energy ==# 
   E_nuc = compute_enuc(mol)
   
-  jeri_oei_engine = JERI.OEIEngine(mol.mol_cxx, 
-    basis.basis_cxx, 0) 
+
   
   #== compute one-electron integrals and Hamiltonian ==#
-  S = zeros(Float64, (basis.norb, basis.norb))
-  compute_overlap(S, basis, jeri_oei_engine)
- 
+  
   #for i in 1:basis.norb, j in 1:i
   #  println("OVR($i,$j): ", S[i,j])
   #end
+
+  #one engine per thread 
+
+  thread_jeri_oei_engine = [JERI.OEIEngine(deepcopy(mol.mol_cxx), deepcopy(basis.basis_cxx), 0) for thread in 1:Threads.nthreads()]
 
   T = zeros(Float64, (basis.norb, basis.norb))  
   V = zeros(Float64, (basis.norb, basis.norb))
   H = zeros(Float64, (basis.norb, basis.norb))
 
-  T_time = @elapsed compute_ke(T, basis, jeri_oei_engine)
-  V_time = @elapsed compute_nah(V, mol, basis, jeri_oei_engine)
+  V_time = @time @elapsed compute_nah(V, mol, basis, thread_jeri_oei_engine)
+  V = zeros(Float64, (basis.norb, basis.norb))
+  V_time = @time @elapsed compute_nah(V, mol, basis, thread_jeri_oei_engine)
+
+
+  T_time = @time @elapsed compute_ke(T, basis, thread_jeri_oei_engine)
+  T = zeros(Float64, (basis.norb, basis.norb))
+  T_time = @time @elapsed compute_ke(T, basis, thread_jeri_oei_engine)
+  S = zeros(Float64, (basis.norb, basis.norb))
+  
+  @time compute_overlap(S, basis, thread_jeri_oei_engine)
+  S = zeros(Float64, (basis.norb, basis.norb))
+  @time compute_overlap(S, basis, thread_jeri_oei_engine)
+  jeri_oei_engine = thread_jeri_oei_engine[1]
 
   H_time = @elapsed H .= T .+ V
 

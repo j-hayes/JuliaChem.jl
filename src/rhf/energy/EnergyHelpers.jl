@@ -23,121 +23,197 @@ function compute_enuc(mol::Molecule)
 end
  
 function compute_overlap(S::Matrix{Float64}, basis::Basis,
-  jeri_oei_engine)
+  thread_oei_engine)
 
-  for ash in 1:length(basis), bsh in 1:ash
-    abas = basis[ash].nbas
-    bbas = basis[bsh].nbas
-    
-    apos = basis[ash].pos
-    bpos = basis[bsh].pos
-       
-    S_block_JERI = zeros(Float64,(abas*bbas,))
-    JERI.compute_overlap_block(jeri_oei_engine, S_block_JERI, ash, bsh, 
-      length(S_block_JERI))
-    axial_normalization_factor(S_block_JERI, basis[ash], basis[bsh])
+  n_threads = Threads.nthreads()
+  # n_threads=1
+  Threads.@sync for thread in 1:n_threads
+    Threads.@spawn begin
+      jeri_oei_engine = thread_oei_engine[thread]
+      for ash in thread:n_threads:length(basis)
+        for bsh in 1:ash
+          abas = basis[ash].nbas
+          bbas = basis[bsh].nbas
+          
+          apos = basis[ash].pos
+          bpos = basis[bsh].pos
+            
+          S_block_JERI = zeros(Float64,(abas*bbas,))
+          JERI.compute_overlap_block(jeri_oei_engine, S_block_JERI, ash, bsh, 
+            length(S_block_JERI))
+          axial_normalization_factor(S_block_JERI, basis[ash], basis[bsh])
 
-    idx = 1
-    for ibas in 0:abas-1, jbas in 0:bbas-1
-      iorb = apos + ibas
-      jorb = bpos + jbas
-      
-      S[max(iorb,jorb),min(iorb,jorb)] = S_block_JERI[idx]
-      
-      idx += 1 
+          idx = 1
+          for ibas in 0:abas-1, jbas in 0:bbas-1
+            iorb = apos + ibas
+            jorb = bpos + jbas
+            
+            S[max(iorb,jorb),min(iorb,jorb)] = S_block_JERI[idx]
+            
+            idx += 1 
+          end
+        end
+      end
     end
   end
 
-  for iorb in 1:basis.norb, jorb in 1:iorb
-    if iorb != jorb
-      S[min(iorb,jorb),max(iorb,jorb)] = S[max(iorb,jorb),min(iorb,jorb)]
-    end
-  end
-end
-
-function compute_ke(T::Matrix{Float64}, basis::Basis, 
-  jeri_oei_engine)
-
-  for ash in 1:length(basis), bsh in 1:ash
-    abas = basis[ash].nbas
-    bbas = basis[bsh].nbas
-    
-    apos = basis[ash].pos
-    bpos = basis[bsh].pos
-       
-    T_block_JERI = zeros(Float64,(abas*bbas,))
-    JERI.compute_kinetic_block(jeri_oei_engine, T_block_JERI, ash, bsh, 
-      length(T_block_JERI))
-    axial_normalization_factor(T_block_JERI, basis[ash], 
-      basis[bsh])
-
-    idx = 1
-    for ibas in 0:abas-1, jbas in 0:bbas-1
-      iorb = apos + ibas
-      jorb = bpos + jbas
-      
-      T[max(iorb,jorb),min(iorb,jorb)] = T_block_JERI[idx]
-      
-      idx += 1 
-    end
-  end
-  
-  for iorb in 1:basis.norb, jorb in 1:iorb
-    if iorb != jorb
-      T[min(iorb,jorb),max(iorb,jorb)] = T[max(iorb,jorb),min(iorb,jorb)]
+  Threads.@sync for thread in 1:n_threads
+    Threads.@spawn begin
+      for iorb in thread:n_threads:basis.norb
+        for jorb in 1:iorb-1
+          S[min(iorb, jorb), max(iorb, jorb)] = S[max(iorb, jorb), min(iorb, jorb)]
+        end
+      end
     end
   end
 end
 
-function compute_nah(V::Matrix{Float64}, mol::Molecule, 
-  basis::Basis, jeri_oei_engine)
-  
-  #== define ncenter ==#
-  #=
-  ncenter::Int64 = length(mol)
-  
-  Z = Vector{Float64}([])
-  x = Vector{Float64}([])
-  y = Vector{Float64}([])
-  z = Vector{Float64}([])
+function compute_ke(T::Matrix{Float64}, basis::Basis, thread_oei_engine)
+  n_threads = Threads.nthreads()
+ ##NOT THIS ONE
+  Threads.@sync for thread in 1:n_threads
+    Threads.@spawn begin
+      T_block_JERI_buffer = zeros(Float64, (10000))
 
-  for atom in mol 
-    push!(Z, convert(Float64,atom.atom_id))  
-    push!(x, atom.atom_center[1])  
-    push!(y, atom.atom_center[2])  
-    push!(z, atom.atom_center[3])  
-  end
-  =#
-  for ash in 1:length(basis), bsh in 1:ash
-    abas = basis[ash].nbas
-    bbas = basis[bsh].nbas
-    
-    apos = basis[ash].pos
-    bpos = basis[bsh].pos
-       
-    V_block_JERI = zeros(Float64,(abas*bbas,))
-    JERI.compute_nuc_attr_block(jeri_oei_engine, V_block_JERI, ash, bsh, 
-      length(V_block_JERI))
-    axial_normalization_factor(V_block_JERI, basis[ash], 
-      basis[bsh])
-  
-    idx = 1
-    for ibas in 0:abas-1, jbas in 0:bbas-1
-      iorb = apos + ibas
-      jorb = bpos + jbas
-      
-      V[max(iorb,jorb),min(iorb,jorb)] = V_block_JERI[idx]
-      
-      idx += 1 
+      jeri_oei_engine = thread_oei_engine[thread]
+      for ash in thread:n_threads:length(basis)
+        for bsh in 1:ash
+          abas = basis[ash].nbas
+          bbas = basis[bsh].nbas
+
+          apos = basis[ash].pos
+          bpos = basis[bsh].pos
+
+          JERI.compute_kinetic_block(jeri_oei_engine, T_block_JERI_buffer, ash, bsh, abas * bbas)
+          T_block_JERI_view = view(T_block_JERI_buffer, 1:abas*bbas)
+          axial_normalization_factor(T_block_JERI_view, basis[ash], basis[bsh])
+
+          idx = 1
+          for ibas in 0:abas-1, jbas in 0:bbas-1
+            iorb = apos + ibas
+            jorb = bpos + jbas
+            T[iorb, jorb] = T_block_JERI_view[idx]
+            idx += 1
+          end
+        end
+      end
     end
   end
-  
-  for iorb in 1:basis.norb, jorb in 1:iorb
-    if iorb != jorb
-      V[min(iorb,jorb),max(iorb,jorb)] = V[max(iorb,jorb),min(iorb,jorb)]
+  #print the thread times: 
+
+  Threads.@sync for thread in 1:n_threads
+    Threads.@spawn begin
+      for iorb in thread:n_threads:basis.norb
+        for jorb in 1:iorb-1
+            T[min(iorb,jorb),max(iorb,jorb)] = T[max(iorb,jorb),min(iorb,jorb)]
+        end 
+      end
     end
   end
 end
+
+function compute_nah(V::Matrix{Float64}, mol, basis::Basis, thread_oei_engine)
+  n_threads = Threads.nthreads()
+
+  lock_obj = ReentrantLock()
+  top_index = n_threads+1
+  max_basis = max_number_of_basis_functions(basis)
+  Threads.@sync for thread in 1:n_threads
+    Threads.@spawn begin
+      V_block_JERI_buffer = zeros(Float64, (max_basis * max_basis))
+      jeri_oei_engine = thread_oei_engine[thread]
+      ash = thread 
+      while ash <= length(basis)
+        for bsh in 1:ash
+          abas = basis[ash].nbas
+          bbas = basis[bsh].nbas
+
+          apos = basis[ash].pos
+          bpos = basis[bsh].pos
+
+          V_block_JERI = view(V_block_JERI_buffer, 1:abas * bbas)
+          JERI.compute_nuc_attr_block(jeri_oei_engine, V_block_JERI_buffer, ash, bsh, abas * bbas)
+          axial_normalization_factor(V_block_JERI, basis[ash], basis[bsh])
+
+          idx = 1
+          for ibas in 0:abas-1, jbas in 0:bbas-1
+            iorb = apos + ibas
+            jorb = bpos + jbas
+            V[max(iorb, jorb), min(iorb, jorb)] = V_block_JERI[idx]
+            idx += 1
+          end
+        end
+
+        lock(lock_obj) do 
+          ash = top_index
+          top_index += 1
+        end
+      end
+    end
+  end
+ 
+  # Parallelize the loop copying values from the lower triangle to the upper triangle
+  Threads.@sync for thread in 1:n_threads
+      Threads.@spawn begin
+          for iorb in thread:n_threads:basis.norb
+              for jorb in 1:iorb-1
+                V[min(iorb, jorb), max(iorb, jorb)] = V[max(iorb, jorb), min(iorb, jorb)]
+              end
+          end
+      end
+  end
+end
+
+# function compute_nah(V::Matrix{Float64}, mol::Molecule, 
+#   basis::Basis, jeri_oei_engine_arr)
+#   jeri_oei_engine = jeri_oei_engine_arr[1]
+  
+#   #== define ncenter ==#
+#   #=
+#   ncenter::Int64 = length(mol)
+  
+#   Z = Vector{Float64}([])
+#   x = Vector{Float64}([])
+#   y = Vector{Float64}([])
+#   z = Vector{Float64}([])
+
+#   for atom in mol 
+#     push!(Z, convert(Float64,atom.atom_id))  
+#     push!(x, atom.atom_center[1])  
+#     push!(y, atom.atom_center[2])  
+#     push!(z, atom.atom_center[3])  
+#   end
+#   =#
+#   for ash in 1:length(basis), bsh in 1:ash
+#     abas = basis[ash].nbas
+#     bbas = basis[bsh].nbas
+    
+#     apos = basis[ash].pos
+#     bpos = basis[bsh].pos
+       
+#     V_block_JERI = zeros(Float64,(abas*bbas,))
+#     JERI.compute_nuc_attr_block(jeri_oei_engine, V_block_JERI, ash, bsh, 
+#       length(V_block_JERI))
+#     axial_normalization_factor(V_block_JERI, basis[ash], 
+#       basis[bsh])
+  
+#     idx = 1
+#     for ibas in 0:abas-1, jbas in 0:bbas-1
+#       iorb = apos + ibas
+#       jorb = bpos + jbas
+      
+#       V[max(iorb,jorb),min(iorb,jorb)] = V_block_JERI[idx]
+      
+#       idx += 1 
+#     end
+#   end
+  
+#   for iorb in 1:basis.norb, jorb in 1:iorb
+#     if iorb != jorb
+#       V[min(iorb,jorb),max(iorb,jorb)] = V[max(iorb,jorb),min(iorb,jorb)]
+#     end
+#   end
+# end
 
 function sad_guess(mol::Molecule, basis::Basis)
   basis_symbol = basis.model
