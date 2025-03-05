@@ -27,7 +27,7 @@ function create_sparse_to_p_q_GPU!(gpu_type::oneAPI_GPU, device_sparse_to_p::one
     threads = min(p , numThreads)
     blocks = ceil(Int, p / threads)
 
-    oneAPI.@sync @oneapi items=threads groups=blocks create_sparse_to_p_q_kernel_oneAPI(device_sparse_to_p,
+    @oneapi items=threads groups=blocks create_sparse_to_p_q_kernel_oneAPI(device_sparse_to_p,
         device_sparse_to_q, 
         sparse_pq_index_map, p)
 
@@ -72,7 +72,7 @@ function form_nozero_coefficient_matrix_GPU!(gpu_type::oneAPI_GPU,
     threads = min(n_ranges , numThreads)
     blocks = ceil(Int, n_ranges / threads)
 
-    oneAPI.@sync @oneapi items=threads groups=blocks build_non_zero_coefficients_kernel_oneAPI(device_non_zero_coefficients, 
+    @oneapi items=threads groups=blocks build_non_zero_coefficients_kernel_oneAPI(device_non_zero_coefficients, 
         device_occupied_orbital_coefficients, 
         device_range_p,
         device_range_start,
@@ -108,7 +108,7 @@ function form_screened_density_GPU!(gpu_type::oneAPI_GPU, screened_density::oneA
     threads = min(p , numThreads)
     blocks = ceil(Int, p / threads)
 
-    oneAPI.@sync @oneapi items=threads groups=blocks form_screened_density_kernel_oneAPI!(screened_density, density, sparse_pq_index_map, p)
+    @oneapi items=threads groups=blocks form_screened_density_kernel_oneAPI!(screened_density, density, sparse_pq_index_map, p)
     GPU_synchronize(gpu_type)
 
 end
@@ -137,10 +137,14 @@ function copy_screened_J_to_fock_GPU!(gpu_type::oneAPI_GPU,
     screened_indices_count::Int64)
 
     numThreads = 256
-    threads = min(screened_indices_count , numThreads)
-    blocks = ceil(Int, screened_indices_count / threads)
+    # threads = min(screened_indices_count , numThreads)
+    # blocks = ceil(Int, screened_indices_count / threads)
+    threads = screened_indices_count
+    blocks = 1
+    # println("screened_indices_count: ", screened_indices_count)
 
-    oneAPI.@sync @oneapi items=threads groups=blocks copy_screened_J_to_fock_upper_triangle_oneAPI(fock, J, device_sparse_to_p, device_sparse_to_q, screened_indices_count)
+
+    @oneapi items=threads groups=blocks copy_screened_J_to_fock_upper_triangle_oneAPI(fock, J, device_sparse_to_p, device_sparse_to_q, screened_indices_count)
     GPU_synchronize(gpu_type)
 end
 
@@ -150,7 +154,7 @@ function copy_upper_to_lower_kernel_oneAPI(A)
     if i > size(A, 1)
         return nothing
     end
-    for j = axes(A, 2)
+    for j = 1:i
         @inbounds A[j, i] = A[i, j] 
     end
     return nothing
@@ -161,8 +165,7 @@ function copy_upper_to_lower_GPU!(gpu_type::oneAPI_GPU, fock::oneArray{Float64},
     threads = min(p , numThreads)
     blocks = ceil(Int, p / threads)                        
 
-    oneAPI.@sync @oneapi items=threads groups=blocks copy_upper_to_lower_kernel_oneAPI(fock)
-     
+    @oneapi items=threads groups=blocks copy_upper_to_lower_kernel_oneAPI(fock)
     GPU_synchronize(gpu_type) 
 end
 

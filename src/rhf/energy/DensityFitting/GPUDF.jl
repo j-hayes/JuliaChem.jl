@@ -1,14 +1,14 @@
 using MPI
-using CUDA
-using CUDA.CUBLAS
-using CUDA.CUSOLVER
+# using CUDA
+# using CUDA.CUBLAS
+# using CUDA.CUSOLVER
 using HDF5 
 # using AMDGPU
 # import AMDGPU.rocSOLVER: potrf!
 # import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
 
-# using oneAPI
-# using oneAPI.oneMKL
+using oneAPI
+using oneAPI.oneMKL
 # import oneAPI.oneMKL: trmm!, gemm!, gemv!
 
 using LinearAlgebra
@@ -69,17 +69,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         end
 
         calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing, F_ARR_type)
-       
-        #copy B to the host
-        for device_id in 1:num_devices
-            B_host = zeros(Float64, size(scf_data.gpu_data.device_B[device_id]))
-            copyto!(B_host, scf_data.gpu_data.device_B[device_id])
-
-            #write to an HDF5 file
-            if rank == 0 && device_id == 1
-                h5write("debug_B.h5", "B_$device_id", B_host)
-            end
-        end
 
         if scf_options.df_use_adaptive && scf_options.df_exchange_n_blocks == 0
             QQ = maximum(scf_data.gpu_data.device_Q_range_lengths)
@@ -198,31 +187,13 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                     J = scf_data.gpu_data.device_coulomb[device_id]
                     fock = scf_data.gpu_data.device_fock[device_id]
                     host_fock = scf_data.gpu_data.host_fock[device_id]
-                
-                    # occupied_orbital_coefficients[3,:] = occupied_orbital_coefficients[3,:]*-1.0
 
                     copyto!(ooc, occupied_orbital_coefficients)
                     GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
-                    # println("occupied_orbital_coefficients")
-                    # display(occupied_orbital_coefficients)
-
                     non_zero_coeff_times[device_id] = @elapsed form_nozero_coefficient_matrix!(scf_data, device_id)
 
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        host_nonzero_coefficients = zeros(Float64, size(scf_data.gpu_data.device_non_zero_coefficients[device_id]))
-                        copyto!(host_nonzero_coefficients, scf_data.gpu_data.device_non_zero_coefficients[device_id])
-                        h5write("debug_non_zero_coefficients.h5", "non_zero_coefficients", host_nonzero_coefficients)
-                    end
-
-
                     W_times[device_id]  = @elapsed calculate_W_screened_GPU(device_id, scf_data, threads_per_device)
-
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        W_host = zeros(Float64, size(scf_data.gpu_data.device_exchange_intermediate[device_id]))
-                        copyto!(W_host, scf_data.gpu_data.device_exchange_intermediate[device_id])
-                        h5write("debug_W.h5", "W", W_host)
-                    end
 
                     if scf_options.df_exchange_n_blocks > 1 
                         lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)#should only be done on first iteration 
@@ -232,52 +203,17 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                         K_times[device_id]  = @elapsed calcululate_K_no_sym_GPU!(fock, W, p, scf_data.occ, Q_length, device_id, scf_data.gpu_data.GPU_Type)
                     end
     
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        K_host = zeros(Float64, size(fock))
-                        copyto!(K_host, fock)
-                        h5write("debug_K.h5", "K", K_host)
-                    end
-
                     density_times[device_id]  = @elapsed form_screened_density!(scf_data, device_id)
-
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        screened_density_host = zeros(Float64, size(scf_data.gpu_data.device_screened_density[device_id]))
-                        copyto!(screened_density_host, scf_data.gpu_data.device_screened_density[device_id])
-                        h5write("debug_screened_density.h5", "screened_density", screened_density_host)
-                    end
-
                     V_times[device_id]  = @elapsed calculate_V_screened_GPU(V, B, density, scf_data.gpu_data.GPU_Type)
-
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        V_host = zeros(Float64, size(scf_data.gpu_data.device_coulomb_intermediate[device_id]))
-                        copyto!(V_host, scf_data.gpu_data.device_coulomb_intermediate[device_id])
-                        h5write("debug_V.h5", "V", V_host)
-                    end
-
                     J_times[device_id]  = @elapsed calculate_J_screened_GPU(J, B, V, scf_data.gpu_data.GPU_Type)
-
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        J_host = zeros(Float64, size(scf_data.gpu_data.device_coulomb[device_id]))
-                        copyto!(J_host, scf_data.gpu_data.device_coulomb[device_id])
-                        h5write("debug_J.h5", "J", J_host)
-                    end
-                    
                     gpu_copy_J_time[device_id] = @elapsed begin 
                         
                         device_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
                         device_sparse_to_q = scf_data.gpu_data.device_sparse_to_q[device_id]
-    
                         copy_screened_J_to_fock_GPU!(scf_data.gpu_data.GPU_Type, 
-                            fock, J, device_sparse_to_p, device_sparse_to_q, scf_data.screening_data.screened_indices_count)
+                        fock, J, device_sparse_to_p, device_sparse_to_q, scf_data.screening_data.screened_indices_count)
 
                     end
-
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        fock_host_d = zeros(Float64, size(scf_data.gpu_data.device_fock[device_id]))
-                        copyto!(fock_host_d, scf_data.gpu_data.device_fock[device_id])
-                        h5write("debug_fock_no_sym_copy.h5", "fock", fock_host_d)
-                    end
-
                     gpu_copy_sym_time[device_id] = @elapsed begin
     
                         device_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
@@ -286,23 +222,11 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                         copy_upper_to_lower_GPU!(scf_data.gpu_data.GPU_Type, fock, p, scf_data.screening_data.screened_indices_count)
                     end
 
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        fock_host_2 = zeros(Float64, size(scf_data.gpu_data.device_fock[device_id]))
-                        copyto!(fock_host_2, scf_data.gpu_data.device_fock[device_id])
-                        h5write("debug_fock_sym_copy.h5", "fock", fock_host_2)
-                    end
-                    
                     if rank == 0 && device_id == 1 
                         H_add_time = @elapsed begin
                             fock .+= scf_data.gpu_data.device_H
                             GPU_synchronize(scf_data.gpu_data.GPU_Type)
                         end
-                    end
-
-                    if rank == 0 && device_id == 1 && iteration == 1
-                        fock_host_3 = zeros(Float64, size(scf_data.gpu_data.device_fock[device_id]))
-                        copyto!(fock_host_3, scf_data.gpu_data.device_fock[device_id])
-                        h5write("debug_fock_H_add.h5", "fock", fock_host_3)
                     end
                 end # gpu fock time elapsed
             end #spawn     
@@ -347,14 +271,13 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     jc_timing.timings[JCTiming_key(JCTC.fock_gpu_cpu_copy_reduce_time, iteration)] = fock_copy_time
     jc_timing.timings[JCTiming_key(JCTC.total_fock_gpu_time, iteration)] = total_fock_gpu_time
 
-
 end
 
 function form_screened_density!(scf_data::SCFData, device_id::Int64)
     density = scf_data.gpu_data.device_density[device_id]
     screened_density = scf_data.gpu_data.device_screened_density[device_id]
     occupied_orbital_coefficients = scf_data.gpu_data.device_occupied_orbital_coefficients[device_id]
-    CUDA.CUBLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, density)
+    oneAPI.oneMKL.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, density)
     GPU_synchronize(scf_data.gpu_data.GPU_Type)
   
     sparse_pq_index_map = scf_data.gpu_data.sparse_pq_index_map[device_id]
@@ -449,12 +372,12 @@ end
 
 
 function calculate_V_screened_GPU(V, B, density, gpu_type::GPU_Type)
-    CUDA.CUBLAS.gemv!('N', 1.0, B, density, 0.0, V)
+    oneAPI.oneMKL.gemv!('N', 1.0, B, density, 0.0, V)
     GPU_synchronize(gpu_type)
 end
 
 function calculate_J_screened_GPU(J, B, V, gpu_type::GPU_Type)
-    CUDA.CUBLAS.gemv!('T', 2.0, B, V, 0.0, J)
+    oneAPI.oneMKL.gemv!('T', 2.0, B, V, 0.0, J)
     GPU_synchronize(gpu_type)
 end
 
@@ -480,7 +403,7 @@ function calculate_W_screened_GPU(device_id, scf_data::SCFData, num_threads ::In
         B_cu = view(non_zero_coefficients, :,1:K,pp)
         C_cu = view(W, :,:,pp)
 
-        CUDA.CUBLAS.gemm!('N','T', alpha, A_cu, B_cu, beta, C_cu)
+        oneAPI.oneMKL.gemm!('N','T', alpha, A_cu, B_cu, beta, C_cu)
     end
 
     GPU_synchronize(scf_data.gpu_data.GPU_Type)
@@ -488,7 +411,7 @@ function calculate_W_screened_GPU(device_id, scf_data::SCFData, num_threads ::In
 end
 
 function calcululate_K_no_sym_GPU!(fock, W, p::Int64, n_ooc::Int64, Q::Int64, device_id::Int64, gpu_type::GPU_Type)
-    CUDA.CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (Q*n_ooc, p)), reshape(W, (Q*n_ooc, p)), 0.0, fock)
+    oneAPI.oneMKL.gemm!('T', 'N', -1.0, reshape(W, (Q*n_ooc, p)), reshape(W, (Q*n_ooc, p)), 0.0, fock)
     GPU_synchronize(gpu_type)
 end
 
@@ -532,7 +455,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         A = reshape(view(W, :,:, p_range), (K, K_block_width))
         B = reshape(view(W, :,:, q_range), (K, K_block_width))
 
-        CUDA.CUBLAS.gemm!(transA, transB, alpha, A, B, beta, exchange_block)
+        oneAPI.oneMKL.gemm!(transA, transB, alpha, A, B, beta, exchange_block)
         copyto!(view(fock, p_range, q_range), exchange_block)
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
@@ -554,7 +477,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         C_non_square = scf_data.gpu_data.device_non_square_K_block[device_id]
         
     
-        CUDA.CUBLAS.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square) #W^T[M, Q*n_ooc] * W[Q*n_ooc, N] = C_non_square[M, N]
+        oneAPI.oneMKL.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square) #W^T[M, Q*n_ooc] * W[Q*n_ooc, N] = C_non_square[M, N]
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
         copyto!(view(fock, row_non_square_range,:), C_non_square)  #non contiguous memory access on the GPU bad, should use the other triangle side
@@ -673,10 +596,10 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
 
 
                         if global_send_device_id == global_recieve_device_id
-                            CUDA.CUBLAS.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id], 1.0, device_B[rank_recieve_device_id])
+                            oneAPI.oneMKL.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id], 1.0, device_B[rank_recieve_device_id])
                         else
                             send_B_view = view(device_B_send_buffers[r_send_device_id], 1:array_size)
-                            CUDA.CUBLAS.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id],
+                            oneAPI.oneMKL.gemm!('N', 'N', 1.0, J_AB_INV_view, device_three_center_integrals[r_send_device_id],
                                 0.0, reshape(send_B_view, (rec_device_Q_range_length, pq)))
                         end
                         GPU_synchronize(scf_data.gpu_data.GPU_Type)
