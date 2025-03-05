@@ -5,7 +5,7 @@ function create_sparse_to_p_q_kernel_oneAPI(sparse_to_p,
     sparse_pq_index_map,  
     p::Int64)
 
-    qq = get_local_id()
+    qq = get_global_id()
     if qq > p
         return nothing
     end
@@ -42,7 +42,7 @@ function build_non_zero_coefficients_kernel_oneAPI(non_zero_coefficients,
        device_range_sparse_start,
        n_ranges::Int64)
 
-    i = get_local_id()
+    i = get_global_id()
 
     if i > n_ranges
         return nothing
@@ -87,7 +87,7 @@ end
 #not a huge performance hit at the moment so not proritiezed 
 function form_screened_density_kernel_oneAPI!(screened_density, density, sparse_pq_index_map, p::Int64)
     
-    pp = get_local_id()
+    pp = get_global_id()
     if pp > p
         return nothing
     end
@@ -115,16 +115,17 @@ end
 
 
 function copy_screened_J_to_fock_upper_triangle_oneAPI(fock, J,
-    device_sparse_to_p, device_sparse_to_q, n_sparse_indicies::Int64)
+    device_sparse_to_p, device_sparse_to_q,  n_sparse_indicies::Int64)
 
-    i = get_local_id()
+    i = get_global_id()
 
     if i > n_sparse_indicies
         return nothing
     end
 
-    qq = device_sparse_to_p[i]
-    pp = device_sparse_to_q[i]
+    @inbounds value = J[i]
+    @inbounds qq = device_sparse_to_p[i]
+    @inbounds pp = device_sparse_to_q[i]
     @inbounds fock[pp, qq] += J[i]
     return nothing 
 end
@@ -136,21 +137,19 @@ function copy_screened_J_to_fock_GPU!(gpu_type::oneAPI_GPU,
     device_sparse_to_q::oneArray{Int64}, 
     screened_indices_count::Int64)
 
-    numThreads = 256
-    # threads = min(screened_indices_count , numThreads)
-    # blocks = ceil(Int, screened_indices_count / threads)
-    threads = screened_indices_count
-    blocks = 1
-    # println("screened_indices_count: ", screened_indices_count)
-
-
-    @oneapi items=threads groups=blocks copy_screened_J_to_fock_upper_triangle_oneAPI(fock, J, device_sparse_to_p, device_sparse_to_q, screened_indices_count)
+    
+    numThreads = min(256, screened_indices_count)
+    blocks = ceil(Int, screened_indices_count / numThreads)
+  
+    @oneapi items=numThreads groups=blocks copy_screened_J_to_fock_upper_triangle_oneAPI(fock, J, device_sparse_to_p, device_sparse_to_q, screened_indices_count)
     GPU_synchronize(gpu_type)
+
+
 end
 
 
 function copy_upper_to_lower_kernel_oneAPI(A)
-    i = get_local_id()
+    i = get_global_id()
     if i > size(A, 1)
         return nothing
     end
