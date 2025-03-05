@@ -288,7 +288,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
                     if rank == 0 && device_id == 1 && iteration == 1
                         fock_host_2 = zeros(Float64, size(scf_data.gpu_data.device_fock[device_id]))
-                        copyto!(fock_host, scf_data.gpu_data.device_fock[device_id])
+                        copyto!(fock_host_2, scf_data.gpu_data.device_fock[device_id])
                         h5write("debug_fock_sym_copy.h5", "fock", fock_host_2)
                     end
                     
@@ -301,7 +301,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
 
                     if rank == 0 && device_id == 1 && iteration == 1
                         fock_host_3 = zeros(Float64, size(scf_data.gpu_data.device_fock[device_id]))
-                        copyto!(fock_host, scf_data.gpu_data.device_fock[device_id])
+                        copyto!(fock_host_3, scf_data.gpu_data.device_fock[device_id])
                         h5write("debug_fock_H_add.h5", "fock", fock_host_3)
                     end
                 end # gpu fock time elapsed
