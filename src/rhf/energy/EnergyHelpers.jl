@@ -26,7 +26,6 @@ function compute_overlap(S::Matrix{Float64}, basis::Basis,
   thread_oei_engine)
 
   n_threads = Threads.nthreads()
-  # n_threads=1
   Threads.@sync for thread in 1:n_threads
     Threads.@spawn begin
       jeri_oei_engine = thread_oei_engine[thread]
@@ -74,6 +73,7 @@ function compute_ke(T::Matrix{Float64}, basis::Basis, thread_oei_engine)
   Threads.@sync for thread in 1:n_threads
     Threads.@spawn begin
       T_block_JERI_buffer = zeros(Float64, (10000))
+      thread_jeri_allocation_bytes = 0.0
 
       jeri_oei_engine = thread_oei_engine[thread]
       for ash in thread:n_threads:length(basis)
@@ -84,7 +84,7 @@ function compute_ke(T::Matrix{Float64}, basis::Basis, thread_oei_engine)
           apos = basis[ash].pos
           bpos = basis[bsh].pos
 
-          JERI.compute_kinetic_block(jeri_oei_engine, T_block_JERI_buffer, ash, bsh, abas * bbas)
+          thread_jeri_allocation_bytes += @allocated JERI.compute_kinetic_block(jeri_oei_engine, T_block_JERI_buffer, ash, bsh, abas * bbas)
           T_block_JERI_view = view(T_block_JERI_buffer, 1:abas*bbas)
           axial_normalization_factor(T_block_JERI_view, basis[ash], basis[bsh])
 
@@ -118,8 +118,10 @@ function compute_nah(V::Matrix{Float64}, mol, basis::Basis, thread_oei_engine)
   lock_obj = ReentrantLock()
   top_index = n_threads+1
   max_basis = max_number_of_basis_functions(basis)
-  Threads.@sync for thread in 1:n_threads
+  @time Threads.@sync for thread in 1:n_threads
     Threads.@spawn begin
+      thread_jeri_allocation_bytes = 0.0
+      
       V_block_JERI_buffer = zeros(Float64, (max_basis * max_basis))
       jeri_oei_engine = thread_oei_engine[thread]
       ash = thread 
@@ -132,7 +134,7 @@ function compute_nah(V::Matrix{Float64}, mol, basis::Basis, thread_oei_engine)
           bpos = basis[bsh].pos
 
           V_block_JERI = view(V_block_JERI_buffer, 1:abas * bbas)
-          JERI.compute_nuc_attr_block(jeri_oei_engine, V_block_JERI_buffer, ash, bsh, abas * bbas)
+          thread_jeri_allocation_bytes += @allocated JERI.compute_nuc_attr_block(jeri_oei_engine, V_block_JERI_buffer, ash, bsh, abas * bbas)
           axial_normalization_factor(V_block_JERI, basis[ash], basis[bsh])
 
           idx = 1
@@ -149,6 +151,8 @@ function compute_nah(V::Matrix{Float64}, mol, basis::Basis, thread_oei_engine)
           top_index += 1
         end
       end
+      println("Thread $thread allocated mb = $(thread_jeri_allocation_bytes / 1e6)")
+
     end
   end
  

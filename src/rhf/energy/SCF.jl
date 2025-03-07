@@ -98,17 +98,8 @@ function rhf_kernel(mol::Molecule,
   H = zeros(Float64, (basis.norb, basis.norb))
 
   V_time = @time @elapsed compute_nah(V, mol, basis, thread_jeri_oei_engine)
-  V = zeros(Float64, (basis.norb, basis.norb))
-  V_time = @time @elapsed compute_nah(V, mol, basis, thread_jeri_oei_engine)
-
-
   T_time = @time @elapsed compute_ke(T, basis, thread_jeri_oei_engine)
   T = zeros(Float64, (basis.norb, basis.norb))
-  T_time = @time @elapsed compute_ke(T, basis, thread_jeri_oei_engine)
-  S = zeros(Float64, (basis.norb, basis.norb))
-  
-  @time compute_overlap(S, basis, thread_jeri_oei_engine)
-  S = zeros(Float64, (basis.norb, basis.norb))
   @time compute_overlap(S, basis, thread_jeri_oei_engine)
   jeri_oei_engine = thread_jeri_oei_engine[1]
 

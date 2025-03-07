@@ -58,6 +58,8 @@ module JCTC
     const form_J_AB_inv_time = "form_J_AB_inv_time" 
     const density_time = "density_time-"
     const H_time = "H_time" 
+    const S_time = "S_time" 
+    const sad_time = "sad_time"
     const H_add_time = "H_add_time-"
     const K_time = "K_time-"
     const W_time = "W_time-"
