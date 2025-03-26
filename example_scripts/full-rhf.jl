@@ -1,4 +1,5 @@
 
+# using MKL 
 include("full-rhf-repl.jl")
 #== initialize JuliaChem ==#
 JuliaChem.initialize() 

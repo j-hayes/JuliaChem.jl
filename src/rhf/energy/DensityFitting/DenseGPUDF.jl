@@ -8,10 +8,10 @@ using CUDA.CUSOLVER
 # import AMDGPU.rocSOLVER: potrf!
 # import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
 
-# using oneAPI
-# using oneAPI.oneMKL
-# import oneAPI.oneMKL: potrf!
-# import oneAPI.oneMKL: gemm!, gemv!, trmm!
+using oneAPI
+using oneAPI.oneMKL
+import oneAPI.oneMKL: potrf!
+import oneAPI.oneMKL: gemm!, gemv!
 
 using LinearAlgebra
 using Base.Threads
@@ -46,7 +46,7 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
         scf_data.gpu_data.device_Q_index_lengths = Q_device_range_lengths
         #clear the memory 
         
-        Threads.@threads for setup_device_id in 1:num_devices
+        for setup_device_id in 1:num_devices #Threads.@threads 
             set_gpu_device(setup_device_id-1, scf_data.gpu_data.GPU_Type)
             Q = scf_data.gpu_data.device_Q_index_lengths[setup_device_id]
 
@@ -83,7 +83,7 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
 
 
     total_fock_gpu_time = @elapsed begin
-        Threads.@threads for device_id in 1:num_devices
+        for device_id in 1:num_devices #Threads.@threads 
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             Q = scf_data.gpu_data.device_Q_index_lengths[device_id]
             ooc = scf_data.gpu_data.device_occupied_orbital_coefficients[device_id]
@@ -133,7 +133,7 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
     fock_copy_time = @elapsed begin
         copyto!(scf_data.gpu_data.host_fock[1], scf_data.gpu_data.device_fock[1])
         scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
-        Threads.@threads for device_id in 2:num_devices
+        for device_id in 2:num_devices #Threads.@threads 
             copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])
         end
         for device_id in 2:num_devices
@@ -208,7 +208,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
         setup_unscreened_screening_matricies(basis_sets, scf_data)
         #copy J_AB_INV to all devices
         copyto!(two_center_integrals, device_J_AB_invt[1])
-        Threads.@threads for device_id in 2:num_devices
+         for device_id in 2:num_devices #Threads.@threads
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             copyto!(device_J_AB_invt[device_id], two_center_integrals)
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
@@ -216,7 +216,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
 
         device_Q_index_lengths = zeros(Int, num_devices)
         aux_ranges = Array{UnitRange{Int}}(undef, num_devices)
-        Threads.@threads for device_id in 1:num_devices
+        for device_id in 1:num_devices #Threads.@threads 
             device_shell_aux_indicies, 
             device_aux_indicies, 
             device_basis_index_map = static_load_rank_indicies(device_id-1,num_devices,basis_sets) 
@@ -226,7 +226,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
 
         max_device_Q_range_length = maximum(device_Q_index_lengths)
 
-        Threads.@threads for device_id in 1:num_devices
+        for device_id in 1:num_devices #Threads.@threads 
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             device_three_center_integrals[device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type,Float64, (max_device_Q_range_length*pq))
             device_B[device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type,Float64, (device_Q_index_lengths[device_id],pq))
@@ -242,7 +242,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
                 scf_data, other_device_id-1, num_devices, true, false)
             end
 
-            Threads.@threads for device_id in 1:num_devices
+            for device_id in 1:num_devices #Threads.@threads 
                 set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
                 device_aux_indicies = aux_ranges[device_id]
                 three_eri_view = view(device_three_center_integrals[device_id], 1:(device_Q_index_lengths[other_device_id]*pq))

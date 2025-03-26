@@ -9,7 +9,7 @@ using HDF5
 
 using oneAPI
 using oneAPI.oneMKL
-# import oneAPI.oneMKL: trmm!, gemm!, gemv!
+import oneAPI.oneMKL: gemm!, gemv!
 
 using LinearAlgebra
 using Base.Threads
@@ -100,7 +100,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         scf_data.non_zero_coefficients = zeros(Float64, n_ooc, p, p)
 
         
-        Threads.@threads for device_id in 1:num_devices
+        # Threads.@threads for device_id in 1:num_devices
+        for device_id in 1:num_devices
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
 
             #device host data 
@@ -134,7 +135,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             
             if rank == 0 && device_id == 1
                 scf_data.gpu_data.device_H = GPU_zeros(scf_data.gpu_data.GPU_Type, Float64, (scf_data.μ, scf_data.μ))
-                copyto!(scf_data.gpu_data.device_H, H)
+                oneAPI.copyto!(scf_data.gpu_data.device_H, H)
+                GPU_synchronize(scf_data.gpu_data.GPU_Type)
             end
             #timing gpu size in MB 
         end
@@ -172,8 +174,9 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     threads_per_device = Int64((n_threads - num_devices) ÷ num_devices) 
     
     total_fock_gpu_time = @elapsed begin 
-        Threads.@sync for device_id in 1:num_devices
-            Threads.@spawn begin
+        for device_id in 1:num_devices
+        # Threads.@sync for device_id in 1:num_devices
+            # Threads.@spawn begin
                 gpu_fock_times[device_id] = @elapsed begin 
                     set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
                     global_device_id = device_id + (rank)*num_devices
@@ -188,14 +191,14 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                     fock = scf_data.gpu_data.device_fock[device_id]
                     host_fock = scf_data.gpu_data.host_fock[device_id]
 
-                    copyto!(ooc, occupied_orbital_coefficients)
+                    oneAPI.copyto!(ooc, occupied_orbital_coefficients)
                     GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
                     non_zero_coeff_times[device_id] = @elapsed form_nozero_coefficient_matrix!(scf_data, device_id)
 
                     W_times[device_id]  = @elapsed calculate_W_screened_GPU(device_id, scf_data, threads_per_device)
 
-                    if scf_options.df_exchange_n_blocks > 1 
+                    if scf_options.df_exchange_n_blocks > 1
                         lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)#should only be done on first iteration 
                         K_times[device_id]  = @elapsed calculate_K_lower_diagonal_block_no_screen_GPU(host_fock, fock, W, Q_length, device_id,
                         scf_data, scf_options, lower_triangle_length, threads_per_device)       
@@ -203,9 +206,31 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                         K_times[device_id]  = @elapsed calcululate_K_no_sym_GPU!(fock, W, p, scf_data.occ, Q_length, device_id, scf_data.gpu_data.GPU_Type)
                     end
     
+                    #copy fock for debug
+                    debug_fock = zeros(Float64, size(fock))
+                    copyto!(debug_fock, fock)
+                    GPU_synchronize(scf_data.gpu_data.GPU_Type)
+                    #save to hdf5 
+                    if rank == 0 && device_id == 1 && iteration == 1
+                        h5write("exchange_$(iteration).h5", "K", debug_fock)
+                    end
+                    # println("K: ")
+                    # display( debug_fock)
+
                     density_times[device_id]  = @elapsed form_screened_density!(scf_data, device_id)
                     V_times[device_id]  = @elapsed calculate_V_screened_GPU(V, B, density, scf_data.gpu_data.GPU_Type)
                     J_times[device_id]  = @elapsed calculate_J_screened_GPU(J, B, V, scf_data.gpu_data.GPU_Type)
+
+
+                    # debug_J = zeros(Float64, size(J))
+                    # copyto!(debug_J, J)
+                    # GPU_synchronize(scf_data.gpu_data.GPU_Type)
+                    # #save to hdf5 
+                    # if rank == 0 && device_id == 1 && iteration == 1
+                    #     h5write("J.h5", "J", debug_J)
+                    # end
+
+
                     gpu_copy_J_time[device_id] = @elapsed begin 
                         
                         device_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
@@ -214,13 +239,13 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                         fock, J, device_sparse_to_p, device_sparse_to_q, scf_data.screening_data.screened_indices_count)
 
                     end
-                    gpu_copy_sym_time[device_id] = @elapsed begin
+                    # gpu_copy_sym_time[device_id] = @elapsed begin
     
-                        device_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
-                        device_sparse_to_q = scf_data.gpu_data.device_sparse_to_q[device_id]
+                    #     device_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
+                    #     device_sparse_to_q = scf_data.gpu_data.device_sparse_to_q[device_id]
                         
-                        copy_upper_to_lower_GPU!(scf_data.gpu_data.GPU_Type, fock, p, scf_data.screening_data.screened_indices_count)
-                    end
+                    #     copy_upper_to_lower_GPU!(scf_data.gpu_data.GPU_Type, fock, p, scf_data.screening_data.screened_indices_count)
+                    # end
 
                     if rank == 0 && device_id == 1 
                         H_add_time = @elapsed begin
@@ -229,14 +254,15 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
                         end
                     end
                 end # gpu fock time elapsed
-            end #spawn     
+            # end #spawn     
         end#sync
     end# total fock gpu time elapsed
 
     fock_copy_time = @elapsed begin
-        Threads.@threads for device_id in 1:num_devices
+        # Threads.@threads for device_id in 1:num_devices
+        for device_id in 1:num_devices
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
-            copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
+            oneAPI.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])  
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
         end
         scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
@@ -245,6 +271,17 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         end 
     end #copy_time elapsed 
 
+    #copy upper to lower triangle fock 
+    for p in 1:scf_data.μ
+        for q in 1:p-1
+            scf_data.two_electron_fock[q,p] = scf_data.two_electron_fock[p,q]
+        end
+    end
+
+    #write fock to hdf5
+    if rank == 0 && iteration == 1
+        h5write("fock_$(iteration).h5", "fock", scf_data.two_electron_fock)
+    end
 
     for device_id in 1:num_devices
         jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_W_time, device_id, iteration)] = W_times[device_id]
@@ -319,8 +356,9 @@ function setup_gpu_screening_data!(scf_data::SCFData, num_devices::Int64)
         end
     end
     
-    Threads.@sync for device_id in 1:num_devices
-        Threads.@spawn begin
+    # Threads.@sync for device_id in 1:num_devices
+    for device_id in 1:num_devices
+        # Threads.@spawn begin
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             scf_data.gpu_data.device_range_p[device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type, Int, n_ranges)
             scf_data.gpu_data.device_range_start[device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type, Int, n_ranges)
@@ -334,24 +372,25 @@ function setup_gpu_screening_data!(scf_data::SCFData, num_devices::Int64)
 
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
-            copyto!(scf_data.gpu_data.sparse_pq_index_map[device_id], scf_data.screening_data.sparse_pq_index_map)
-            copyto!(scf_data.gpu_data.device_range_p[device_id], range_p)
-            copyto!(scf_data.gpu_data.device_range_start[device_id], range_start)
-            copyto!(scf_data.gpu_data.device_range_end[device_id], range_end)
-            copyto!(scf_data.gpu_data.device_range_sparse_start[device_id], range_sparse_start)
-            copyto!(scf_data.gpu_data.device_range_sparse_end[device_id], range_sparse_end)
+            oneAPI.copyto!(scf_data.gpu_data.sparse_pq_index_map[device_id], scf_data.screening_data.sparse_pq_index_map)
+            oneAPI.copyto!(scf_data.gpu_data.device_range_p[device_id], range_p)
+            oneAPI.copyto!(scf_data.gpu_data.device_range_start[device_id], range_start)
+            oneAPI.copyto!(scf_data.gpu_data.device_range_end[device_id], range_end)
+            oneAPI.copyto!(scf_data.gpu_data.device_range_sparse_start[device_id], range_sparse_start)
+            oneAPI.copyto!(scf_data.gpu_data.device_range_sparse_end[device_id], range_sparse_end)
             GPU_synchronize(scf_data.gpu_data.GPU_Type) 
-        end
+        # end
     end
 
-    Threads.@sync for device_id in 1:num_devices
-        Threads.@spawn begin
+    # Threads.@sync for device_id in 1:num_devices
+    for device_id in 1:num_devices
+        # Threads.@spawn begin
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
 
             create_sparse_to_p_q_GPU!(scf_data.gpu_data.GPU_Type, scf_data.gpu_data.device_sparse_to_p[device_id],
                 scf_data.gpu_data.device_sparse_to_q[device_id], 
                 scf_data.gpu_data.sparse_pq_index_map[device_id], p, n_ranges)
-        end
+        # end
     end
 end
 
@@ -444,7 +483,6 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
 
     # no streams if the system is large enough to use this method the GEMM should saturate GPU
 
-    set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
     exchange_block = view(device_K_block, :,:, 1)
 
     for index in 1:lower_triangle_length
@@ -456,11 +494,10 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         B = reshape(view(W, :,:, q_range), (K, K_block_width))
 
         oneAPI.oneMKL.gemm!(transA, transB, alpha, A, B, beta, exchange_block)
-        copyto!(view(fock, p_range, q_range), exchange_block)
+        oneAPI.copyto!(view(fock, p_range, q_range), exchange_block)
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
-        #copy transpose 
-        copyto!(view(fock, q_range, p_range), transpose(exchange_block))
+        oneAPI.copyto!(view(fock, q_range, p_range), transpose(exchange_block))
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
     end
 
@@ -480,11 +517,11 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
         oneAPI.oneMKL.gemm!(transA, transB, alpha, A_non_square, B_non_square, beta, C_non_square) #W^T[M, Q*n_ooc] * W[Q*n_ooc, N] = C_non_square[M, N]
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
-        copyto!(view(fock, row_non_square_range,:), C_non_square)  #non contiguous memory access on the GPU bad, should use the other triangle side
+        oneAPI.copyto!(view(fock, row_non_square_range,:), C_non_square)  #non contiguous memory access on the GPU bad, should use the other triangle side
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
         #copy transpose
-        copyto!(view(fock, :, row_non_square_range), transpose(C_non_square))
+        oneAPI.copyto!(view(fock, :, row_non_square_range), transpose(C_non_square))
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
 
     end 
@@ -514,8 +551,9 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
 
     device_id_offset = rank * num_devices
     
-    Threads.@sync for setup_device_id in 1:num_devices
-        Threads.@spawn begin
+    # Threads.@sync for setup_device_id in 1:num_devices
+    for setup_device_id in 1:num_devices
+        # Threads.@spawn begin
             set_gpu_device(setup_device_id-1, scf_data.gpu_data.GPU_Type)
             global_device_id = setup_device_id  + device_id_offset
             # buffer for J_AB_invt for each device max size needed is A*A 
@@ -526,7 +564,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
            
             #todo calculate the three center integrals per device (probably could directly copy to the device while it is being calculated)
             device_three_center_integrals[setup_device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type,Float64, size(three_center_integrals[setup_device_id]))
-            copyto!(device_three_center_integrals[setup_device_id], three_center_integrals[setup_device_id])
+            oneAPI.copyto!(device_three_center_integrals[setup_device_id], three_center_integrals[setup_device_id])
 
             device_B[setup_device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type, Float64, (device_Q_range_lengths[global_device_id], pq))
             if num_devices_global > 1 
@@ -534,7 +572,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                 host_B_send_buffers[setup_device_id] = zeros(Float64, (max_device_Q_range_length * pq))
             end
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
-        end #spawn
+        # end #spawn
     end
 
     if rank == 0
@@ -543,8 +581,8 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             calculate_J_AB_INV_GPU!(scf_data.gpu_data.GPU_Type, two_center_integrals, device_J_AB_invt[1])
         end
 
-        copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
-
+        oneAPI.copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
+        GPU_synchronize(scf_data.gpu_data.GPU_Type)
         jc_timing.timings[JCTC.form_J_AB_inv_time] = J_AB_time
     end
 
@@ -555,7 +593,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
     
 
     if n_ranks == 1 && num_devices == 1
-        copyto!(device_J_AB_invt[1], two_center_integrals)
+        oneAPI.copyto!(device_J_AB_invt[1], two_center_integrals)
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
         B_time = @elapsed begin
             trmm_GPU!(scf_data.gpu_data.GPU_Type, 'L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])
@@ -570,7 +608,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
 
     for device_id_two_eri in 2:num_devices
         set_gpu_device(device_id_two_eri-1, scf_data.gpu_data.GPU_Type)
-        copyto!(device_J_AB_invt[device_id_two_eri], two_center_integrals)
+        oneAPI.copyto!(device_J_AB_invt[device_id_two_eri], two_center_integrals)
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
     end
 
@@ -581,14 +619,15 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
             recieve_rank = (global_recieve_device_id-1) ÷ num_devices
             rank_recieve_device_id = ((global_recieve_device_id-1) % num_devices) + 1 # one indexed device id for the rank 
             array_size = rec_device_Q_range_length*pq
-            Threads.@sync for r_send_device_id in 1:num_devices
-                Threads.@spawn begin
+            # Threads.@sync for r_send_device_id in 1:num_devices
+            for r_send_device_id in 1:num_devices
+                # Threads.@spawn begin
                     set_gpu_device(r_send_device_id-1, scf_data.gpu_data.GPU_Type) 
                         global_send_device_id = r_send_device_id + device_id_offset 
                         send_device_Q_range_length = device_Q_range_lengths[global_send_device_id]
                         J_AB_invt_for_device = two_center_integrals[device_Q_indices[global_recieve_device_id],device_Q_indices[global_send_device_id]]
                         device_J_AB_inv_count = send_device_Q_range_length*rec_device_Q_range_length # total number of elements in the J_AB_invt matrix for the device
-                        copyto!(device_J_AB_invt[r_send_device_id],1,J_AB_invt_for_device,1,device_J_AB_inv_count) #copy the needed J_AB_invt data to the device 
+                        oneAPI.copyto!(device_J_AB_invt[r_send_device_id],1,J_AB_invt_for_device,1,device_J_AB_inv_count) #copy the needed J_AB_invt data to the device 
 
                         J_AB_INV_view = reshape(
                             view(device_J_AB_invt[r_send_device_id],
@@ -603,7 +642,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                                 0.0, reshape(send_B_view, (rec_device_Q_range_length, pq)))
                         end
                         GPU_synchronize(scf_data.gpu_data.GPU_Type)
-                end #spawn
+                # end #spawn
             end #sync for 
 
             for send_rank in 0:n_ranks-1
@@ -618,7 +657,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
 
                     #copy from the sending device to the host send buffer
                     set_gpu_device(rank_send_device_id-1, scf_data.gpu_data.GPU_Type) do 
-                        copyto!(host_B_send_buffers[rank_send_device_id], 1, 
+                        oneAPI.copyto!(host_B_send_buffers[rank_send_device_id], 1, 
                         device_B_send_buffers[rank_send_device_id], 1, array_size)
                     end
                     
@@ -626,7 +665,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                     send_unique_tag = send_rank*100000 + recieve_rank*10000 + global_send_device_id*1000 + global_recieve_device_id*100
                     if send_rank == recieve_rank # devices belong to the same rank 
                         set_gpu_device(rank_recieve_device_id-1, scf_data.gpu_data.GPU_Type) do 
-                        copyto!(device_B_send_buffers[rank_recieve_device_id],
+                        oneAPI.copyto!(device_B_send_buffers[rank_recieve_device_id],
                             1, host_B_send_buffers[rank_send_device_id], 1, array_size)
                         end
                         
@@ -637,7 +676,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                     elseif rank == recieve_rank
                         set_gpu_device(rank_recieve_device_id-1, scf_data.gpu_data.GPU_Type) do 
                             MPI.Recv!(host_B_send_buffers[rank_recieve_device_id], send_rank, send_unique_tag, COMM)
-                            copyto!(device_B_send_buffers[rank_recieve_device_id],1,
+                            oneAPI.copyto!(device_B_send_buffers[rank_recieve_device_id],1,
                             host_B_send_buffers[rank_recieve_device_id],1, array_size)
                             GPU_synchronize(scf_data.gpu_data.GPU_Type)
                         end
@@ -646,7 +685,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
                     if rank == recieve_rank # add the sent buffer to the device B matrix
                         set_gpu_device(rank_recieve_device_id-1, scf_data.gpu_data.GPU_Type) do 
                             device_B_send_view = reshape(view(device_B_send_buffers[rank_recieve_device_id], 1:array_size), (rec_device_Q_range_length, pq))
-                            axpy!(1.0, device_B_send_view, device_B[rank_recieve_device_id])
+                            device_B[rank_recieve_device_id] .+=  device_B_send_view
                             GPU_synchronize(scf_data.gpu_data.GPU_Type)
                         end                
                     end

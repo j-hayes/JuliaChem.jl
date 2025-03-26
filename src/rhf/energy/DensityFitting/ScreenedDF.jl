@@ -7,7 +7,7 @@ using ThreadPinning
 using Serialization
 using JuliaChem.Shared.JCTC
 using JuliaChem.Shared.Constants
-
+using HDF5
 @inline function twoD_to1Dindex(i, j, p)
     return (i - 1) * p + j
 end
@@ -84,6 +84,14 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
 
     if iteration == 1
+
+        #write occupied orbital coefficients to hdf5
+        if isfile("debug_cpu_occ_coefficients.h5")
+            rm("debug_cpu_occ_coefficients.h5")
+        end
+        h5write("debug_cpu_occ_coefficients.h5", "occ_coefficients", occupied_orbital_coefficients)
+        
+
         n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
