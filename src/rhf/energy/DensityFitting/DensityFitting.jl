@@ -52,8 +52,16 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     run_gpu_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, occupied_orbital_coefficients, iteration, scf_options, H, jc_timing)
   else # CPU
     if scf_options.contraction_mode == "dense" || scf_options.df_force_dense 
-      df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
-      basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
+      # df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+      # basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
+
+      if haskey(ENV, "DO_MIXED") && ENV["DO_MIXED"] == "true"
+        df_rhf_fock_build_BLAS_mixed_precision!(Float32, scf_data, jeri_engine_thread_df,
+        basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
+      else
+        df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
+        basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
+      end
     else   #default contraction mode is now scf_options.contraction_mode == "screened"
       df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
@@ -214,6 +222,133 @@ function calculate_coulomb!(scf_data, occupied_orbital_coefficients, indicies, j
   jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
   jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
 end
+
+
+
+function df_rhf_fock_build_BLAS_mixed_precision!(FloatT::Type, scf_data, jeri_engine_thread_df::Vector{T}, basis_sets::CalculationBasisSets,
+  occupied_orbital_coefficients, iteration, scf_options::SCFOptions, jc_timing::JCTiming) where {T<:DFRHFTEIEngine}
+comm = MPI.COMM_WORLD
+shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_rank(comm),MPI.Comm_size(comm),basis_sets) #todo only do this on iteration 1
+
+
+
+
+
+if iteration == 1
+  println("doing mixed precision 32 bit float DF-RHF tensor contractions")
+  two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+  calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
+  B = zeros(FloatT, (scf_data.μ, scf_data.μ, scf_data.A))
+  B .= permutedims(scf_data.D, (2,3,1))
+  scf_data.D = B
+
+      
+  jc_timing.timings[JCTiming_key(JCTC.two_eri_time,iteration)] = two_eri_time
+  jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense cpu"
+  scf_data.J = zeros(FloatT, (scf_data.μ, scf_data.μ))
+  scf_data.K = zeros(FloatT, (scf_data.μ, scf_data.μ))
+  scf_data.density = zeros(FloatT, (scf_data.μ, scf_data.μ))
+
+end  
+num_Q_ranges = 4
+if haskey(ENV, "NUM_Q_RANGES")
+    num_Q_ranges = parse(Int, ENV["NUM_Q_RANGES"])
+end
+
+Q = scf_data.A 
+Q_ranges = []
+scf_data.D_tilde = Vector{Array}(undef, num_Q_ranges)
+scf_data.coulomb_intermediate = Vector{Array}(undef, num_Q_ranges)
+for q_range_index in 1:num_Q_ranges
+    start = (q_range_index-1) * div(Q, num_Q_ranges) + 1
+    stop = q_range_index * div(Q, num_Q_ranges)
+    if q_range_index == num_Q_ranges
+        stop = Q
+    end
+    push!(Q_ranges, start:stop)
+    scf_data.D_tilde[q_range_index] = zeros(FloatT, (scf_data.μ, length(Q_ranges[q_range_index]), scf_data.occ))
+    scf_data.coulomb_intermediate[q_range_index] = zeros(FloatT, length(Q_ranges[q_range_index]))
+end
+
+
+occupied_orbital_coefficients_mixed = zeros(FloatT, size(occupied_orbital_coefficients))
+occupied_orbital_coefficients_mixed .= occupied_orbital_coefficients
+scf_data.two_electron_fock .= 0.0
+
+calculate_coulomb_mixed_precision!(FloatT, scf_data, occupied_orbital_coefficients_mixed, iteration, Q_ranges, num_Q_ranges)
+calculate_exchange_mixed_precision!(FloatT, scf_data, occupied_orbital_coefficients_mixed, iteration, Q_ranges, num_Q_ranges)
+
+
+end
+
+
+function calculate_coulomb_mixed_precision!(FloatT::Type, scf_data, occupied_orbital_coefficients, iteration, Q_ranges, num_Q_ranges)
+  Q = scf_data.A
+  pq = scf_data.μ^2
+  B = scf_data.D
+  V = scf_data.coulomb_intermediate
+  fock = scf_data.two_electron_fock
+  density = scf_data.density 
+
+  BLAS_threads = Base.Threads.nthreads()
+  blas_threads = BLAS.get_num_threads()
+  if scf_data.μ < 200 
+      BLAS.set_num_threads(1)
+  end
+
+
+  one_mixed = FloatT(1.0)
+  two_mixed = FloatT(2.0)
+  neg_mixed = FloatT(-1.0)
+  zero_mixed = FloatT(0.0)
+
+  if scf_data.μ < 200 
+      BLAS.set_num_threads(1)
+  end
+
+  BLAS.gemm!('N', 'T', one_mixed, occupied_orbital_coefficients, occupied_orbital_coefficients, zero_mixed, density)
+  BLAS.set_num_threads(BLAS_threads)
+  for q_range_index in 1:num_Q_ranges
+    Q_range = Q_ranges[q_range_index]
+
+    B_reshape = reshape(view(B, :, :, Q_range), (pq, length(Q_range)))
+
+    BLAS.gemv!('T', one_mixed, B_reshape, reshape(density, pq), zero_mixed, V[q_range_index])
+    BLAS.gemv!('N', two_mixed, B_reshape, V[q_range_index], zero_mixed, reshape(scf_data.J, pq))
+    scf_data.two_electron_fock .+= scf_data.J
+  end
+end
+
+function calculate_exchange_mixed_precision!(FloatT::Type, scf_data, occupied_orbital_coefficients, iteration, Q_ranges, num_Q_ranges)
+  Q = scf_data.A
+  p = scf_data.μ
+  n_ooc = scf_data.occ
+  K = scf_data.K
+
+  # ooc = occupied_orbital_coefficients
+  B = scf_data.D
+  W = scf_data.D_tilde
+  fock = scf_data.two_electron_fock
+
+
+  one_mixed = FloatT(1.0)
+  neg_one_mixed = FloatT(-1.0)
+  zero_mixed = FloatT(0.0)
+
+  for q_range_index in 1:num_Q_ranges
+    Q_range = Q_ranges[q_range_index]
+    W_reshape = reshape(scf_data.D_tilde[q_range_index], (p*length(Q_range), n_ooc))
+    B_reshape = reshape(view(B, :, :, Q_range), (p, p*length(Q_range)))
+    BLAS.gemm!('T', 'N', one_mixed, B_reshape, occupied_orbital_coefficients, zero_mixed, W_reshape)
+    W_reshape_K = reshape(scf_data.D_tilde[q_range_index], (p, n_ooc * length(Q_range)))
+    BLAS.gemm!('N', 'T', neg_one_mixed, W_reshape_K, W_reshape_K, zero_mixed, K)
+
+    scf_data.two_electron_fock .+= K
+  end
+
+end
+
+
 
 function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, jc_timing::JCTiming, iteration)
   Q = length(indicies)
