@@ -1,0 +1,601 @@
+Threads.nthreads = 64
+Creating sysimage at /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/perlmutter_JC_sysimg.so using precompile script at /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile/run.jl
+starting run.jl
+done loading JuliaChem
+using inputs from /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile
+writing outputs to /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile
+Status `/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/mixed_precision_env_perl/Project.toml`
+  [6f275bd8] BLISBLAS v0.1.1
+⌃ [1f15a43c] CxxWrap v0.14.2
+  [f67ccb44] HDF5 v0.17.2
+  [0a8e60a0] JuliaChem v0.4.3 `..`
+⌃ [33e6dc65] MKL v0.7.0
+⌃ [da04e1cc] MPI v0.20.21
+  [3da0fdf6] MPIPreferences v0.1.11
+  [9b87118b] PackageCompiler v2.2.0 `https://github.com/PatrickHaecker/PackageCompiler.jl#fix_hang_multiple_threads`
+  [811555cd] ThreadPinning v1.0.2
+  [ade2ca70] Dates v1.11.0
+  [8ba89e20] Distributed v1.11.0
+Info Packages marked with ⌃ have new versions available and may be upgradable.
+starting run starting at index 1
+Date of run: 2025-05-27T13:12:41.794
+settings_id: DF_RHF_screenedCPU
+basis_id: cc-pvdz-ri
+basis: cc-pVDZ
+aux_basis: cc-pVDZ-RIFIT
+BLAS config LBTConfig([ILP64] libopenblas64_.so, [ILP64] libblis.so)
+scf_keywords: Dict{String, Any} with 9 entries:
+  "niter" => 50
+  "rmsd" => 0.0001
+  "contraction_mode" => "screened"
+  "dele" => 0.0001
+  "guess" => "hcore"
+  "load" => "static"
+  "df_exchange_n_blocks" => 10
+  "scf_type" => "df"
+  "df_sigma" => 1.0e-6
+input_files_paths
+["/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json"]
+output file path
+/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile/DF_RHF_screenedCPU
+initialized JuliaChem
+Threads 64
+OPENBLAS_NUM_THREADS: 64
+BLAS Threads 64
+running input file /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                READING INPUT DATA FILE                         
+                       ========================================                 
+ 
+ 
+Number of worker processes: 1
+Number of threads per process: 64
+Number of threads in total: 64
+ 
+                       ========================================                 
+                                       END INPUT                                
+                       ========================================                 
+--------------------------------------------------------------------------------
+Running ethene_2_ethyne_run_1
+----------------------------------------          
+     Printing basis set metadata...               
+----------------------------------------          
+
+Basis set: cc-pVDZ
+Number of basis functions: 140
+Auxillary Basis set: cc-pVDZ-RIFIT
+Number of auxillary basis functions: 546
+Number of electrons: 46
+---------------------------------------------------------------------------------
+                       ========================================          
+                             MOLECULAR COORDINATE ANALYSIS               
+                       ========================================          
+
+----------------------------------------          
+         Printing coordinates                     
+            in xyz format...                      
+----------------------------------------          
+ 
+16
+
+C         -0.23547515356533089     -0.8697418941575734     -8.48661001038043
+C         -0.1901632499745453     1.6154644250648738     -8.507319002718514
+H         1.4631995328294314     -1.9643776624789124     -8.289677198454616
+H         -1.9728670605689254     -1.905229050090619     -8.6657171444005
+H         -1.8883827174415364     2.710482718334688     -8.70555322225584
+H         1.5476396301015165     2.6507104895674334     -8.329396476882
+C         0.08046800052928824     0.024088212823236477     1.1185597887746344
+C         -0.09040693566622084     0.1692971597504878     -1.1030484179054945
+H         -0.24132788269238253     0.29670691422657575     -3.0879066411350315
+H         0.2315470790702121     -0.1063625463489361     3.1032560536053104
+H         -1.8866862412583871     -2.4121889864546437     8.195628390984144
+C         -0.004500318242117607     -1.6831571972874713     8.416033882277484
+H         1.4968331560162966     -3.046851830487231     8.510671946502512
+C         0.4393561518486336     0.758147198839519     8.563575405674666
+H         -1.0625050782806182     2.121501353305058     8.469673730061503
+H         2.3211470988898393     1.4876167477560622     8.784820808737905
+
+                       ========================================          
+                                END COORDINATE ANALYSIS                  
+                       ========================================          
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                RESTRICTED CLOSED-SHELL                         
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+
+SCF Options:
+------------------------------
+Integral Load: static
+Guess: hcore
+Energy Convergence: 0.0001
+Density Convergence: 0.0001
+Max Iterations: 50
+--------------------------------
+
+Density Fitting Options:
+--------------------------------
+Contraction Mode: screened
+DF Energy Convergence: 0.0001
+DF Density Convergence: 0.0001
+DF Exchange Block Width: nbas ÷ 10
+DF Screening Sigma: 1.0e-6
+DF Screen Exchange: false
+--------------------------------
+----------------------------------------          
+       Starting RHF iterations...                 
+----------------------------------------          
+ 
+Iter        Energy                ΔE                Drms                time
+1      -178.4336860749      -178.4336860749      43.4766971103      9.2871639729 
+2      -238.9893022156      -60.5556161406      44.6782406019      0.0341291428 
+3      -234.6178351920      4.3714670236      26.9462538045      0.0252380371 
+4      -234.0510081001      0.5668270918      0.6635481763      0.0278778076 
+5      -233.4022028233      0.6488052768      0.4403172149      0.0687849522 
+6      -233.1723559657      0.2298468576      0.1677622898      0.0226781368 
+7      -233.0486711038      0.1236848619      0.0668321920      0.0217010975 
+8      -232.9393967588      0.1092743450      0.0433958951      0.0218260288 
+9      -232.9094883277      0.0299084311      0.0220262451      0.0228888988 
+10      -232.9143459365      -0.0048576088      0.0031548976      0.0226690769 
+11      -232.9128765442      0.0014693923      0.0010794023      0.0228841305 
+12      -232.9126361410      0.0002404032      0.0004092517      0.0224740505 
+13      -232.9127273142      -0.0000911732      0.0001542998      0.0220429897 
+ 
+----------------------------------------
+   The SCF calculation has converged!   
+----------------------------------------
+Total SCF Energy: -232.9127269834 h
+ 
+                       ========================================                 
+                              END RESTRICTED CLOSED-SHELL                       
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+--------------------------------------------------------------------------------
+JuliaChem has already been initialized!
+Status `/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/mixed_precision_env_perl/Project.toml`
+  [6f275bd8] BLISBLAS v0.1.1
+⌃ [1f15a43c] CxxWrap v0.14.2
+  [f67ccb44] HDF5 v0.17.2
+  [0a8e60a0] JuliaChem v0.4.3 `..`
+⌃ [33e6dc65] MKL v0.7.0
+⌃ [da04e1cc] MPI v0.20.21
+  [3da0fdf6] MPIPreferences v0.1.11
+  [9b87118b] PackageCompiler v2.2.0 `https://github.com/PatrickHaecker/PackageCompiler.jl#fix_hang_multiple_threads`
+  [811555cd] ThreadPinning v1.0.2
+  [ade2ca70] Dates v1.11.0
+  [8ba89e20] Distributed v1.11.0
+Info Packages marked with ⌃ have new versions available and may be upgradable.
+starting run starting at index 1
+Date of run: 2025-05-27T13:13:06.066
+settings_id: DF_RHF_denseCPU
+basis_id: cc-pvdz-ri
+basis: cc-pVDZ
+aux_basis: cc-pVDZ-RIFIT
+BLAS config LBTConfig([ILP64] libopenblas64_.so, [ILP64] libblis.so)
+scf_keywords: Dict{String, Any} with 9 entries:
+  "niter" => 50
+  "rmsd" => 0.0001
+  "contraction_mode" => "dense"
+  "dele" => 0.0001
+  "guess" => "hcore"
+  "load" => "static"
+  "df_exchange_n_blocks" => 10
+  "scf_type" => "df"
+  "df_sigma" => 1.0e-6
+input_files_paths
+["/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json"]
+output file path
+/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile/DF_RHF_denseCPU
+initialized JuliaChem
+Threads 64
+OPENBLAS_NUM_THREADS: 64
+BLAS Threads 64
+running input file /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                READING INPUT DATA FILE                         
+                       ========================================                 
+ 
+ 
+Number of worker processes: 1
+Number of threads per process: 64
+Number of threads in total: 64
+ 
+                       ========================================                 
+                                       END INPUT                                
+                       ========================================                 
+--------------------------------------------------------------------------------
+Running ethene_2_ethyne_run_1
+----------------------------------------          
+     Printing basis set metadata...               
+----------------------------------------          
+
+Basis set: cc-pVDZ
+Number of basis functions: 140
+Auxillary Basis set: cc-pVDZ-RIFIT
+Number of auxillary basis functions: 546
+Number of electrons: 46
+---------------------------------------------------------------------------------
+                       ========================================          
+                             MOLECULAR COORDINATE ANALYSIS               
+                       ========================================          
+
+----------------------------------------          
+         Printing coordinates                     
+            in xyz format...                      
+----------------------------------------          
+ 
+16
+
+C         -0.23547515356533089     -0.8697418941575734     -8.48661001038043
+C         -0.1901632499745453     1.6154644250648738     -8.507319002718514
+H         1.4631995328294314     -1.9643776624789124     -8.289677198454616
+H         -1.9728670605689254     -1.905229050090619     -8.6657171444005
+H         -1.8883827174415364     2.710482718334688     -8.70555322225584
+H         1.5476396301015165     2.6507104895674334     -8.329396476882
+C         0.08046800052928824     0.024088212823236477     1.1185597887746344
+C         -0.09040693566622084     0.1692971597504878     -1.1030484179054945
+H         -0.24132788269238253     0.29670691422657575     -3.0879066411350315
+H         0.2315470790702121     -0.1063625463489361     3.1032560536053104
+H         -1.8866862412583871     -2.4121889864546437     8.195628390984144
+C         -0.004500318242117607     -1.6831571972874713     8.416033882277484
+H         1.4968331560162966     -3.046851830487231     8.510671946502512
+C         0.4393561518486336     0.758147198839519     8.563575405674666
+H         -1.0625050782806182     2.121501353305058     8.469673730061503
+H         2.3211470988898393     1.4876167477560622     8.784820808737905
+
+                       ========================================          
+                                END COORDINATE ANALYSIS                  
+                       ========================================          
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                RESTRICTED CLOSED-SHELL                         
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+
+SCF Options:
+------------------------------
+Integral Load: static
+Guess: hcore
+Energy Convergence: 0.0001
+Density Convergence: 0.0001
+Max Iterations: 50
+--------------------------------
+
+Density Fitting Options:
+--------------------------------
+Contraction Mode: dense
+DF Energy Convergence: 0.0001
+DF Density Convergence: 0.0001
+DF Exchange Block Width: nbas ÷ 10
+DF Screening Sigma: 1.0e-6
+DF Screen Exchange: false
+--------------------------------
+----------------------------------------          
+       Starting RHF iterations...                 
+----------------------------------------          
+ 
+Iter        Energy                ΔE                Drms                time
+1      -178.4336855391      -178.4336855391      43.4767213099      0.7146348953 
+2      -238.9893017784      -60.5556162393      44.6784007129      0.0371999741 
+3      -234.6178353736      4.3714664049      26.9465400655      0.0370740891 
+4      -234.0510081301      0.5668272435      0.6635481339      0.0358297825 
+5      -233.4022027528      0.6488053772      0.4403167813      0.0359179974 
+6      -233.1723559488      0.2298468041      0.1677617715      0.0359869003 
+7      -233.0486711140      0.1236848348      0.0668320630      0.0350070000 
+8      -232.9393967692      0.1092743448      0.0433958405      0.0360181332 
+9      -232.9094883566      0.0299084126      0.0220261968      0.0362141132 
+10      -232.9143459612      -0.0048576046      0.0031548929      0.0357902050 
+11      -232.9128765683      0.0014693930      0.0010793993      0.0354399681 
+12      -232.9126361649      0.0002404034      0.0004092506      0.0356938839 
+13      -232.9127273380      -0.0000911731      0.0001542996      0.0352041721 
+ 
+----------------------------------------
+   The SCF calculation has converged!   
+----------------------------------------
+Total SCF Energy: -232.9127270072 h
+ 
+                       ========================================                 
+                              END RESTRICTED CLOSED-SHELL                       
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+--------------------------------------------------------------------------------
+JuliaChem has already been initialized!
+Status `/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/mixed_precision_env_perl/Project.toml`
+  [6f275bd8] BLISBLAS v0.1.1
+⌃ [1f15a43c] CxxWrap v0.14.2
+  [f67ccb44] HDF5 v0.17.2
+  [0a8e60a0] JuliaChem v0.4.3 `..`
+⌃ [33e6dc65] MKL v0.7.0
+⌃ [da04e1cc] MPI v0.20.21
+  [3da0fdf6] MPIPreferences v0.1.11
+  [9b87118b] PackageCompiler v2.2.0 `https://github.com/PatrickHaecker/PackageCompiler.jl#fix_hang_multiple_threads`
+  [811555cd] ThreadPinning v1.0.2
+  [ade2ca70] Dates v1.11.0
+  [8ba89e20] Distributed v1.11.0
+Info Packages marked with ⌃ have new versions available and may be upgradable.
+starting run starting at index 1
+Date of run: 2025-05-27T13:13:07.798
+settings_id: DF_RHF_denseCPU
+basis_id: cc-pvdz-ri
+basis: cc-pVDZ
+aux_basis: cc-pVDZ-RIFIT
+BLAS config LBTConfig([ILP64] libopenblas64_.so, [ILP64] libblis.so)
+scf_keywords: Dict{String, Any} with 9 entries:
+  "niter" => 50
+  "rmsd" => 0.0001
+  "contraction_mode" => "dense"
+  "dele" => 0.0001
+  "guess" => "hcore"
+  "load" => "static"
+  "df_exchange_n_blocks" => 10
+  "scf_type" => "df"
+  "df_sigma" => 1.0e-6
+input_files_paths
+["/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json"]
+output file path
+/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile/DF_RHF_mixedCPU
+initialized JuliaChem
+Threads 64
+OPENBLAS_NUM_THREADS: 64
+BLAS Threads 64
+running input file /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                READING INPUT DATA FILE                         
+                       ========================================                 
+ 
+ 
+Number of worker processes: 1
+Number of threads per process: 64
+Number of threads in total: 64
+ 
+                       ========================================                 
+                                       END INPUT                                
+                       ========================================                 
+--------------------------------------------------------------------------------
+Running ethene_2_ethyne_run_1
+----------------------------------------          
+     Printing basis set metadata...               
+----------------------------------------          
+
+Basis set: cc-pVDZ
+Number of basis functions: 140
+Auxillary Basis set: cc-pVDZ-RIFIT
+Number of auxillary basis functions: 546
+Number of electrons: 46
+---------------------------------------------------------------------------------
+                       ========================================          
+                             MOLECULAR COORDINATE ANALYSIS               
+                       ========================================          
+
+----------------------------------------          
+         Printing coordinates                     
+            in xyz format...                      
+----------------------------------------          
+ 
+16
+
+C         -0.23547515356533089     -0.8697418941575734     -8.48661001038043
+C         -0.1901632499745453     1.6154644250648738     -8.507319002718514
+H         1.4631995328294314     -1.9643776624789124     -8.289677198454616
+H         -1.9728670605689254     -1.905229050090619     -8.6657171444005
+H         -1.8883827174415364     2.710482718334688     -8.70555322225584
+H         1.5476396301015165     2.6507104895674334     -8.329396476882
+C         0.08046800052928824     0.024088212823236477     1.1185597887746344
+C         -0.09040693566622084     0.1692971597504878     -1.1030484179054945
+H         -0.24132788269238253     0.29670691422657575     -3.0879066411350315
+H         0.2315470790702121     -0.1063625463489361     3.1032560536053104
+H         -1.8866862412583871     -2.4121889864546437     8.195628390984144
+C         -0.004500318242117607     -1.6831571972874713     8.416033882277484
+H         1.4968331560162966     -3.046851830487231     8.510671946502512
+C         0.4393561518486336     0.758147198839519     8.563575405674666
+H         -1.0625050782806182     2.121501353305058     8.469673730061503
+H         2.3211470988898393     1.4876167477560622     8.784820808737905
+
+                       ========================================          
+                                END COORDINATE ANALYSIS                  
+                       ========================================          
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                RESTRICTED CLOSED-SHELL                         
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+
+SCF Options:
+------------------------------
+Integral Load: static
+Guess: hcore
+Energy Convergence: 0.0001
+Density Convergence: 0.0001
+Max Iterations: 50
+--------------------------------
+
+Density Fitting Options:
+--------------------------------
+Contraction Mode: dense
+DF Energy Convergence: 0.0001
+DF Density Convergence: 0.0001
+DF Exchange Block Width: nbas ÷ 10
+DF Screening Sigma: 1.0e-6
+DF Screen Exchange: false
+--------------------------------
+----------------------------------------          
+       Starting RHF iterations...                 
+----------------------------------------          
+ 
+Iter        Energy                ΔE                Drms                time
+doing mixed precision 32 bit float DF-RHF tensor contractions
+1      -178.4334557728      -178.4334557728      43.4766318479      2.3800141811 
+2      -238.9895768210      -60.5561210482      44.7167651838      0.0213930607 
+3      -234.6182375452      4.3713392759      27.0155020148      0.0217609406 
+4      -234.0511774491      0.5670600961      0.6635520498      0.0222580433 
+5      -233.4022261365      0.6489513125      0.4418803847      0.0221650600 
+6      -233.1724224416      0.2298036950      0.1667996780      0.0223009586 
+7      -233.0486788366      0.1237436049      0.0672307165      0.0574498177 
+8      -232.9393894608      0.1092893758      0.0433622907      0.0212969780 
+9      -232.9095177982      0.0298716626      0.0219996696      0.0223169327 
+10      -232.9143627030      -0.0048449048      0.0035821981      0.0227599144 
+11      -232.9128575017      0.0015052014      0.0017390501      0.0224699974 
+12      -232.9126764813      0.0001810204      0.0010979652      0.0225191116 
+13      -232.9127334989      -0.0000570176      0.0016039102      0.0237119198 
+14      -232.9127412199      -0.0000077210      0.0011491604      0.0762491226 
+15      -232.9127393906      0.0000018292      0.0005734742      0.0224020481 
+16      -232.9127418691      -0.0000024784      0.0005800616      0.0226409435 
+17      -232.9127363219      0.0000055471      0.0001351112      0.0228741169 
+ 
+----------------------------------------
+   The SCF calculation has converged!   
+----------------------------------------
+Total SCF Energy: -232.9127377567 h
+ 
+                       ========================================                 
+                              END RESTRICTED CLOSED-SHELL                       
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+--------------------------------------------------------------------------------
+JuliaChem has already been initialized!
+Status `/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/mixed_precision_env_perl/Project.toml`
+  [6f275bd8] BLISBLAS v0.1.1
+⌃ [1f15a43c] CxxWrap v0.14.2
+  [f67ccb44] HDF5 v0.17.2
+  [0a8e60a0] JuliaChem v0.4.3 `..`
+⌃ [33e6dc65] MKL v0.7.0
+⌃ [da04e1cc] MPI v0.20.21
+  [3da0fdf6] MPIPreferences v0.1.11
+  [9b87118b] PackageCompiler v2.2.0 `https://github.com/PatrickHaecker/PackageCompiler.jl#fix_hang_multiple_threads`
+  [811555cd] ThreadPinning v1.0.2
+  [ade2ca70] Dates v1.11.0
+  [8ba89e20] Distributed v1.11.0
+Info Packages marked with ⌃ have new versions available and may be upgradable.
+starting run starting at index 1
+Date of run: 2025-05-27T13:13:11.259
+settings_id: RHF_dynamicCPU
+basis_id: cc-pvdz-ri
+basis: cc-pVDZ
+aux_basis: cc-pVDZ-RIFIT
+BLAS config LBTConfig([ILP64] libopenblas64_.so, [ILP64] libblis.so)
+scf_keywords: Dict{String, Any} with 6 entries:
+  "niter" => 50
+  "rmsd" => 0.0001
+  "dele" => 0.0001
+  "guess" => "hcore"
+  "load" => "dynamic"
+  "scf_type" => "rhf"
+input_files_paths
+["/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json"]
+output file path
+/global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile/RHF_dynamicCPU
+initialized JuliaChem
+Threads 64
+OPENBLAS_NUM_THREADS: 64
+BLAS Threads 64
+running input file /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_inputs/compile/ethene_2_ethyne.json
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                READING INPUT DATA FILE                         
+                       ========================================                 
+ 
+ 
+Number of worker processes: 1
+Number of threads per process: 64
+Number of threads in total: 64
+ 
+                       ========================================                 
+                                       END INPUT                                
+                       ========================================                 
+--------------------------------------------------------------------------------
+Running ethene_2_ethyne_run_1
+----------------------------------------          
+     Printing basis set metadata...               
+----------------------------------------          
+
+Basis set: cc-pVDZ
+Number of basis functions: 140
+Auxillary Basis set: cc-pVDZ-RIFIT
+Number of auxillary basis functions: 546
+Number of electrons: 46
+---------------------------------------------------------------------------------
+                       ========================================          
+                             MOLECULAR COORDINATE ANALYSIS               
+                       ========================================          
+
+----------------------------------------          
+         Printing coordinates                     
+            in xyz format...                      
+----------------------------------------          
+ 
+16
+
+C         -0.23547515356533089     -0.8697418941575734     -8.48661001038043
+C         -0.1901632499745453     1.6154644250648738     -8.507319002718514
+H         1.4631995328294314     -1.9643776624789124     -8.289677198454616
+H         -1.9728670605689254     -1.905229050090619     -8.6657171444005
+H         -1.8883827174415364     2.710482718334688     -8.70555322225584
+H         1.5476396301015165     2.6507104895674334     -8.329396476882
+C         0.08046800052928824     0.024088212823236477     1.1185597887746344
+C         -0.09040693566622084     0.1692971597504878     -1.1030484179054945
+H         -0.24132788269238253     0.29670691422657575     -3.0879066411350315
+H         0.2315470790702121     -0.1063625463489361     3.1032560536053104
+H         -1.8866862412583871     -2.4121889864546437     8.195628390984144
+C         -0.004500318242117607     -1.6831571972874713     8.416033882277484
+H         1.4968331560162966     -3.046851830487231     8.510671946502512
+C         0.4393561518486336     0.758147198839519     8.563575405674666
+H         -1.0625050782806182     2.121501353305058     8.469673730061503
+H         2.3211470988898393     1.4876167477560622     8.784820808737905
+
+                       ========================================          
+                                END COORDINATE ANALYSIS                  
+                       ========================================          
+--------------------------------------------------------------------------------
+                       ========================================                 
+                                RESTRICTED CLOSED-SHELL                         
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+
+SCF Options:
+------------------------------
+Integral Load: dynamic
+Guess: hcore
+Energy Convergence: 0.0001
+Density Convergence: 0.0001
+Max Iterations: 50
+--------------------------------
+----------------------------------------          
+       Starting RHF iterations...                 
+----------------------------------------          
+ 
+Iter        Energy                ΔE                Drms                time
+1      -178.4355117478      -178.4355117478      43.4658598375      1.9576370716 
+2      -238.9684531212      -60.5329413734      44.6793377326      0.0660848618 
+3      -234.6025738680      4.3658792532      26.9458245607      0.0619008541 
+4      -234.0448579361      0.5577159319      0.6634375586      0.0611581802 
+5      -233.3990258588      0.6458320773      0.4397476131      0.0605149269 
+6      -233.1681084430      0.2309174158      0.1677625499      0.0607450008 
+7      -233.0444237285      0.1236847145      0.0666448637      0.0610899925 
+8      -232.9353064382      0.1091172903      0.0432151160      0.0644471645 
+9      -232.9053024169      0.0300040213      0.0219936521      0.0607268810 
+10      -232.9101873947      -0.0048849778      0.0031517379      0.0612359047 
+11      -232.9087075203      0.0014798744      0.0010787887      0.0621380806 
+12      -232.9084645453      0.0002429750      0.0004106621      0.0610520840 
+13      -232.9085559476      -0.0000914023      0.0001542767      0.0611341000 
+14      -232.9085554213      0.0000005263      0.0000497345      0.0602829456 
+ 
+----------------------------------------
+   The SCF calculation has converged!   
+----------------------------------------
+Total SCF Energy: -232.9085554213 h
+ 
+                       ========================================                 
+                              END RESTRICTED CLOSED-SHELL                       
+                                  HARTREE-FOCK ENERGY                           
+                       ========================================                 
+--------------------------------------------------------------------------------
+done with precompile JuliaChem Runs
+/usr/lib64/gcc/x86_64-suse-linux/13/../../../../x86_64-suse-linux/bin/ld: warning: text#107.o: missing .note.GNU-stack section implies executable stack
+/usr/lib64/gcc/x86_64-suse-linux/13/../../../../x86_64-suse-linux/bin/ld: NOTE: This behaviour is deprecated and will be removed in a future version of the linker
+done creating sysimage
+[ Info: PackageCompiler: Executing /global/cfs/cdirs/m4265/mixed_precision/JuliaChem.jl/example_scripts/compile/run.jl => /tmp/jl_packagecompiler_ApexOL/jl_cYrv1H
+[ Info: PackageCompiler: Done
+- PackageCompiler: compiling incremental system image

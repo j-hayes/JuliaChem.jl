@@ -1,3 +1,6 @@
 [submodule "JuliaChem-Papers"]
 	path = JuliaChem-Papers
 	url = https://github.com/juliachem-jl/JuliaChem-Papers.git
+[submodule "Benchmarks"]
+	path = Benchmarks
+	url = https://github.com/juliachem-jl/Benchmarks
