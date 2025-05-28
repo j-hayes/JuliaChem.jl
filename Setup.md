@@ -4,8 +4,9 @@
 Get the code 
 ```sh 
 git clone https://github.com/j-hayes/JuliaChem.jl
-git checkout feature/mixed_precision
 cd JuliaChem.jl
+git checkout feature/mixed_precision
+
 ```
 
 ```sh 
