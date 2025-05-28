@@ -10,3 +10,4 @@ deps/libjeri.so
 .templates/template-sample-react-component/index.scss
 template.config.js
 testoutputs/*
+*.so

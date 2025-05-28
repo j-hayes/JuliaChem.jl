@@ -44,4 +44,15 @@ Add the local JuliaChem to the environemtn and Build JuliaChem
 
 When running benchmarks one should run using a precompiled binary. This is done using PackageCompiler.jl 
 
-This package uses the normal Julia Precompiler and a script you provide it to run tests execute the code so the whole codebase can be precompiled. 
+This package uses the normal Julia Precompiler and a script you provide it to run tests execute the code so the whole codebase can be precompiled. An example script and general compile template exists in ./example_scripts/compile
+
+```
+./example_scripts/compile/compile_perlmutter.sh
+```
+
+This can then be used to run julia code and it will not need to recompile the code on each execution. 
+
+```sh
+julia --project=./mixed_precision_env_perl --sysimage=./sysimage/sysimage_perlmutter.jl you_script.jl
+```
+
