@@ -23,6 +23,8 @@ mutable struct SCFOptions
     df_adaptive_basis_limit :: Int64
     df_max_num_GPU_exchange_blocks :: Int64
     df_GPU_K_block_opeartions_threshold :: Int64
+    do_mixed_precision :: Bool
+    mixed_precision_level :: Type
 end 
 
 function create_default_scf_options()
@@ -47,7 +49,9 @@ function create_default_scf_options()
         SCF_Keywords.GPUAlgorithms.df_K_sym_type,
         SCF_Keywords.GPUAlgorithms.df_adaptive_basis_limit, 
         SCF_Keywords.GPUAlgorithms.df_max_num_GPU_exchange_blocks,
-        SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold
+        SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold,
+        SCF_Keywords.MixedPrecision.do_mixed_precision_default,
+        SCF_Keywords.MixedPrecision.mixed_precision_level_default
         )
 end
 
@@ -132,7 +136,11 @@ function create_scf_options(scf_flags)
     df_max_num_GPU_exchange_blocks = haskey(scf_flags, GPUAlgorithms.df_max_num_GPU_exchange_blocks) ?
         scf_flags[GPUAlgorithms.df_max_num_GPU_exchange_blocks] : GPUAlgorithms.df_max_num_GPU_exchange_blocks_default
 
+    do_mixed_precision = haskey(scf_flags, MixedPrecision.do_mixed_precision) ?
+        scf_flags[MixedPrecision.do_mixed_precision] : MixedPrecision.do_mixed_precision_default
 
+    mixed_precision_level = haskey(scf_flags, MixedPrecision.mixed_precision_level) ?
+        scf_flags[MixedPrecision.mixed_precision_level] : MixedPrecision.mixed_precision_level_default
     
     return SCFOptions(
         do_density_fitting,
@@ -155,7 +163,9 @@ function create_scf_options(scf_flags)
         df_K_sym_type,
         df_adaptive_basis_limit,
         df_max_num_GPU_exchange_blocks,
-        df_GPU_K_block_opeartions_threshold
+        df_GPU_K_block_opeartions_threshold,
+        do_mixed_precision,
+        mixed_precision_level
         )
 end
 
@@ -194,6 +204,9 @@ function print_scf_options(options::SCFOptions)
             println("DF number of GPUs: ", options.num_devices)
             println("DF Max Number of GPU Exchange Blocks: ", options.df_max_num_GPU_exchange_blocks)
             @printf("DF GPU K Block Operations Threshold: %.1e\n", options.df_GPU_K_block_opeartions_threshold)
+        end
+        if options.do_mixed_precision 
+            println("Using mixed precision for DF tensor contractions: $(options.mixed_precision_level)") 
         end
         println("--------------------------------")
     end

@@ -7,6 +7,13 @@ module SCF_Keywords
         const density_fitting = "df" # Density Fitted Restricted Hartree Fock
     end
 
+    module MixedPrecision
+        const do_mixed_precision = "do_mixed_precision"
+        const do_mixed_precision_default = false
+        const mixed_precision_level = "mixed_precision_level"
+        const mixed_precision_level_default = Float32
+    end
+
     module Screening
         const df_exchange_n_blocks = "df_exchange_n_blocks"
         const df_exchange_n_blocks_default = 0
@@ -80,7 +87,7 @@ module SCF_Keywords
         const df_max_num_GPU_exchange_blocks_default = 16
     end
     
-    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence, Screening, GPUAlgorithms
+    export SCFType, ContractionMode, IntegralLoad, Guess, Convergence, Screening, GPUAlgorithms, MixedPrecision
 end 
 
 

@@ -55,8 +55,8 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
       # df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
       # basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
 
-      if haskey(ENV, "DO_MIXED") && ENV["DO_MIXED"] == "true"
-        df_rhf_fock_build_BLAS_mixed_precision!(Float32, scf_data, jeri_engine_thread_df,
+      if scf_options.do_mixed_precision 
+        df_rhf_fock_build_BLAS_mixed_precision!(scf_options.mixed_precision_level, scf_data, jeri_engine_thread_df,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
       else
         df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,

@@ -13,6 +13,8 @@ function get_settings(settings_id)
         return DF_RHF_GPU_adaptive()
     elseif settings_id == "DF_RHF_GPU_dense"
         return DF_RHF_GPU_dense()
+    elseif settings_id == "DF_RHF_denseCPU_mixed"
+        return DF_RHF_denseCPU_mixed()
     else
         throw(ErrorException("Error: settings_id not recognized"))        
     end
@@ -101,5 +103,12 @@ function DF_RHF_GPU_dense()
     scf_keywords["df_force_dense"] = true
     scf_keywords["df_use_adaptive"] = false
     scf_keywords["df_K_sym_type"] = "square"
+    return scf_keywords
+end
+
+function DF_RHF_denseCPU_mixed()
+    scf_keywords = DF_RHF_denseCPU()
+    scf_keywords["do_mixed_precision"] = true
+    scf_keywords["mixed_precision_level"] = Float64
     return scf_keywords
 end
