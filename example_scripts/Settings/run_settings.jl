@@ -109,6 +109,6 @@ end
 function DF_RHF_denseCPU_mixed()
     scf_keywords = DF_RHF_denseCPU()
     scf_keywords["do_mixed_precision"] = true
-    scf_keywords["mixed_precision_level"] = Float64
+    scf_keywords["contraction_float_type"] = "half"
     return scf_keywords
 end

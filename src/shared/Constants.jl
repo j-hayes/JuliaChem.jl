@@ -10,8 +10,11 @@ module SCF_Keywords
     module MixedPrecision
         const do_mixed_precision = "do_mixed_precision"
         const do_mixed_precision_default = false
-        const mixed_precision_level = "mixed_precision_level"
-        const mixed_precision_level_default = Float32
+        const contraction_float_type = "contraction_float_type"
+        const contraction_float_type_default = Float32
+        const single_precision = "single"
+        const double_precision = "double"
+        const half_precision = "half"
     end
 
     module Screening

@@ -24,7 +24,7 @@ mutable struct SCFOptions
     df_max_num_GPU_exchange_blocks :: Int64
     df_GPU_K_block_opeartions_threshold :: Int64
     do_mixed_precision :: Bool
-    mixed_precision_level :: Type
+    contraction_float_type :: Type
 end 
 
 function create_default_scf_options()
@@ -51,7 +51,7 @@ function create_default_scf_options()
         SCF_Keywords.GPUAlgorithms.df_max_num_GPU_exchange_blocks,
         SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold,
         SCF_Keywords.MixedPrecision.do_mixed_precision_default,
-        SCF_Keywords.MixedPrecision.mixed_precision_level_default
+        SCF_Keywords.MixedPrecision.contraction_float_type_default
         )
 end
 
@@ -139,8 +139,19 @@ function create_scf_options(scf_flags)
     do_mixed_precision = haskey(scf_flags, MixedPrecision.do_mixed_precision) ?
         scf_flags[MixedPrecision.do_mixed_precision] : MixedPrecision.do_mixed_precision_default
 
-    mixed_precision_level = haskey(scf_flags, MixedPrecision.mixed_precision_level) ?
-        scf_flags[MixedPrecision.mixed_precision_level] : MixedPrecision.mixed_precision_level_default
+    contraction_float_type = MixedPrecision.contraction_float_type_default 
+    if haskey(scf_flags, MixedPrecision.contraction_float_type) && !isnothing(scf_flags[MixedPrecision.contraction_float_type])
+        contraction_float_type_value = lowercase(scf_flags[MixedPrecision.contraction_float_type])
+        if contraction_float_type_value == MixedPrecision.single_precision 
+            contraction_float_type = Float32
+        elseif contraction_float_type_value ==  MixedPrecision.double_precision
+            contraction_float_type = Float64
+        elseif contraction_float_type_value == MixedPrecision.half_precision
+            contraction_float_type = Float16
+        else
+            error("Density-fitting mixed precision level chosen: $(contraction_float_type_value) is not a valid option")
+        end
+    end
     
     return SCFOptions(
         do_density_fitting,
@@ -165,7 +176,7 @@ function create_scf_options(scf_flags)
         df_max_num_GPU_exchange_blocks,
         df_GPU_K_block_opeartions_threshold,
         do_mixed_precision,
-        mixed_precision_level
+        contraction_float_type
         )
 end
 
@@ -206,7 +217,7 @@ function print_scf_options(options::SCFOptions)
             @printf("DF GPU K Block Operations Threshold: %.1e\n", options.df_GPU_K_block_opeartions_threshold)
         end
         if options.do_mixed_precision 
-            println("Using mixed precision for DF tensor contractions: $(options.mixed_precision_level)") 
+            println("Using mixed precision for DF tensor contractions: $(options.contraction_float_type)") 
         end
         println("--------------------------------")
     end

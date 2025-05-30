@@ -56,7 +56,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
       # basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
 
       if scf_options.do_mixed_precision 
-        df_rhf_fock_build_BLAS_mixed_precision!(scf_options.mixed_precision_level, scf_data, jeri_engine_thread_df,
+        df_rhf_fock_build_BLAS_mixed_precision!(scf_options.contraction_float_type, scf_data, jeri_engine_thread_df,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
       else
         df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
@@ -235,7 +235,7 @@ shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_ran
 
 
 if iteration == 1
-  println("doing mixed precision 32 bit float DF-RHF tensor contractions")
+  println("doing mixed precision $(scf_options.contraction_float_type) DF-RHF tensor contractions")
   two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
   calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
   B = zeros(FloatT, (scf_data.μ, scf_data.μ, scf_data.A))
