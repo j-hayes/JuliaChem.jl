@@ -30,7 +30,7 @@ function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
     print_scf_options(scf_options)
   end
   
-  check_auxillary_basis_is_provided(scf_options.density_fitting, basis_sets)
+  check_scf_flags(scf_options, basis_sets)
 
   jc_timing = create_jctiming() :: JCTiming
 
@@ -364,7 +364,10 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   B_dim = 1
   D_rms = 1.0
   ΔE = 1.0 
-  cutoff = fdiff ? 5E-11 : 1E-10
+  ###DO NOT CHECK THIS CHANGE IN, only do this for
+  ###testing mixed precision vs Full RHF so schwarz screening is not done
+  cutoff = 0 # fdiff ? 5E-11 : 1E-10
+  ###########
 
   #length_eri_sizes = length(eri_sizes)
 
@@ -394,7 +397,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
   density_fitting_converged = false
 
-  set_basis_info!(jc_timing, basis, auxiliary_basis)
+  set_basis_info!(jc_timing, basis, auxiliary_basis, scf_options)
   
   while !iter_converged
     just_finished_df_iters = false
@@ -1122,6 +1125,19 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
   end
 
   return E_elec, F_eval
+end
+
+function check_scf_flags(scf_options::SCFOptions, basis_sets::CalculationBasisSets)
+  do_density_fitting = scf_options.density_fitting || scf_options.guess == Guess.density_fitting
+  check_auxillary_basis_is_provided(do_density_fitting, basis_sets)
+  check_mixed_precision_options(scf_options)
+end
+
+function check_mixed_precision_options(scf_options::SCFOptions)
+  if scf_options.contraction_float_type == Float16 &&
+    (scf_options.contraction_mode == ContractionMode.dense || scf_options.contraction_mode == ContractionMode.screened)
+    error("Cannot use half precision with CPU Denisty-Fitted Hartree-Fock method")
+  end
 end
 
 function check_auxillary_basis_is_provided(do_density_fitting, basis_sets)

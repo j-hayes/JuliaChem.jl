@@ -55,8 +55,8 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
       # df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
       # basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
 
-      if haskey(ENV, "DO_MIXED") && ENV["DO_MIXED"] == "true"
-        df_rhf_fock_build_BLAS_mixed_precision!(Float32, scf_data, jeri_engine_thread_df,
+      if scf_options.do_mixed_precision 
+        df_rhf_fock_build_BLAS_mixed_precision!(scf_options.contraction_float_type, scf_data, jeri_engine_thread_df,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
       else
         df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
@@ -235,7 +235,7 @@ shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_ran
 
 
 if iteration == 1
-  println("doing mixed precision 32 bit float DF-RHF tensor contractions")
+  println("doing mixed precision $(scf_options.contraction_float_type) DF-RHF tensor contractions")
   two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
   calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
   B = zeros(FloatT, (scf_data.μ, scf_data.μ, scf_data.A))
@@ -250,10 +250,19 @@ if iteration == 1
   scf_data.density = zeros(FloatT, (scf_data.μ, scf_data.μ))
 
 end  
-num_Q_ranges = 4
-if haskey(ENV, "NUM_Q_RANGES")
-    num_Q_ranges = parse(Int, ENV["NUM_Q_RANGES"])
+
+
+#number of Q ranges starts as number of aux basis sets, divide by user given Int64
+if scf_options.Q_ranges_divide_Q_by > 0 && scf_options.num_Q_ranges > 0
+  error("Cannot set both Q_ranges_divide_Q_by and num_Q_ranges for DF RHF")
 end
+
+if scf_options.Q_ranges_divide_Q_by > 0
+  num_Q_ranges = scf_data.A ÷ scf_options.Q_ranges_divide_Q_by
+else # using explicit number of Q ranges 
+  num_Q_ranges = scf_options.num_Q_ranges
+end
+
 
 Q = scf_data.A 
 Q_ranges = []

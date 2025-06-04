@@ -23,6 +23,10 @@ mutable struct SCFOptions
     df_adaptive_basis_limit :: Int64
     df_max_num_GPU_exchange_blocks :: Int64
     df_GPU_K_block_opeartions_threshold :: Int64
+    do_mixed_precision :: Bool
+    contraction_float_type :: Type
+    Q_ranges_divide_Q_by :: Int64
+    num_Q_ranges :: Int64
 end 
 
 function create_default_scf_options()
@@ -47,7 +51,11 @@ function create_default_scf_options()
         SCF_Keywords.GPUAlgorithms.df_K_sym_type,
         SCF_Keywords.GPUAlgorithms.df_adaptive_basis_limit, 
         SCF_Keywords.GPUAlgorithms.df_max_num_GPU_exchange_blocks,
-        SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold
+        SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold,
+        SCF_Keywords.MixedPrecision.do_mixed_precision_default,
+        SCF_Keywords.MixedPrecision.contraction_float_type_default,
+        SCF_Keywords.DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by_default,
+        SCF_Keywords.DF_Auxiliary_Parallelization.num_Q_ranges_default
         )
 end
 
@@ -132,8 +140,46 @@ function create_scf_options(scf_flags)
     df_max_num_GPU_exchange_blocks = haskey(scf_flags, GPUAlgorithms.df_max_num_GPU_exchange_blocks) ?
         scf_flags[GPUAlgorithms.df_max_num_GPU_exchange_blocks] : GPUAlgorithms.df_max_num_GPU_exchange_blocks_default
 
+    do_mixed_precision = haskey(scf_flags, MixedPrecision.do_mixed_precision) ?
+        scf_flags[MixedPrecision.do_mixed_precision] : MixedPrecision.do_mixed_precision_default
 
+    contraction_float_type = MixedPrecision.contraction_float_type_default 
+    if haskey(scf_flags, MixedPrecision.contraction_float_type) && !isnothing(scf_flags[MixedPrecision.contraction_float_type])
+        contraction_float_type_value = lowercase(scf_flags[MixedPrecision.contraction_float_type])
+        if contraction_float_type_value == MixedPrecision.single_precision 
+            contraction_float_type = Float32
+        elseif contraction_float_type_value ==  MixedPrecision.double_precision
+            contraction_float_type = Float64
+        elseif contraction_float_type_value == MixedPrecision.half_precision
+            contraction_float_type = Float16
+        else
+            error("Density-fitting mixed precision level chosen: $(contraction_float_type_value) is not a valid option")
+        end
+    end
+
+    num_Q_ranges = DF_Auxiliary_Parallelization.num_Q_ranges_default
+    Q_ranges_divide_Q_by = DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by_default
     
+    if haskey(scf_flags, DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by) && 
+        haskey(scf_flags, DF_Auxiliary_Parallelization.num_Q_ranges)
+        error("Cannot specify both Q_ranges_divide_Q_by and num_Q_ranges in SCF options")
+    end
+    
+    if haskey(scf_flags, DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by)
+        Q_ranges_divide_Q_by = scf_flags[DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by]
+        if Q_ranges_divide_Q_by <= 0
+            error("Divide number of Q ranges by must be a positive integer, got: $Q_ranges_divide_Q_by")
+        end
+        num_Q_ranges = 0 
+    elseif haskey(scf_flags, DF_Auxiliary_Parallelization.num_Q_ranges)
+        num_Q_ranges = scf_flags[DF_Auxiliary_Parallelization.num_Q_ranges]
+        if num_Q_ranges <= 1
+            error("Number of Q ranges must be a positive integer, got: $num_Q_ranges")
+        end
+        Q_ranges_divide_Q_by = 0
+    end
+
+
     return SCFOptions(
         do_density_fitting,
         contraction_mode,
@@ -155,7 +201,11 @@ function create_scf_options(scf_flags)
         df_K_sym_type,
         df_adaptive_basis_limit,
         df_max_num_GPU_exchange_blocks,
-        df_GPU_K_block_opeartions_threshold
+        df_GPU_K_block_opeartions_threshold,
+        do_mixed_precision,
+        contraction_float_type,
+        Q_ranges_divide_Q_by, 
+        num_Q_ranges
         )
 end
 
@@ -194,6 +244,19 @@ function print_scf_options(options::SCFOptions)
             println("DF number of GPUs: ", options.num_devices)
             println("DF Max Number of GPU Exchange Blocks: ", options.df_max_num_GPU_exchange_blocks)
             @printf("DF GPU K Block Operations Threshold: %.1e\n", options.df_GPU_K_block_opeartions_threshold)
+        end
+        if options.do_mixed_precision 
+            println("Using mixed precision for DF tensor contractions: $(options.contraction_float_type)") 
+            
+            if options.Q_ranges_divide_Q_by > 0
+                println("Dividing number of Q ranges by: ", options.Q_ranges_divide_Q_by)
+            elseif options.num_Q_ranges > 0
+                println("Using number of Q ranges: ", options.num_Q_ranges)
+            else
+                println("No division of Q ranges specified.")
+            end
+            println("Divide number of Q ranges by: ", options.Q_ranges_divide_Q_by)
+            println("Number of Q ranges: ", options.num_Q_ranges)
         end
         println("--------------------------------")
     end
