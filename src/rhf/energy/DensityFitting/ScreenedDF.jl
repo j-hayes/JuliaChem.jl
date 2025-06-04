@@ -327,6 +327,112 @@ function copy_screened_density_to_array(scf_data)
     end
 end
 
+
+function calculate_coulomb_screened_batched(scf_data, occupied_orbital_coefficients, jc_timing::JCTiming, iteration)
+    density_time = @elapsed begin 
+        blas_threads = BLAS.get_num_threads()
+        if scf_data.μ < 1000 
+            BLAS.set_num_threads(1)
+        end
+        BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
+        copy_screened_density_to_array(scf_data)
+        BLAS.set_num_threads(blas_threads)
+    end
+
+    #if env use no sym J 
+    use_sym = haskey(ENV, "DF_FOCK_NO_J_SYMMETRY") && ENV["DF_FOCK_NO_J_SYMMETRY"] == "true" ? false : true
+    if !use_sym
+        V_time = @elapsed BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
+        J_time = @elapsed BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate, 0.0, scf_data.J)
+        copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
+        jc_timing.timings[JCTiming_key(JCTC.density_time,iteration)] = density_time
+        jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
+        jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
+        jc_timing.timings[JCTiming_key(JCTC.copy_J_time,iteration)] = copy_J_time
+        return 
+    end
+
+
+    rank_Q = size(scf_data.D_tilde, 1)
+
+    sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
+
+    blas_threads = BLAS.get_num_threads()
+    V_time = @elapsed begin 
+        last_blas_add_time = 0.0
+        p = scf_data.μ
+        BLAS.set_num_threads(1)
+        n_threads = min(Threads.nthreads(), p-1)
+        num_p_per_thread = p ÷ n_threads
+        vv_time = @elapsed Threads.@threads for tt in 1:n_threads
+            thread_time = @elapsed begin 
+                p_thread_start = (tt - 1) * num_p_per_thread + 1
+                p_thread_end =  tt * num_p_per_thread
+                if tt == n_threads
+                    p_thread_end = p-1
+                end
+                thread_V = view(view(scf_data.D_tilde, :,:, p_thread_start), 1:rank_Q)
+                beta = 0.0
+                for pp in p_thread_start:p_thread_end
+                    if pp != p_thread_start
+                        beta = 1.0
+                    end
+                    range_start = scf_data.screening_data.sparse_p_start_indices[pp]
+                    range_end = scf_data.screening_data.sparse_p_start_indices[pp+1] - 1
+                    BLAS.gemv!('N', 1.0, 
+                        view(scf_data.D, :, range_start:range_end), 
+                        view(scf_data.density_array, range_start:range_end),
+                        beta, thread_V) 
+                end
+                if tt == n_threads
+                    last_blas_add_time = @elapsed begin
+                        BLAS.gemv!('N', 1.0, 
+                        view(scf_data.D, :, size(scf_data.D, 2)),
+                        view(scf_data.density_array, scf_data.screening_data.screened_indices_count:scf_data.screening_data.screened_indices_count),
+                        0.0, scf_data.coulomb_intermediate)
+                    end
+                end
+            end
+        end
+
+        v_add_time = @elapsed begin 
+            for t in 1:n_threads
+                p_thread_start = (t - 1) * num_p_per_thread + 1
+                axpy!(1.0, 
+                view(view(scf_data.D_tilde, :,:, p_thread_start), 1:rank_Q),
+                scf_data.coulomb_intermediate)
+            end 
+        end
+    end
+
+    J_time = @elapsed begin
+        # do symm J 
+        Threads.@threads for pp in 1:(p-1) #todo use call_gemv to remove view usage?
+            range_start = sparse_pq_index_map[pp, pp]
+            range_end = scf_data.screening_data.sparse_p_start_indices[pp+1]-1
+            BLAS.gemv!('T', 2.0,
+                view(scf_data.D, :, range_start:range_end),
+                scf_data.coulomb_intermediate,
+                0.0, view(scf_data.J, range_start:range_end))
+            if pp == p-1
+                range_start = scf_data.screening_data.screened_indices_count
+                range_end = scf_data.screening_data.screened_indices_count
+                BLAS.gemv!('T', 2.0,
+                    view(scf_data.D, :, size(scf_data.D, 2)),
+                    scf_data.coulomb_intermediate,
+                    0.0, view(scf_data.J, range_start:range_end))
+            end
+        end
+       copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
+    end
+   
+    BLAS.set_num_threads(blas_threads)
+    jc_timing.timings[JCTiming_key(JCTC.copy_J_time,iteration)] = copy_J_time
+    jc_timing.timings[JCTiming_key(JCTC.density_time,iteration)] = density_time
+    jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
+    jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
+end
+
 function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing::JCTiming, iteration)
     density_time = @elapsed begin 
         blas_threads = BLAS.get_num_threads()
