@@ -38,7 +38,7 @@ mutable struct SCFData
     scf_iteration::Int
     lower_triangle_length::Int
     B::Vector{Array} # the B matrix split up into Q range blocks 
-    W_batches::Vector{Array}
+    W_batches::Vector{Array} # batched exchange intermediate todo merge back so there is only one contraction intermediate buffer
 end
 
 
