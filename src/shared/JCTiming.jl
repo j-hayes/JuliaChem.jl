@@ -73,7 +73,7 @@ module JCTC
     const B_time = "B_time" 
 
     const n_auxiliary_basis_functions = "n_auxiliary_basis_functions"
-    const divide_num_Q_ranges_by = "divide_num_Q_ranges_by"
+    const Q_ranges_divide_Q_by = "Q_ranges_divide_Q_by"
     const num_Q_ranges = "num_Q_ranges"
     const three_eri_time = "three_eri_time"
     const two_eri_time = "two_eri_time"

@@ -25,7 +25,8 @@ mutable struct SCFOptions
     df_GPU_K_block_opeartions_threshold :: Int64
     do_mixed_precision :: Bool
     contraction_float_type :: Type
-    divide_num_Q_ranges_by :: Int64
+    Q_ranges_divide_Q_by :: Int64
+    num_Q_ranges :: Int64
 end 
 
 function create_default_scf_options()
@@ -53,7 +54,8 @@ function create_default_scf_options()
         SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold,
         SCF_Keywords.MixedPrecision.do_mixed_precision_default,
         SCF_Keywords.MixedPrecision.contraction_float_type_default,
-        SCF_Keywords.MixedPrecision.divide_num_Q_ranges_by_default
+        SCF_Keywords.DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by_default,
+        SCF_Keywords.DF_Auxiliary_Parallelization.num_Q_ranges_default
         )
 end
 
@@ -155,9 +157,29 @@ function create_scf_options(scf_flags)
         end
     end
 
-    divide_num_Q_ranges_by = haskey(scf_flags, Convergence.divide_num_Q_ranges_by) ?
-        scf_flags[Convergence.divide_num_Q_ranges_by] : Convergence.divide_num_Q_ranges_by_default
+    num_Q_ranges = DF_Auxiliary_Parallelization.num_Q_ranges_default
+    Q_ranges_divide_Q_by = DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by_default
     
+    if haskey(scf_flags, DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by) && 
+        haskey(scf_flags, DF_Auxiliary_Parallelization.num_Q_ranges)
+        error("Cannot specify both Q_ranges_divide_Q_by and num_Q_ranges in SCF options")
+    end
+    
+    if haskey(scf_flags, DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by)
+        Q_ranges_divide_Q_by = scf_flags[DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by]
+        if Q_ranges_divide_Q_by <= 0
+            error("Divide number of Q ranges by must be a positive integer, got: $Q_ranges_divide_Q_by")
+        end
+        num_Q_ranges = 0 
+    elseif haskey(scf_flags, DF_Auxiliary_Parallelization.num_Q_ranges)
+        num_Q_ranges = scf_flags[DF_Auxiliary_Parallelization.num_Q_ranges]
+        if num_Q_ranges <= 1
+            error("Number of Q ranges must be a positive integer, got: $num_Q_ranges")
+        end
+        Q_ranges_divide_Q_by = 0
+    end
+
+
     return SCFOptions(
         do_density_fitting,
         contraction_mode,
@@ -182,7 +204,8 @@ function create_scf_options(scf_flags)
         df_GPU_K_block_opeartions_threshold,
         do_mixed_precision,
         contraction_float_type,
-        divide_num_Q_ranges_by
+        Q_ranges_divide_Q_by, 
+        num_Q_ranges
         )
 end
 
@@ -224,6 +247,16 @@ function print_scf_options(options::SCFOptions)
         end
         if options.do_mixed_precision 
             println("Using mixed precision for DF tensor contractions: $(options.contraction_float_type)") 
+            
+            if options.Q_ranges_divide_Q_by > 0
+                println("Dividing number of Q ranges by: ", options.Q_ranges_divide_Q_by)
+            elseif options.num_Q_ranges > 0
+                println("Using number of Q ranges: ", options.num_Q_ranges)
+            else
+                println("No division of Q ranges specified.")
+            end
+            println("Divide number of Q ranges by: ", options.Q_ranges_divide_Q_by)
+            println("Number of Q ranges: ", options.num_Q_ranges)
         end
         println("--------------------------------")
     end

@@ -48,7 +48,8 @@ end
 function DF_RHF_denseCPU()
     scf_keywords = DF_RHF_screenedCPU()
     scf_keywords["contraction_mode"] = "dense"
-    scf_keywords["divide_num_Q_ranges_by"] = 10
+    
+
     return scf_keywords
 end
 

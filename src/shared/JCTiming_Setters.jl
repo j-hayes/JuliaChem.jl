@@ -50,7 +50,7 @@ function set_basis_info!(jc_timing::JCTiming, basis::Basis, aux_basis::Union{Bas
     else
         jc_timing.non_timing_data[JCTC.n_auxiliary_basis_functions] = "0"
     end
-    num_Q_ranges = aux_basis.norb ÷ scf_options.divide_num_Q_ranges_by
+    num_Q_ranges = aux_basis.norb ÷ scf_options.Q_ranges_divide_Q_by
     jc_timing.non_timing_data[JCTC.num_Q_ranges] = string(num_Q_ranges)
     jc_timing.non_timing_data[JCTC.n_electrons] = string(basis.nels)
     jc_timing.non_timing_data[JCTC.n_occupied_orbitals] = string(basis.nels÷2)
