@@ -6,18 +6,32 @@ include("../src/shared/JCTiming.jl")
 # The rest of JuliaChem to be read, only the JCTC keys 
 function save_jc_timings_to_hdf5(jc_timing, file_path::String)
     # write stuff struct to hdf5 
-    h5open("$(file_path)", "w") do file
-        # write_dictionary_to_hdf5{String}(file, jc_timing.non_timing_data, "non_timing_data")
-        save_scf_options(file, jc_timing.options, JCTC.scf_options) # scf options
-        save_scf_options(file, jc_timing.user_options, "$(JCTC.scf_options)-user") # scf options
-        save_run_level_data(file, jc_timing) #run level data
-        save_timings(file, jc_timing)
-        save_non_timing_data(file, jc_timing)
-
-    end
+    file =h5open("$(file_path)", "w")
+    save_jc_timings_to_hdf5(jc_timing, file)
+    close(file)   
 end
 
-function save_non_timing_data(file, jc_timing)
+function save_jc_timings_to_hdf5(jc_timing, file::HDF5.File)
+    # write stuff struct to hdf5 
+    # write_dictionary_to_hdf5{String}(file, jc_timing.non_timing_data, "non_timing_data")
+    save_scf_options(file, jc_timing.options, JCTC.scf_options) # scf options
+    save_scf_options(file, jc_timing.user_options, "$(JCTC.scf_options)-user") # scf options
+    save_run_level_data(file, jc_timing) #run level data
+    save_timings(file, jc_timing)
+    save_non_timing_data(file, jc_timing)
+    println("Saved JCtiming data to ")
+end
+
+function save_array_to_hdf5_table(file::HDF5.File, data::Array{String, 2}, file_name::String)
+    # write the array to the hdf5 file
+    # data should be a 2D array with 2 columns
+    if size(data, 2) != 2
+        error("data must be a 2D array with 2 columns")
+    end
+    write(file, file_name, data)
+end
+
+function save_non_timing_data(file::HDF5.File, jc_timing)
     # write the non timing data to the hdf5 file
     str_array = Array{String}(undef, length(jc_timing.non_timing_data), 2)
     row = 1
@@ -30,7 +44,7 @@ function save_non_timing_data(file, jc_timing)
 
 end
 
-function save_timings(file, jc_timing)
+function save_timings(file::HDF5.File, jc_timing)
     # write the timings to the hdf5 file
 
     #sort the items in the dictionary jc_timing.timings by key then iteration 
@@ -79,7 +93,7 @@ function sort_timings(jc_timing)
     return sorted_timings
 end
 
-function save_scf_options(file, options, file_name)
+function save_scf_options(file::HDF5.File, options, file_name)
     # write the scf options to the hdf5 file
     str_array = Array{String}(undef, 18, 2)
 
@@ -162,7 +176,7 @@ function check_value_exists(key::String, dict::Dict{String, String}) :: String
     end
 end
 
-function save_run_level_data(file, jc_timing)
+function save_run_level_data(file::HDF5.File, jc_timing)
     str_array = Array{String}(undef, 12, 2)
 
 
