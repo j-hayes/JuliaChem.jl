@@ -255,8 +255,6 @@ function print_scf_options(options::SCFOptions)
             else
                 println("No division of Q ranges specified.")
             end
-            println("Divide number of Q ranges by: ", options.Q_ranges_divide_Q_by)
-            println("Number of Q ranges: ", options.num_Q_ranges)
         end
         println("--------------------------------")
     end
