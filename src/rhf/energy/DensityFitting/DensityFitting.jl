@@ -252,16 +252,7 @@ if iteration == 1
 end  
 
 
-#number of Q ranges starts as number of aux basis sets, divide by user given Int64
-if scf_options.Q_ranges_divide_Q_by > 0 && scf_options.num_Q_ranges > 0
-  error("Cannot set both Q_ranges_divide_Q_by and num_Q_ranges for DF RHF")
-end
-
-if scf_options.Q_ranges_divide_Q_by > 0
-  num_Q_ranges = scf_data.A ÷ scf_options.Q_ranges_divide_Q_by
-else # using explicit number of Q ranges 
-  num_Q_ranges = scf_options.num_Q_ranges
-end
+num_Q_ranges = get_num_Q_ranges(scf_options, num_aux_basis_functions)
 
 
 Q = scf_data.A 

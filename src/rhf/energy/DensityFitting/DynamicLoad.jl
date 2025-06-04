@@ -210,3 +210,17 @@ end
 function static_load_thread_shell_to_process_count(thread, nthreads, rank_number_of_shells, n_indicies_per_thread)
     return thread != nthreads ?   n_indicies_per_thread : n_indicies_per_thread + rank_number_of_shells%nthreads
 end
+
+function get_num_Q_ranges(scf_options::SCFOptions, num_aux_basis_functions::Int64)
+    #number of Q ranges starts as number of aux basis sets, divide by user given Int64
+    if scf_options.Q_ranges_divide_Q_by > 0 && scf_options.num_Q_ranges > 0
+        error("Cannot set both Q_ranges_divide_Q_by and num_Q_ranges for DF RHF")
+    end
+    num_Q_ranges = 0
+    if scf_options.Q_ranges_divide_Q_by > 0
+        num_Q_ranges = num_aux_basis_functions ÷ scf_options.Q_ranges_divide_Q_by
+    else # using explicit number of Q ranges 
+        num_Q_ranges = scf_options.num_Q_ranges
+    end
+    return num_Q_ranges
+end

@@ -37,13 +37,15 @@ mutable struct SCFData
     A::Int
     scf_iteration::Int
     lower_triangle_length::Int
+    B::Vector{Array} # the B matrix split up into Q range blocks 
+    W_batches::Vector{Array}
 end
 
 
 function SCFData(gpu_data::SCFGPUData)
     sd = ScreeningData([], [], [], [], [], [], [], falses(1, 1), zeros(Int, 0), Array{Tuple{Int,Int}}(undef, 0),
         Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
-    return SCFData([], [], [], [], [],[], [], [],[], [], [], [], [], sd, gpu_data, 0, 0, 0, 0, 0)
+    return SCFData([], [], [], [], [],[], [], [],[], [], [], [], [], sd, gpu_data, 0, 0, 0, 0, 0, [], [])
 end
 
 export SCFData, ScreeningData

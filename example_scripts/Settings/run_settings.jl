@@ -15,6 +15,8 @@ function get_settings(settings_id)
         return DF_RHF_GPU_dense()
     elseif settings_id == "DF_RHF_denseCPU_mixed"
         return DF_RHF_denseCPU_mixed()
+    elseif settings_id == "DF_RHF_screenedCPU_mixed"
+        return DF_RHF_screenedCPU_mixed()
     else
         throw(ErrorException("Error: settings_id not recognized"))        
     end
@@ -110,6 +112,13 @@ end
 
 function DF_RHF_denseCPU_mixed()
     scf_keywords = DF_RHF_denseCPU()
+    scf_keywords["do_mixed_precision"] = true
+    scf_keywords["contraction_float_type"] = "single"
+    return scf_keywords
+end
+
+function DF_RHF_screenedCPU_mixed()
+    scf_keywords = DF_RHF_screenedCPU()
     scf_keywords["do_mixed_precision"] = true
     scf_keywords["contraction_float_type"] = "single"
     return scf_keywords
