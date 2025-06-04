@@ -397,7 +397,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
 
   density_fitting_converged = false
 
-  set_basis_info!(jc_timing, basis, auxiliary_basis, scf_options)
+  set_basis_info!(jc_timing, basis, auxiliary_basis)
   
   while !iter_converged
     just_finished_df_iters = false
