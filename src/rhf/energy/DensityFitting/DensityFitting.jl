@@ -250,10 +250,12 @@ if iteration == 1
   scf_data.density = zeros(FloatT, (scf_data.μ, scf_data.μ))
 
 end  
-num_Q_ranges = 4
+
+#number of Q ranges starts as number of aux basis sets, divide by user given Int64
+num_Q_ranges = basis_sets.auxillary.norb ÷ scf_options.divide_num_Q_ranges_by
 if haskey(ENV, "NUM_Q_RANGES")
     num_Q_ranges = parse(Int, ENV["NUM_Q_RANGES"])
-end
+end 
 
 Q = scf_data.A 
 Q_ranges = []

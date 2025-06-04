@@ -25,6 +25,7 @@ mutable struct SCFOptions
     df_GPU_K_block_opeartions_threshold :: Int64
     do_mixed_precision :: Bool
     contraction_float_type :: Type
+    divide_num_Q_ranges_by :: Int64
 end 
 
 function create_default_scf_options()
@@ -51,7 +52,8 @@ function create_default_scf_options()
         SCF_Keywords.GPUAlgorithms.df_max_num_GPU_exchange_blocks,
         SCF_Keywords.GPUAlgorithms.df_GPU_K_block_opeartions_threshold,
         SCF_Keywords.MixedPrecision.do_mixed_precision_default,
-        SCF_Keywords.MixedPrecision.contraction_float_type_default
+        SCF_Keywords.MixedPrecision.contraction_float_type_default,
+        SCF_Keywords.MixedPrecision.divide_num_Q_ranges_by_default
         )
 end
 
@@ -152,6 +154,9 @@ function create_scf_options(scf_flags)
             error("Density-fitting mixed precision level chosen: $(contraction_float_type_value) is not a valid option")
         end
     end
+
+    divide_num_Q_ranges_by = haskey(scf_flags, Convergence.divide_num_Q_ranges_by) ?
+        scf_flags[Convergence.divide_num_Q_ranges_by] : Convergence.divide_num_Q_ranges_by_default
     
     return SCFOptions(
         do_density_fitting,
@@ -176,7 +181,8 @@ function create_scf_options(scf_flags)
         df_max_num_GPU_exchange_blocks,
         df_GPU_K_block_opeartions_threshold,
         do_mixed_precision,
-        contraction_float_type
+        contraction_float_type,
+        divide_num_Q_ranges_by
         )
 end
 

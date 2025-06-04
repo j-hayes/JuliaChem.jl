@@ -50,6 +50,9 @@ module SCF_Keywords
 
         const df_max_iterations = "df_niter"
         const df_max_iterations_default = 10
+
+        const divide_num_Q_ranges_by = "divide_num_Q_ranges_by"
+        const divide_num_Q_ranges_by_default = 4
     end
 
     module ContractionMode 
