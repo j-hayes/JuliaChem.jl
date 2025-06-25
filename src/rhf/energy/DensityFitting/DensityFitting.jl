@@ -58,7 +58,6 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
       df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df, jeri_engine_thread,
       basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
     end
-    
     if rank == 0
       H_add_time = @elapsed scf_data.two_electron_fock .+= H # add the core hamiltonian to the two electron fock matrix
       jc_timing.timings[JCTiming_key(JCTC.H_add_time,iteration)] = H_add_time
@@ -66,12 +65,18 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   end
 
   if MPI.Comm_size(comm) > 1
-    MPI_time = @elapsed MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
+    MPI_time = @elapsed begin 
+      MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)
+      # MPI.Barrier(MPI.COMM_WORLD)
+    end
+
     jc_timing.timings[JCTiming_key(JCTC.fock_MPI_time,iteration)] = MPI_time
   end  
 
   calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)
-
+  
+  ThreadPinning.unpinthreads()
+  BLAS.set_num_threads(1)
   return scf_data.two_electron_fock
 end
 

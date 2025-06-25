@@ -7,6 +7,7 @@ using ThreadPinning
 using Serialization
 using JuliaChem.Shared.JCTC
 using JuliaChem.Shared.Constants
+using ThreadPinning
 
 @inline function twoD_to1Dindex(i, j, p)
     return (i - 1) * p + j
@@ -90,8 +91,12 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
         j_ab_inv_time = @elapsed begin 
             if rank == 0 # avoid convergence problems always do this on rank 0
+                ThreadPinning.unpinthreads()
+                BLAS.set_num_threads(Threads.nthreads())
                 LAPACK.potrf!('L', two_center_integrals)
                 LAPACK.trtri!('L', 'N', two_center_integrals)
+                BLAS.set_num_threads(1)
+                ThreadPinning.pinthreads(:affinitymask)
             end
             if n_ranks > 1
                 broadcast_two_center_integrals(two_center_integrals)
@@ -101,14 +106,16 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         B_time = 0.0
         three_eri_time = 0.0
         if n_ranks > 1 
-
             calculate_B_multi_rank(scf_data, J_AB_invt, basis_sets, jeri_engine_thread_df, scf_options, jc_timing)
         else
+            ThreadPinning.unpinthreads()
+            BLAS.set_num_threads(Threads.nthreads())
             three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
                 scf_data, rank, n_ranks, true, false)
             B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
             jc_timing.timings[JCTC.B_time] = B_time
             jc_timing.timings[JCTC.three_eri_time] = three_eri_time
+            ThreadPinning.pinthreads(:affinitymask)
         end
         # deallocate unneeded memory
         two_center_integrals = zeros(0)
@@ -161,7 +168,11 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
 
     this_rank_J_AB_INV = J_AB_INV[this_rank_B_Q_index_range, :]
     # do B[Q,pq] += J_AB_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
+    ThreadPinning.unpinthreads()
+    BLAS.set_num_threads(Threads.nthreads())
     for other_rank in 0:n_ranks-1
+      
+
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 
             basis_sets,
             scf_options,
@@ -169,13 +180,14 @@ function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thre
             other_rank,
             n_ranks,
             true, false)
-        
         B_time += @elapsed begin 
             other_rank_Q_index_range = load_balance_indicies[other_rank+1][2] #range of indexes managed by rank: other rank 
-            J_AB_INV_ranks_slice = this_rank_J_AB_INV[:, other_rank_Q_index_range] #this allocates memory perhaps needs to be done another way
+            J_AB_INV_ranks_slice = view(this_rank_J_AB_INV, :, other_rank_Q_index_range) #this allocates memory perhaps needs to be done another way
             BLAS.gemm!('N', 'N', 1.0, J_AB_INV_ranks_slice, three_center_integrals, 1.0, scf_data.D)
         end
     end
+    BLAS.set_num_threads(1)
+    ThreadPinning.pinthreads(:affinitymask)
 
     jc_timing.timings[JCTC.B_time] = B_time
     jc_timing.timings[JCTC.three_eri_time] = three_eri_time
@@ -237,8 +249,6 @@ end
 function calculate_W_screened(scf_data, occupied_orbital_coefficients)
     
     p = scf_data.μ
-    blas_threads = BLAS.get_num_threads()
-    BLAS.set_num_threads(1)
     n_threads = Threads.nthreads()
     dynamic_p = n_threads + 1
     dynamic_lock = Threads.ReentrantLock()
@@ -250,28 +260,43 @@ function calculate_W_screened(scf_data, occupied_orbital_coefficients)
 
     linear_indicesB = LinearIndices(scf_data.D)
     linear_indicesW = LinearIndices(scf_data.D_tilde)
+    ThreadPinning.pinthreads(:affinitymask)
+    BLAS.set_num_threads(1)
+    Threads.@sync for thread in 1:n_threads
+        ThreadPinning.@spawnat thread begin
+            pp = thread
+            K = 1
+            while pp <= p
+                non_zero_r_index = 1
+                for r in 1:p
+                    if scf_data.screening_data.basis_function_screen_matrix[r, pp]
+                        scf_data.non_zero_coefficients[pp][:, non_zero_r_index] .= view(occupied_orbital_coefficients, :, r)
+                        non_zero_r_index += 1
+                    end
+                end
+                K = scf_data.screening_data.non_screened_p_indices_count[pp]
+                A_ptr = pointer(scf_data.D, linear_indicesB[1, scf_data.screening_data.sparse_p_start_indices[pp]])
+                B_ptr = pointer(scf_data.non_zero_coefficients[pp], 1)
+                C_ptr = pointer(scf_data.D_tilde, linear_indicesW[1, 1, pp])
+                call_gemm!(Val(false), Val(true), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
 
-   
-    Threads.@threads for pp in 1:p
-        K = 1
-        non_zero_r_index = 1
-        for r in 1:p
-            if scf_data.screening_data.basis_function_screen_matrix[r, pp]
-                scf_data.non_zero_coefficients[pp][:, non_zero_r_index] .= view(occupied_orbital_coefficients, :, r)
-                non_zero_r_index += 1
+                lock(dynamic_lock) do
+                    if dynamic_p <= p
+                        pp = dynamic_p
+                        dynamic_p += 1
+                    else
+                        pp = p + 1
+                    end
+                end
             end
         end
-        K = scf_data.screening_data.non_screened_p_indices_count[pp]
-        A_ptr = pointer(scf_data.D, linear_indicesB[1, scf_data.screening_data.sparse_p_start_indices[pp]])
-        B_ptr = pointer(scf_data.non_zero_coefficients[pp], 1)
-        C_ptr = pointer(scf_data.D_tilde, linear_indicesW[1, 1, pp])
-        call_gemm!(Val(false), Val(true), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
     end
-    BLAS.set_num_threads(blas_threads)
 end
 
 function calculate_K_small(scf_data)
 
+    ThreadPinning.unpinthreads()
+    BLAS.set_num_threads(Threads.nthreads())
     M = scf_data.μ 
     N = scf_data.μ
     K = size(scf_data.D_tilde,1)*scf_data.occ
@@ -281,7 +306,8 @@ function calculate_K_small(scf_data)
     C_ptr = pointer(scf_data.two_electron_fock, 1)
 
     call_gemm!(Val(true), Val(false), M, N, K, -1.0, A_ptr, B_ptr, 0.0, C_ptr) #it might not be necessary to do this with call gemm but it isn't going to hurt and keeps things consistent
-
+    BLAS.set_num_threads(1)
+    ThreadPinning.pinthreads(:affinitymask)
 end
 
 function copy_screened_density_to_array(scf_data)
@@ -301,16 +327,26 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_
     density_time = @elapsed begin 
         blas_threads = BLAS.get_num_threads()
         if scf_data.μ < 1000 
+            ThreadPinning.pinthreads(:affinitymask)
             BLAS.set_num_threads(1)
+        else
+            ThreadPinning.unpinthreads()
+            BLAS.set_num_threads(Threads.nthreads())
         end
+        # ThreadPinning.unpinthreads()
+        # BLAS.set_num_threads(Threads.nthreads())
         BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
         copy_screened_density_to_array(scf_data)
-        BLAS.set_num_threads(blas_threads)
+        # BLAS.set_num_threads(blas_threads)
     end
 
     #if env use no sym J 
     use_sym = haskey(ENV, "DF_FOCK_NO_J_SYMMETRY") && ENV["DF_FOCK_NO_J_SYMMETRY"] == "true" ? false : true
     if !use_sym
+
+
+        ThreadPinning.unpinthreads()
+        BLAS.set_num_threads(Threads.nthreads())
         V_time = @elapsed BLAS.gemv!('N', 1.0, scf_data.D, scf_data.density_array, 0.0, scf_data.coulomb_intermediate)
         J_time = @elapsed BLAS.gemv!('T', 2.0, scf_data.D, scf_data.coulomb_intermediate, 0.0, scf_data.J)
         copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
@@ -318,10 +354,15 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_
         jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
         jc_timing.timings[JCTiming_key(JCTC.J_time,iteration)] = J_time
         jc_timing.timings[JCTiming_key(JCTC.copy_J_time,iteration)] = copy_J_time
+        BLAS.set_num_threads(1)
+        ThreadPinning.pinthreads(:affinitymask)
         return 
     end
 
 
+    BLAS.set_num_threads(1)
+    ThreadPinning.pinthreads(:affinitymask)
+    
     rank_Q = size(scf_data.D_tilde, 1)
 
     sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
@@ -330,7 +371,7 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_
     V_time = @elapsed begin 
         last_blas_add_time = 0.0
         p = scf_data.μ
-        BLAS.set_num_threads(1)
+        # BLAS.set_num_threads(1)
         n_threads = min(Threads.nthreads(), p-1)
         num_p_per_thread = p ÷ n_threads
         vv_time = @elapsed Threads.@threads for tt in 1:n_threads
@@ -396,7 +437,7 @@ function calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_
        copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J, scf_data.two_electron_fock)
     end
    
-    BLAS.set_num_threads(blas_threads)
+    # BLAS.set_num_threads(blas_threads)
     jc_timing.timings[JCTiming_key(JCTC.copy_J_time,iteration)] = copy_J_time
     jc_timing.timings[JCTiming_key(JCTC.density_time,iteration)] = density_time
     jc_timing.timings[JCTiming_key(JCTC.V_time,iteration)] = V_time
@@ -526,17 +567,17 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     n_threads = Threads.nthreads()
     n_threads = min(n_threads, length(scf_data.screening_data.blocks_to_calculate))
     
-    blas_threads = BLAS.get_num_threads()
-    BLAS.set_num_threads(1)
-    dynamic_index = n_threads + 1
-    dynamic_lock = Threads.ReentrantLock()
+    # blas_threads = BLAS.get_num_threads()
+    # BLAS.set_num_threads(1)
+    # dynamic_index = n_threads + 1
+    # dynamic_lock = Threads.ReentrantLock()
     
     exchange_blocks = scf_data.k_blocks
 
     K_linear_indices = LinearIndices(exchange_blocks)
 
     Threads.@sync for thread in 1:n_threads
-        Threads.@spawn begin
+        ThreadPinning.@spawnat thread begin
             index = thread
             for ii in thread:n_threads:length(scf_data.screening_data.blocks_to_calculate)
                 index = scf_data.screening_data.blocks_to_calculate[ii]
@@ -563,7 +604,6 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
         end
     end#sync
       
-    BLAS.set_num_threads(blas_threads)
     if p % scf_options.df_exchange_n_blocks == 0 # square blocks cover the entire pq space
         return
     end
@@ -583,9 +623,9 @@ function calculate_K_lower_diagonal_block(scf_data, scf_options)
     B_non_square_ptr = pointer(W, linear_indices[1, 1, q_non_square_start])
     C_non_square_ptr = pointer(scf_data.k_blocks, 1)
 
-
+    BLAS.set_num_threads(Threads.nthreads())
     call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_non_square_ptr, B_non_square_ptr, beta, C_non_square_ptr)    
-
+    BLAS.set_num_threads(1)
     non_square_buffer = reshape(view(scf_data.k_blocks, 1:M*N), (p, length(q_non_square_range))) 
 
     scf_data.two_electron_fock[p_non_square_range, q_non_square_range] .= non_square_buffer
@@ -614,8 +654,9 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options, jc_ti
    
     n_threads = Threads.nthreads()
     
-    blas_threads = BLAS.get_num_threads()
+    ThreadPinning.pinthreads(:affinitymask)
     BLAS.set_num_threads(1)
+
     
     exchange_blocks = scf_data.k_blocks
     K_linear_indices = LinearIndices(exchange_blocks)
@@ -633,6 +674,10 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options, jc_ti
     # println("use_non_square_blocks = $use_non_square_blocks")
     # println("scf_data.screening_data.exchange_batch_indexes")
     # println(scf_data.screening_data.exchange_batch_indexes)
+
+    ThreadPinning.pinthreads(:affinitymask)
+    BLAS.set_num_threads(1)
+
     Threads.@threads for index in lower_triangle_length:-1:1 
         pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
@@ -671,10 +716,7 @@ function calculate_K_lower_diagonal_block_no_screen(scf_data, scf_options, jc_ti
                 scf_data.two_electron_fock[q_range, p_range] .= transpose(view(exchange_blocks, :,:, index)) 
             end
         end
-    end#sync
-
-    BLAS.set_num_threads(blas_threads)
-    
+    end#sync    
 end
 
 
