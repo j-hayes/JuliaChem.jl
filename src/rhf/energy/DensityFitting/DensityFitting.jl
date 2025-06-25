@@ -252,7 +252,7 @@ if iteration == 1
 end  
 
 
-num_Q_ranges = get_num_Q_ranges(scf_options, num_aux_basis_functions)
+num_Q_ranges = get_num_Q_ranges(scf_options, scf_data.A)
 
 
 Q = scf_data.A 
