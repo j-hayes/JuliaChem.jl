@@ -39,7 +39,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             error("Number of devices requested is greater than the number of devices available")
         end
 
-        two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+        two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
         
         device_Q_indices, 
         device_rank_Q_indices, 

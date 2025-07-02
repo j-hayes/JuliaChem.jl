@@ -4,7 +4,7 @@ using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 two_center_integral_tag = 2000
 
-function calculate_two_center_intgrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
+function calculate_two_center_integrals(jeri_engine_thread::Vector{T}, basis_sets, scf_options::SCFOptions) where {T<:DFRHFTEIEngine}
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     aux_basis_function_count = basis_sets.auxillary.norb

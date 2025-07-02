@@ -29,6 +29,9 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   rank = MPI.Comm_rank(comm)
   n_ranks = MPI.Comm_size(comm)
 
+  scf_data.μ = basis_function_count
+  scf_data.A = aux_basis_function_count
+  scf_data.occ = occupied_orbital_count
 
 
   if iteration == 1
@@ -121,7 +124,7 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
   shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_rank(comm),MPI.Comm_size(comm),basis_sets) #todo only do this on iteration 1
   
   if iteration == 1
-    two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+    two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
     calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
         
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time,iteration)] = two_eri_time
@@ -236,7 +239,7 @@ shell_indicies, aux_indicies, indicies  = static_load_rank_indicies(MPI.Comm_ran
 
 if iteration == 1
   println("doing mixed precision $(scf_options.contraction_float_type) DF-RHF tensor contractions")
-  two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+  two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
   calculate_B!(scf_data, two_center_integrals, jc_timing, scf_options, jeri_engine_thread_df, basis_sets)
   B = zeros(FloatT, (scf_data.μ, scf_data.μ, scf_data.A))
   B .= permutedims(scf_data.D, (2,3,1))

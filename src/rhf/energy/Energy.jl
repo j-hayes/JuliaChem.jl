@@ -18,6 +18,7 @@ using JSON
 Base.include(@__MODULE__,"EnergyHelpers.jl")
 Base.include(@__MODULE__,"SCF.jl")
 Base.include(@__MODULE__,"./DensityFitting/DensityFitting.jl")
+Base.include(@__MODULE__,"./DensityFitting/DensityFitting2.jl")
 Base.include(@__MODULE__,"./DensityFitting/TwoCenterIntegrals.jl")
 Base.include(@__MODULE__,"./DensityFitting/ThreeCenterIntegralsScreened.jl")
 Base.include(@__MODULE__,"./DensityFitting/ThreeCenterIntegrals.jl")
@@ -27,6 +28,11 @@ Base.include(@__MODULE__,"./DensityFitting/SchwarzScreening.jl")
 Base.include(@__MODULE__,"./DensityFitting/ScreenedDF.jl")
 Base.include(@__MODULE__,"./DensityFitting/GPUDF.jl")
 Base.include(@__MODULE__,"./DensityFitting/DenseGPUDF.jl")
+
+
+Base.include(@__MODULE__,"./DensityFitting/ScreenedDF2.jl")
+Base.include(@__MODULE__,"./DensityFitting/Exchange.jl")
+Base.include(@__MODULE__,"./DensityFitting/Coulomb.jl")
 
 
 """

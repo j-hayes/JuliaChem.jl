@@ -183,7 +183,7 @@ end
 
 function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_engine_thread_df, basis_sets, scf_options)
 
-    two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+    two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time, 1)] = two_eri_time
 
 

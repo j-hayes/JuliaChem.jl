@@ -86,7 +86,7 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     if iteration == 1
         n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
-        two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
+        two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
         s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
         j_ab_inv_time = @elapsed begin 
             if rank == 0 # avoid convergence problems always do this on rank 0

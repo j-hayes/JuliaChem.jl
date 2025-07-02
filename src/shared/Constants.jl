@@ -91,7 +91,9 @@ module SCF_Keywords
         const num_devices = "num_devices"
         const default_num_devices = 1
         const df_use_K_sym = "df_use_K_sym"
-        const df_use_K_sym_default = false 
+        const df_use_J_sym = "df_use_J_sym"
+        const df_use_K_sym_default = true 
+        const df_use_J_sym_default = true 
         const df_K_sym_type = "df_K_sym_type"
         const df_K_sym_type_default = "square" 
         const df_K_sym_type_square = "square" 

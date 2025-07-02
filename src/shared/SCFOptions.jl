@@ -19,6 +19,7 @@ mutable struct SCFOptions
     df_use_adaptive :: Bool
     num_devices :: Int64
     df_use_K_sym :: Bool
+    df_use_J_sym :: Bool
     df_K_sym_type :: String
     df_adaptive_basis_limit :: Int64
     df_max_num_GPU_exchange_blocks :: Int64
@@ -48,6 +49,7 @@ function create_default_scf_options()
         SCF_Keywords.GPUAlgorithms.df_use_adaptive_default,
         SCF_Keywords.GPUAlgorithms.default_num_devices,
         SCF_Keywords.GPUAlgorithms.df_use_K_sym_default,
+        SCF_Keywords.GPUAlgorithms.df_use_J_sym_default,
         SCF_Keywords.GPUAlgorithms.df_K_sym_type,
         SCF_Keywords.GPUAlgorithms.df_adaptive_basis_limit, 
         SCF_Keywords.GPUAlgorithms.df_max_num_GPU_exchange_blocks,
@@ -128,6 +130,9 @@ function create_scf_options(scf_flags)
     df_use_K_sym = haskey(scf_flags, GPUAlgorithms.df_use_K_sym) ?
         scf_flags[GPUAlgorithms.df_use_K_sym] : GPUAlgorithms.df_use_K_sym_default
 
+    df_use_J_sym = haskey(scf_flags, GPUAlgorithms.df_use_J_sym) ?
+        scf_flags[GPUAlgorithms.df_use_J_sym] : GPUAlgorithms.df_use_J_sym_default
+
     df_K_sym_type = haskey(scf_flags, GPUAlgorithms.df_K_sym_type) ?
         scf_flags[GPUAlgorithms.df_K_sym_type] : GPUAlgorithms.df_K_sym_type_default
     
@@ -167,13 +172,13 @@ function create_scf_options(scf_flags)
     
     if haskey(scf_flags, DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by)
         Q_ranges_divide_Q_by = scf_flags[DF_Auxiliary_Parallelization.Q_ranges_divide_Q_by]
-        if Q_ranges_divide_Q_by <= 0
+        if Q_ranges_divide_Q_by < 1
             error("Divide number of Q ranges by must be a positive integer, got: $Q_ranges_divide_Q_by")
         end
         num_Q_ranges = 0 
     elseif haskey(scf_flags, DF_Auxiliary_Parallelization.num_Q_ranges)
         num_Q_ranges = scf_flags[DF_Auxiliary_Parallelization.num_Q_ranges]
-        if num_Q_ranges <= 1
+        if num_Q_ranges < 1
             error("Number of Q ranges must be a positive integer, got: $num_Q_ranges")
         end
         Q_ranges_divide_Q_by = 0
@@ -198,6 +203,7 @@ function create_scf_options(scf_flags)
         df_use_adaptive,
         df_num_devices,
         df_use_K_sym,
+        df_use_J_sym,
         df_K_sym_type,
         df_adaptive_basis_limit,
         df_max_num_GPU_exchange_blocks,
