@@ -364,9 +364,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   B_dim = 1
   D_rms = 1.0
   ΔE = 1.0 
-  ###DO NOT CHECK THIS CHANGE IN, only do this for
-  ###testing mixed precision vs Full RHF so schwarz screening is not done
-  cutoff = 0 # fdiff ? 5E-11 : 1E-10
+  cutoff = fdiff ? 5E-11 : 1E-10
   ###########
 
   #length_eri_sizes = length(eri_sizes)
@@ -525,7 +523,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     D_rms = √(LinearAlgebra.BLAS.dot(length(ΔD), ΔD, 1, ΔD, 1))
 
     E = E_elec + E_nuc
-    ΔE = E - E_old
+    ΔE = E - E_old # marked CF
 
     if do_density_fitting && !density_fitting_converged 
       density_fitting_converged = 
