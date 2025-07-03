@@ -29,16 +29,12 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
   rank = MPI.Comm_rank(comm)
   n_ranks = MPI.Comm_size(comm)
 
-  scf_data.μ = basis_function_count
-  scf_data.A = aux_basis_function_count
-  scf_data.occ = occupied_orbital_count
-
 
   if iteration == 1
     aux_basis_function_count = basis_sets.auxillary.norb
     basis_function_count = basis_sets.primary.norb
     occupied_orbital_count = Int64(basis_sets.primary.nels)÷2
-  
+
     shell_aux_indicies, aux_indicies, basis_index_map = static_load_rank_indicies(rank, n_ranks, basis_sets)
   
     scf_data.μ = basis_function_count

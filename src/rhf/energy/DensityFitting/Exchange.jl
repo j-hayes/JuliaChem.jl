@@ -20,9 +20,9 @@ function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficient
 
     for Q_range_index in 1:num_Q_ranges
         # zero out two_electron_fock on first iteration only
-        if Q_range_index > 1
-            beta = float_type(1.0)
-        end
+        # if Q_range_index > 1
+        #     beta = float_type(1.0)
+        # end do this if we put back C_ptr = pointer(scf_data.two_electron_fock, 1) in call_gemm!
 
         K = size(scf_data.W_batches[Q_range_index],1)*scf_data.occ
 
@@ -32,12 +32,16 @@ function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficient
 
         call_gemm!(Val(true), Val(false), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr) 
     end
-
+    #remove this if we put back C_ptr = pointer(scf_data.two_electron_fock, 1) in call_gemm!
+    scf_data.two_electron_fock .= 0.0
     for Q_range_index in 1:num_Q_ranges
         # print the first 10 values of the K matrix for each batch
-        println("K batch $Q_range_index first 10 values: $(scf_data.K[Q_range_index][1:10])")
         scf_data.two_electron_fock += scf_data.K[Q_range_index]
     end
+
+    # println("exchange 2: ")
+    # display(scf_data.two_electron_fock)
+
 end
 
 
@@ -81,10 +85,6 @@ function calculate_W_screened!(scf_data::SCFData, occupied_orbital_coefficients:
     end
     BLAS.set_num_threads(blas_threads)
     
-    for Q_range_index in 1:num_Q_ranges
-        # print the first 10 values of the W matrix for each batch
-        println("W batch $Q_range_index first 10 values: $(scf_data.W_batches[Q_range_index][1:10])")
-    end
 end
 
 

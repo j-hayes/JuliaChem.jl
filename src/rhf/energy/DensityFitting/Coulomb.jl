@@ -1,36 +1,47 @@
 function calculate_dfrhf_coulomb!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
     calculate_density!(scf_data, scf_options, occupied_orbital_coefficients)
     
-    scf_options.df_use_J_sym = false
+    scf_options.df_use_J_sym = true
 
     if !scf_options.df_use_J_sym
         calculate_dfrhf_coulomb_no_sym!(scf_data, scf_options)
     else
-        calculate_df_rhf_coulomb_sym!(scf_data, scf_options)
+        calculate_dfrhf_coulomb_sym!(scf_data, scf_options)
     end
 
+    # mpi reduce the two-electron fock matrix
+end
 
+
+function calculate_dfrhf_coulomb_sym!(scf_data::SCFData, scf_options::SCFOptions)
+    calculate_dfrhf_coulomb_intermediate_sym!(scf_data, scf_options)
+    calculate_dfrhf_J_sym!(scf_data, scf_options)
 end
 
 function calculate_dfrhf_coulomb_no_sym!(scf_data::SCFData, scf_options::SCFOptions) 
-    
     for Q_range_index in 1:size(scf_data.B, 1)
-        println("type of scf_data.density_array: $(typeof(scf_data.density_array))")
-        println("size of scf_data.density_array: $(size(scf_data.density_array))")
-        println("type of scf_data.B[Q_range_index]: $(typeof(scf_data.B[Q_range_index]))")
-        println("size of scf_data.B[Q_range_index]: $(size(scf_data.B[Q_range_index]))")
-        println("type of scf_data.V_batches[Q_range_index]: $(typeof(scf_data.V_batches[Q_range_index]))")
-        println("size of scf_data.V_batches[Q_range_index]: $(size(scf_data.V_batches[Q_range_index]))")
-        
         BLAS.gemv!('N', 1.0, scf_data.B[Q_range_index], scf_data.density_array, 0.0, scf_data.V_batches[Q_range_index])
-        BLAS.gemv!('T', 2.0, scf_data.B[Q_range_index], scf_data.coulomb_intermediate, 0.0, scf_data.J[Q_range_index])
+        BLAS.gemv!('T', 2.0, scf_data.B[Q_range_index], scf_data.V_batches[Q_range_index], 0.0, scf_data.J[Q_range_index])
         copy_screened_coulomb_to_fock!(scf_data, scf_data.J[Q_range_index], scf_data.two_electron_fock)
     end
 end
 
-function calculate_coulomb_intermediate_sym(scf_data, scf_options)
-    sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
 
+function calculate_coulomb_symmetric_range(scf_data::SCFData,screening_data::ScreeningData, scf_options::SCFOptions, pp::Int64)
+    if do_screening(scf_options)
+        if pp == scf_data.μ
+            return scf_data.screening_data.sparse_p_start_indices[pp]:scf_data.screening_data.screened_indices_count
+        end
+        range_start = scf_data.screening_data.sparse_p_start_indices[pp]
+        range_end = scf_data.screening_data.sparse_p_start_indices[pp+1] - 1
+        return range_start:range_end
+    else
+        return (pp-1)*scf_data.μ + 1:pp*scf_data.μ
+    end
+end
+
+function calculate_dfrhf_coulomb_intermediate_sym!(scf_data, scf_options)
+    sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
     blas_threads = BLAS.get_num_threads()
     V_time = @elapsed begin 
         last_blas_add_time = 0.0
@@ -45,7 +56,7 @@ function calculate_coulomb_intermediate_sym(scf_data, scf_options)
             W = scf_data.W_batches[Q_range_index]
             V = scf_data.V_batches[Q_range_index]
             rank_Q = size(B, 1)
-            Threads.@threads for tt in 1:n_threads
+            for tt in 1:n_threads
                 p_thread_start = (tt - 1) * num_p_per_thread + 1
                 p_thread_end =  tt * num_p_per_thread
                 if tt == n_threads
@@ -57,17 +68,17 @@ function calculate_coulomb_intermediate_sym(scf_data, scf_options)
                     if pp != p_thread_start
                         beta = 1.0
                     end
-                    range = calculate_coulomb_symmetric_range(scf_data.screening_data, scf_options, pp)
+                    range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, pp)
                     BLAS.gemv!('N', 1.0, 
                         view(B, :, range), 
                         view(scf_data.density_array, range),
                         beta, thread_V) 
                 end
                 if tt == n_threads
-                    last_range = calculate_coulomb_symmetric_range(scf_data.screening_data, scf_options, scf_data.μ)
+                    last_range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, scf_data.μ)
                     last_blas_add_time = @elapsed begin
                         BLAS.gemv!('N', 1.0, 
-                        view(B, :, size(B, 2)),
+                        view(B, :, last_range),
                         view(scf_data.density_array, last_range),
                         0.0, V)
                     end
@@ -87,7 +98,8 @@ function calculate_coulomb_intermediate_sym(scf_data, scf_options)
 end
 
 function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions)
-    
+    blas_threads = BLAS.get_num_threads()
+    p = scf_data.μ
     J_time = @elapsed begin
         # do symm J 
         num_Q_ranges = length(scf_data.B)
@@ -95,15 +107,15 @@ function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions)
             V = scf_data.V_batches[Q_range_index]
             B = scf_data.B[Q_range_index]
             Threads.@threads for pp in 1:(p-1) #todo use call_gemv to remove view usage?
-                range = calculate_coulomb_symmetric_range(scf_data.screening_data, scf_options, pp)
+                range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, pp)
                 BLAS.gemv!('T', 2.0,
                     view(B, :, range),
                     V,
                     0.0, view(scf_data.J[Q_range_index], range))
                 if pp == p-1
-                    last_range = calculate_coulomb_symmetric_range(scf_data.screening_data, scf_options, scf_data.μ)
+                    last_range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, scf_data.μ)
                     BLAS.gemv!('T', 2.0,
-                        view(B, :, size(B, 2)),
+                        view(B, :, last_range),
                         V,
                         0.0, view(scf_data.J[Q_range_index], last_range))
                 end
@@ -113,11 +125,6 @@ function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions)
     end
    
     BLAS.set_num_threads(blas_threads)
-end
-
-function calculate_dfrhf_coulomb_sym!(scf_data::SCFData, scf_options::SCFOptions)
-    calculate_dfrhf_coulomb_intermediate_sym(scf_data, scf_options)
-    calculate_dfrhf_J_sym!(scf_data, scf_options)
 end
 
 
@@ -130,18 +137,7 @@ function calculate_density!(scf_data::SCFData, scf_options::SCFOptions, occupied
     if do_screening(scf_options)
         copy_screened_density_to_array(scf_data)
     else
-        scf_data.density_array = reshape(scf_data.density, scf_data.μ * scf_data.μ)
+        scf_data.density_array = reshape(scf_data.density, scf_data.μ * scf_data.μ) # reshape the density matrix to a vector for gemv! density_array is used in the coulomb calculation
     end
     BLAS.set_num_threads(blas_threads)
-end
-
-function calculate_coulomb_symmetric_range(screening_data::ScreeningData, scf_options::SCFOptions, pp::Int64)
-    if do_screening(scf_options)
-        return calculate_screened_coulomb_symmetric_range(screening_data, pp)
-        range_start = scf_data.screening_data.sparse_p_start_indices[pp]
-        range_end = scf_data.screening_data.sparse_p_start_indices[pp+1] - 1
-        return range_start:range_end
-    else
-        return (pp-1)*scf_data.μ + 1:pp*scf_data.μ
-    end
 end

@@ -36,7 +36,8 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
             two_center_integrals, basis_sets, jc_timing)
         allocate_dfrhf_memory_cpu!(scf_data, scf_options, basis_sets)
-        calculate_dfrhf_B!(scf_data, scf_options, two_center_integrals, basis_sets, 
+        J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals)
+        calculate_dfrhf_B!(scf_data, scf_options, J_PQ_INV, basis_sets, 
         jeri_engine_thread_df, jc_timing)
     end
 
@@ -47,6 +48,9 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
     calculate_dfrhf_exchange!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
     calculate_dfrhf_coulomb!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
+
+    scf_data.two_electron_fock .+= H
+    return scf_data.two_electron_fock
 end
 
 
@@ -66,37 +70,50 @@ function calculate_J_PQ_inv!(two_center_integrals::Array{T}) where {T<:Union{Flo
     end
     return two_center_integrals
 end
-
-function calculate_dfrhf_B!(scf_data::SCFData, scf_options, two_center_integrals::Array{T}, basis_sets::CalculationBasisSets, 
+# documentation: 
+# calculate_dfrhf_B!(scf_data::SCFData, scf_options, two_center_integrals::Array{T}, basis_sets::CalculationBasisSets,
+#         jeri_engine_thread_df, jc_timing::JCTiming) where {T <:Union{Float32, Float64}}
+#          
+# This function calculates the B matrix for the Density Fitted Restricted Hartree-Fock method.
+# It uses the two-center integrals and the J_PQ_INV matrix to calculate the B
+# matrix for each MPI rank. The B matrix is calculated by performing a matrix multiplication
+# between the J_PQ_INV matrix and the three-center integrals. 
+# B^Q_{pq} = (pq|P)*J^{-1/2}_{PQ}
+function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, basis_sets::CalculationBasisSets, 
         jeri_engine_thread_df, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
 
     comm = MPI.COMM_WORLD
     this_rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
 
-    J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals)
     
     pq = scf_data.screening_data.screened_indices_count
-
-    #divide the B_Q indicies that will go to each rank 
-    load_balance_indicies = [static_load_rank_indicies_3_eri(rank_index, n_ranks, basis_sets) for rank_index in 0:n_ranks-1]
-    three_eri_rank_indicies = load_balance_indicies[this_rank+1][2]
-    this_rank_B_Q_index_range = load_balance_indicies[this_rank+1][2]
-    
-    this_rank_Q_length = length(this_rank_B_Q_index_range)
 
     three_eri_time = 0.0
     B_time = 0.0
 
     num_batches = length(scf_data.Q_ranges)
 
+
+    if n_ranks == 1 && num_batches == 1
+        calculate_dfrhf_B_symmetric(scf_data, scf_options, J_PQ_INV, basis_sets, 
+            jeri_engine_thread_df, jc_timing)
+        return
+    end
+
+     #divide the B_Q indicies that will go to each rank 
+    load_balance_indicies = [static_load_rank_indicies_3_eri(rank_index, n_ranks, basis_sets) for rank_index in 0:n_ranks-1]
+    three_eri_rank_indicies = load_balance_indicies[this_rank+1][2]
+    this_rank_B_Q_index_range = load_balance_indicies[this_rank+1][2]
+    
+    this_rank_Q_length = length(this_rank_B_Q_index_range)
     J_PQ_INV_for_batches = Vector{Array}(undef, num_batches)
+
     for ii in 1:num_batches
         this_batch_indicies = this_rank_B_Q_index_range[scf_data.Q_ranges[ii]] # convert from 1-based Q range indicies to indicies in the full 1:num_aux_basis_functions
         J_PQ_INV_for_batches[ii] = J_PQ_INV[this_batch_indicies, :] # this allocates memory perhaps needs to be done another way
     end
-    # this_rank_J_AB_INV = J_AB_INV[this_rank_B_Q_index_range, :]
-    # do B[Q,pq] += J_AB_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
+    # do B[Q,pq] += J_PQ_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
     for other_rank in 0:n_ranks-1
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 
             basis_sets,
@@ -107,14 +124,28 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, two_center_integrals
             true, false)
         other_rank_Q_index_range = load_balance_indicies[other_rank+1][2] #range of indexes managed by rank: other rank 
         for batch_index in 1:num_batches
+            scf_data.B[batch_index] .= 0.0 #shouldn't be necessary but just in case
             B_time += @elapsed begin 
                 # this slicing could be on the other dimension and then gemm transposed? TODO(JJH)
-                J_AB_INV_ranks_slice = J_PQ_INV_for_batches[batch_index][:, other_rank_Q_index_range] #this allocates memory perhaps needs to be done another way
-                BLAS.gemm!('N', 'N', T(1.0), J_AB_INV_ranks_slice, three_center_integrals, T(1.0), scf_data.B[batch_index])
+                J_PQ_INV_ranks_slice = J_PQ_INV_for_batches[batch_index][:, other_rank_Q_index_range] #this allocates memory perhaps needs to be done another way
+                BLAS.gemm!('N', 'N', T(1.0), J_PQ_INV_ranks_slice, three_center_integrals, T(1.0), scf_data.B[batch_index])
             end 
         end
     end
 
+    jc_timing.timings[JCTC.B_time] = B_time
+    jc_timing.timings[JCTC.three_eri_time] = three_eri_time
+end
+
+#this method is used when there is only one MPI rank and one batch of Q indicies
+function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, basis_sets::CalculationBasisSets, 
+    jeri_engine_thread_df, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
+    this_rank = 0 
+    n_ranks = 1 
+
+    three_eri_time = @elapsed scf_data.B[1] = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
+    scf_data, this_rank, n_ranks, true, false)
+    B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_PQ_INV, scf_data.B[1])    
     jc_timing.timings[JCTC.B_time] = B_time
     jc_timing.timings[JCTC.three_eri_time] = three_eri_time
 end
@@ -158,13 +189,8 @@ function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions, 
         scf_data.W_batches[ii] = zeros(T, length(scf_data.Q_ranges[ii]), scf_data.occ ,scf_data.μ)
         scf_data.V_batches[ii] = zeros(T, length(scf_data.Q_ranges[ii]))
         scf_data.K[ii] = zeros(T, scf_data.μ, scf_data.μ)
-
-        if do_screened
-            scf_data.J[ii] = zeros(T, length(scf_data.Q_ranges[ii]), scf_data.μ, scf_data.screening_data.screened_indices_count)
-
-        else
-            scf_data.J[ii] = zeros(T, scf_data.μ*scf_data.μ)
-        end
+        scf_data.J[ii] = zeros(T, pq)
+  
     end
     # allocate Fock
 
@@ -174,7 +200,6 @@ function calculate_on_rank_ranges!(scf_data, scf_options::SCFOptions, aux_indici
     this_rank_Q_range_length = length(aux_indicies)
     num_Q_ranges = get_num_Q_ranges(scf_options, this_rank_Q_range_length)
 
-    println("num_Q_ranges: $num_Q_ranges, this_rank_Q_range_length: $this_rank_Q_range_length")
     scf_data.Q_ranges = Array{UnitRange{Int64}}(undef, num_Q_ranges)
     num_Q_per_range = this_rank_Q_range_length ÷ num_Q_ranges
     #the on rank ranges are indexed starting at 1, if it needs to be adjusted to all rank indicies
