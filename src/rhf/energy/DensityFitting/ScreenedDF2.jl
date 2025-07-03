@@ -1,6 +1,6 @@
 
 
-function do_screening(scf_options::SCFOptions)
+function do_dfrhf_screening(scf_options::SCFOptions)
     if scf_options.contraction_mode == Constants.SCF_Keywords.ContractionMode.screened || #screened CPU 
         scf_options.contraction_mode == Constants.SCF_Keywords.GPUAlgorithms.default # screened GPU
         return true
@@ -12,7 +12,7 @@ end
 function setup_dfrhf_screening!(scf_data::SCFData, scf_options::SCFOptions, jeri_engine_thread, two_center_integrals::Matrix{T}, 
     basis_sets::CalculationBasisSets, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
 
-    if !do_screening(scf_options)
+    if !do_dfrhf_screening(scf_options)
         return
     end
     

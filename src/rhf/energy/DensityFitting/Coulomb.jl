@@ -1,15 +1,11 @@
 function calculate_dfrhf_coulomb!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
     calculate_density!(scf_data, scf_options, occupied_orbital_coefficients)
     
-    scf_options.df_use_J_sym = true
-
-    if !scf_options.df_use_J_sym
-        calculate_dfrhf_coulomb_no_sym!(scf_data, scf_options)
-    else
+    if scf_options.df_use_J_sym
         calculate_dfrhf_coulomb_sym!(scf_data, scf_options)
+    else
+        calculate_dfrhf_coulomb_no_sym!(scf_data, scf_options)
     end
-
-    # mpi reduce the two-electron fock matrix
 end
 
 
@@ -28,7 +24,7 @@ end
 
 
 function calculate_coulomb_symmetric_range(scf_data::SCFData,screening_data::ScreeningData, scf_options::SCFOptions, pp::Int64)
-    if do_screening(scf_options)
+    if do_dfrhf_screening(scf_options)
         if pp == scf_data.μ
             return scf_data.screening_data.sparse_p_start_indices[pp]:scf_data.screening_data.screened_indices_count
         end
@@ -134,7 +130,7 @@ function calculate_density!(scf_data::SCFData, scf_options::SCFOptions, occupied
         BLAS.set_num_threads(1)
     end
     BLAS.gemm!('T', 'N', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, scf_data.density)
-    if do_screening(scf_options)
+    if do_dfrhf_screening(scf_options)
         copy_screened_density_to_array(scf_data)
     else
         scf_data.density_array = reshape(scf_data.density, scf_data.μ * scf_data.μ) # reshape the density matrix to a vector for gemv! density_array is used in the coulomb calculation

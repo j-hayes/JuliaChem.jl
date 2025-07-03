@@ -110,10 +110,6 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
             jc_timing.timings[JCTC.three_eri_time] = three_eri_time
         end
 
-        println("B[:,1]", scf_data.D[:,1])
-        println("B[:,5]", scf_data.D[:,5])
-        println("B[:,10]", scf_data.D[:,10])
-
         num_Q_ranges = get_num_Q_ranges(scf_options, scf_data.A)
         D_permutted = permutedims(scf_data.D, (2, 1)) 
         
@@ -251,10 +247,6 @@ function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_co
             calculate_K_lower_diagonal_block(scf_data, scf_options, jc_timing)
         end
     end
-
-
-    println("exchange: ")
-    display(scf_data.two_electron_fock)
 
     jc_timing.timings[JCTiming_key(JCTC.W_time, iteration)] = W_time    
     jc_timing.timings[JCTiming_key(JCTC.K_time, iteration)] = K_time

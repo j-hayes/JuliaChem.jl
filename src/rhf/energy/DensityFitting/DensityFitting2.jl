@@ -16,14 +16,16 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
     coefficients, iteration, scf_options::SCFOptions, H::Array{Float64},
     jc_timing::JCTiming) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
-    println("df_rhf_fock_build_2!")
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
 
+    scf_options.df_use_K_sym = true
+    scf_options.df_use_J_sym = true
+
+    println("float type for contraction: ", scf_options.contraction_float_type)
     
     if iteration == 1 
-        scf_options.df_exchange_n_blocks = 2
 
         aux_basis_function_count = basis_sets.auxillary.norb
         basis_function_count = basis_sets.primary.norb
@@ -34,33 +36,50 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
 
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
-        if do_screening(scf_options)
+        if do_dfrhf_screening(scf_options)
             setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
                 two_center_integrals, basis_sets, jc_timing)
+        else
+            setup_unscreened_screening_matricies(basis_sets, scf_data) #allows non-screened 3eri calculation to use same code as screened 3eri
         end
         
         scf_options.df_use_K_sym = true
         if scf_options.df_use_K_sym
-            println("setting up K symmetry for DF-RHF")
             setup_dfrhf_exchange_blocks!(scf_data, scf_options, jc_timing)
         end
-        println("K_block_width: ", scf_data.screening_data.K_block_width)
         allocate_dfrhf_memory_cpu!(scf_data, scf_options, basis_sets)
         J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals)
         calculate_dfrhf_B!(scf_data, scf_options, J_PQ_INV, basis_sets, 
         jeri_engine_thread_df, jc_timing)
     end
 
-    occupied_orbital_coefficients = coefficients[:,1:scf_data.occ]
-    if do_screening(scf_options)
-        occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
-    end
-
+    occupied_orbital_coefficients = get_occupied_orbital_coefficients(scf_data, scf_options, coefficients)
+   
     calculate_dfrhf_exchange!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
     calculate_dfrhf_coulomb!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
 
-    scf_data.two_electron_fock .+= H
-    return scf_data.two_electron_fock
+    if rank == 0
+        #add the core hamiltonian to the two electron fock matrix
+        scf_data.two_electron_fock .+= H
+    end
+
+    if n_ranks > 1
+        #reduce the two electron fock matrix to all ranks
+        MPI.Allreduce!(scf_data.two_electron_fock, scf_data.two_electron_fock, MPI.SUM, comm)
+    end
+
+    return scf_data.two_electron_fock   
+end
+
+function get_occupied_orbital_coefficients(scf_data::SCFData, scf_options::SCFOptions, coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
+    occupied_orbital_coefficients = coefficients[:,1:scf_data.occ]
+    occupied_orbital_coefficients = permutedims(occupied_orbital_coefficients, (2, 1))
+    if scf_options.contraction_float_type == Float64
+        return occupied_orbital_coefficients        
+    end
+    occupied_orbital_coefficients_mixed = zeros(scf_options.contraction_float_type, size(occupied_orbital_coefficients))
+    occupied_orbital_coefficients_mixed .= occupied_orbital_coefficients
+    return occupied_orbital_coefficients_mixed
 end
 
 
@@ -104,10 +123,11 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
 
     num_batches = length(scf_data.Q_ranges)
 
-
+    do_three_eri_screening = do_dfrhf_screening(scf_options)
     if n_ranks == 1 && num_batches == 1
         calculate_dfrhf_B_symmetric(scf_data, scf_options, J_PQ_INV, basis_sets, 
             jeri_engine_thread_df, jc_timing)
+       
         return
     end
 
@@ -124,6 +144,7 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
         J_PQ_INV_for_batches[ii] = J_PQ_INV[this_batch_indicies, :] # this allocates memory perhaps needs to be done another way
     end
     # do B[Q,pq] += J_PQ_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
+    println("do thre eri screening", do_three_eri_screening)
     for other_rank in 0:n_ranks-1
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 
             basis_sets,
@@ -131,8 +152,14 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
             scf_data,
             other_rank,
             n_ranks,
-            true, false)
+            do_three_eri_screening, false)
         other_rank_Q_index_range = load_balance_indicies[other_rank+1][2] #range of indexes managed by rank: other rank 
+
+        if !do_three_eri_screening
+            #reshape for matrix multiplication: todo move this to the three center integral calculation
+            three_center_integrals = reshape(three_center_integrals, (size(three_center_integrals,1), size(three_center_integrals,2)^2))
+        end
+
         for batch_index in 1:num_batches
             scf_data.B[batch_index] .= 0.0 #shouldn't be necessary but just in case
             B_time += @elapsed begin 
@@ -153,8 +180,15 @@ function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options, J_PQ_INV::A
     this_rank = 0 
     n_ranks = 1 
 
+    use_screening = do_dfrhf_screening(scf_options)
     three_eri_time = @elapsed scf_data.B[1] = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
-    scf_data, this_rank, n_ranks, true, false)
+    scf_data, this_rank, n_ranks, use_screening, false)
+
+    println("size of scf_data.B[1]: ", size(scf_data.B[1]))
+    if !use_screening
+        #reshape for matrix multiplication: todo move this to the three center integral calculation
+        scf_data.B[1] = reshape(scf_data.B[1], (size(scf_data.B[1],1), size(scf_data.B[1],2)^2))
+    end
     B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_PQ_INV, scf_data.B[1])    
     jc_timing.timings[JCTC.B_time] = B_time
     jc_timing.timings[JCTC.three_eri_time] = three_eri_time
@@ -178,7 +212,7 @@ function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions, 
     # divide MPI rank ranges into ranges for Mixed Precision
     num_ranges = calculate_on_rank_ranges!(scf_data, scf_options, aux_indicies)
 
-    do_screened = do_screening(scf_options)
+    do_screened = do_dfrhf_screening(scf_options)
     pq = scf_data.μ^2
     if do_screened
         pq = scf_data.screening_data.screened_indices_count

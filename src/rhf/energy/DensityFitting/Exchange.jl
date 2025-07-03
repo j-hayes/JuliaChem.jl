@@ -1,12 +1,18 @@
 function calculate_dfrhf_exchange!(scf_data::SCFData, scf_options::SCFOptions, occupied_orbital_coefficients::Array{T,2}, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
-    W_time = @elapsed calculate_W_screened!(scf_data, occupied_orbital_coefficients)
+    use_screening = do_dfrhf_screening(scf_options)
+    if use_screening
+        W_time = @elapsed calculate_dfrhf_W_screened!(scf_data, occupied_orbital_coefficients)
+    else
+        W_time = @elapsed calculate_dfrhf_W_noscreen!(scf_data, occupied_orbital_coefficients)
+    end
 
     if scf_options.df_use_K_sym
        K_time = @elapsed calculate_dfrhf_exchange_sym!(scf_data, scf_options, jc_timing)
     else
-        K_time = @elapsed calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients)
+       K_time = @elapsed calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients)
     end
 end
+
 
 function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
     p = scf_data.μ
@@ -98,6 +104,25 @@ function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOption
     
 end
 
+
+function calculate_dfrhf_W_noscreen!(scf_data::SCFData, occupied_orbital_coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
+    B = scf_data.B
+    W = scf_data.W_batches
+    p = scf_data.μ # number of basis functions
+    n_ooc = scf_data.occ # number of occupied orbitals
+    one_mixed = T(1.0)
+    zero_mixed = T(0.0)
+
+    num_Q_ranges = size(B, 1)
+    for Q_range_index in 1:num_Q_ranges
+        Q_size = size(scf_data.W_batches[Q_range_index],1)
+        B_reshape = reshape(B[Q_range_index], (Q_size*p, p))
+        W_reshape = reshape(W[Q_range_index], (n_ooc,Q_size*p))
+
+        BLAS.gemm!('N', 'T', one_mixed, occupied_orbital_coefficients, B_reshape, zero_mixed, W_reshape)
+    end
+end
+
 function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
 
     M = scf_data.μ 
@@ -106,6 +131,8 @@ function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficient
     float_type = typeof(scf_data.B[1][1,1])
     alpha = float_type(-1.0)
     beta = float_type(0.0)
+    left_transpose = true
+    right_transpose = false
 
     for Q_range_index in 1:num_Q_ranges
         # zero out two_electron_fock on first iteration only
@@ -119,7 +146,7 @@ function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficient
         B_ptr = pointer(scf_data.W_batches[Q_range_index], 1)
         C_ptr = pointer(scf_data.K[Q_range_index], 1)
 
-        call_gemm!(Val(true), Val(false), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr) 
+        call_gemm!(Val(left_transpose), Val(right_transpose), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr) 
     end
     #remove this if we put back C_ptr = pointer(scf_data.two_electron_fock, 1) in call_gemm!
     scf_data.two_electron_fock .= 0.0
@@ -134,7 +161,7 @@ function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficient
 end
 
 
-function calculate_W_screened!(scf_data::SCFData, occupied_orbital_coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
+function calculate_dfrhf_W_screened!(scf_data::SCFData, occupied_orbital_coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
 
     p = scf_data.μ # number of basis functions
     blas_threads = BLAS.get_num_threads()
@@ -183,6 +210,7 @@ function call_gemm!(transA::Val, transB::Val,
     alpha::T, A::Ptr{T}, B::Ptr{T},
     beta::T, C::Ptr{T}) where {T<:Union{Float32, Float64}}
 
+    #TODO pass bool instead of val and wrap val in this function 
     # Convert our compile-time transpose marker to a char for BLAS
     convtrans(V::Val{false}) = 'N'
     convtrans(V::Val{true}) = 'T'
