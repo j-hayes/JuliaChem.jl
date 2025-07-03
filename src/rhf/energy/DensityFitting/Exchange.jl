@@ -1,13 +1,102 @@
 function calculate_dfrhf_exchange!(scf_data::SCFData, scf_options::SCFOptions, occupied_orbital_coefficients::Array{T,2}, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
     W_time = @elapsed calculate_W_screened!(scf_data, occupied_orbital_coefficients)
-    scf_options.df_use_K_sym = false
+
     if scf_options.df_use_K_sym
-       error("Not imlemented yet")
+       K_time = @elapsed calculate_dfrhf_exchange_sym!(scf_data, scf_options, jc_timing)
     else
         K_time = @elapsed calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients)
     end
 end
 
+function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
+    p = scf_data.μ
+    occ = scf_data.occ
+
+    K_block_width = scf_data.screening_data.K_block_width
+    
+    transA = true
+    transB = false
+    alpha = -1.0
+    # first Q index beta = 0, subsequent has beta = 1 
+    beta = 0.0
+
+    M = K_block_width
+    N = K_block_width
+    
+   
+    n_threads = Threads.nthreads()
+    
+    blas_threads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
+    
+    exchange_blocks = scf_data.k_blocks
+    K_linear_indices = LinearIndices(exchange_blocks)
+    K_non_square_block_linear_indices = LinearIndices(scf_data.k_non_square_blocks)
+    lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
+    use_non_square_blocks = p % scf_options.df_exchange_n_blocks != 0
+
+    n_non_square_blocks = min(lower_triangle_length % n_threads, p % K_block_width)
+    index_times = zeros(Float64, lower_triangle_length + n_non_square_blocks)
+
+
+    k_block_p_limit = K_block_width * scf_options.df_exchange_n_blocks
+    k_block_q_limit = k_block_p_limit
+
+    scf_data.two_electron_fock .= 0.0 #zero out Fock matrix
+    num_Q_ranges = length(scf_data.W_batches)
+    #loop over the batches of Q ranges
+    for Q_range_index in 1:num_Q_ranges
+        W = scf_data.W_batches[Q_range_index]
+        Q = size(W, 1) 
+        K = Q * occ
+        linear_indices = LinearIndices(W)
+        Threads.@threads for index in lower_triangle_length:-1:1 
+            pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
+
+            p_start = (pp - 1) * K_block_width + 1
+            p_range = p_start:pp*K_block_width
+            if p_range[end] == k_block_p_limit
+                p_range = p_start:p
+            end
+            
+            q_start = (qq - 1) * K_block_width + 1
+            q_range = q_start:qq*K_block_width
+            if q_range[end] == k_block_q_limit
+                q_range = q_start:p
+            end
+
+            # Will be changing what W_index is
+            # pointers to place in memory where matrix multiplication will be done
+            A_ptr = pointer(W, linear_indices[1, 1, p_start])
+            B_ptr = pointer(W, linear_indices[1, 1, q_start])
+
+            if p_range[end] == p && q_range[end] == p && use_non_square_blocks #bottom corner block
+                C_ptr = pointer(scf_data.bottom_corner_k_block, 1)
+                call_gemm!(Val(transA), Val(transB), length(p_range), length(q_range), K, alpha, A_ptr, B_ptr, beta, C_ptr)
+                # will be .+=, need to zero out Fock matrix in first iteration at beginning of function
+                scf_data.two_electron_fock[p_range, q_range] .+= scf_data.bottom_corner_k_block
+            elseif (p_range[end] == p || q_range[end] == p) && use_non_square_blocks #non square block
+                C_ptr = pointer(scf_data.k_non_square_blocks, K_non_square_block_linear_indices[1,1, qq])
+                C_block = view(scf_data.k_non_square_blocks, :, :, qq)
+                call_gemm!(Val(transA), Val(transB), length(p_range), length(q_range), K, alpha, A_ptr, B_ptr, beta, C_ptr)
+                scf_data.two_electron_fock[p_range, q_range] .+= C_block
+                if pp != qq
+                    scf_data.two_electron_fock[q_range, p_range] .+= transpose(C_block) 
+                end
+            else #square block (normal)
+                C_ptr = pointer(exchange_blocks, K_linear_indices[1, 1, index])
+                call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
+                scf_data.two_electron_fock[p_range, q_range] .+= view(exchange_blocks, :,:, index)
+                if pp != qq
+                    scf_data.two_electron_fock[q_range, p_range] .+= transpose(view(exchange_blocks, :,:, index)) 
+                end
+            end
+        end#sync
+    end
+
+    BLAS.set_num_threads(blas_threads)
+    
+end
 
 function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
 
@@ -132,5 +221,67 @@ function call_gemm!(transA::Val, transB::Val,
     
 end
 
+function setup_dfrhf_exchange_blocks!(scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
+
+    K_block_width = 0
+    lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
+
+    if scf_data.μ < 100 #if the # of basis functions is small just do a dense calculation with one block
+        K_block_width = scf_data.μ
+        scf_options.df_exchange_n_blocks = 1
+    else
+        K_block_width = scf_data.μ ÷ scf_options.df_exchange_n_blocks
+    end
+    scf_data.screening_data.K_block_width = K_block_width
 
 
+    scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, lower_triangle_length)
+
+    the_batch_index = 1
+    exchange_batch_indexes = Array{Tuple{Int, Int}}(undef, lower_triangle_length)
+    for iii in 1:scf_options.df_exchange_n_blocks
+        for jjj in 1:iii
+            exchange_batch_indexes[the_batch_index] = (iii, jjj)
+            the_batch_index+=1
+        end
+    end
+      # println("scf_data.μ % scf_options.df_exchange_n_blocks = ", scf_data.μ % scf_options.df_exchange_n_blocks)
+    if scf_data.μ % scf_options.df_exchange_n_blocks != 0
+        non_square_size = K_block_width + scf_data.μ % scf_options.df_exchange_n_blocks
+        scf_data.k_non_square_blocks = zeros(Float64, non_square_size, K_block_width, scf_options.df_exchange_n_blocks)
+        scf_data.bottom_corner_k_block = zeros(Float64, non_square_size, non_square_size)
+    end
+
+    scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes
+
+    jc_timing.non_timing_data[JCTC.total_exchange_blocks] = string(lower_triangle_length)
+    jc_timing.non_timing_data[JCTC.df_exchange_n_blocks] = string(scf_options.df_exchange_n_blocks)
+end
+
+# Currently not used, to be brought back if this feature is resurected later if a 
+# appropriate method for systematically manipulating the input geometry such that it maximizes the 
+# number of screened blocks is found.
+function screen_exchange_blocks(lower_triangle_length::Int, scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
+    while block_index <= lower_triangle_length
+        pp, qq = exchange_batch_indexes[block_index]
+        if scf_options.df_screen_exchange     
+            p_range = (pp-1)*K_block_width+1:pp*K_block_width
+            q_range = (qq-1)*K_block_width+1:qq*K_block_width
+            total_non_screened_indices = sum(
+                view(scf_data.screening_data.basis_function_screen_matrix, p_range, q_range))
+            if total_non_screened_indices != 0 #skip where all are screened
+                push!(blocks_to_calculate, block_index) 
+                block_screen_matrix[pp, qq] = true
+            end
+        else
+            push!(blocks_to_calculate, block_index) 
+            block_screen_matrix[pp, qq] = true
+        end
+        block_index += 1
+    end
+    scf_data.screening_data.block_screen_matrix = block_screen_matrix
+    scf_data.screening_data.blocks_to_calculate = blocks_to_calculate
+
+    jc_timing.non_timing_data[JCTC.unscreened_exchange_blocks] = string(length(blocks_to_calculate))
+
+end

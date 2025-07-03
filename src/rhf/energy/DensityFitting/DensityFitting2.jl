@@ -23,6 +23,7 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
     
     if iteration == 1 
+        scf_options.df_exchange_n_blocks = 2
 
         aux_basis_function_count = basis_sets.auxillary.norb
         basis_function_count = basis_sets.primary.norb
@@ -33,8 +34,17 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
 
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
-        setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
-            two_center_integrals, basis_sets, jc_timing)
+        if do_screening(scf_options)
+            setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
+                two_center_integrals, basis_sets, jc_timing)
+        end
+        
+        scf_options.df_use_K_sym = true
+        if scf_options.df_use_K_sym
+            println("setting up K symmetry for DF-RHF")
+            setup_dfrhf_exchange_blocks!(scf_data, scf_options, jc_timing)
+        end
+        println("K_block_width: ", scf_data.screening_data.K_block_width)
         allocate_dfrhf_memory_cpu!(scf_data, scf_options, basis_sets)
         J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals)
         calculate_dfrhf_B!(scf_data, scf_options, J_PQ_INV, basis_sets, 
@@ -183,14 +193,13 @@ function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions, 
     scf_data.K = Vector{Array}(undef, num_ranges)
     scf_data.two_electron_fock = zeros(Float64, scf_data.μ, scf_data.μ)
     scf_data.density = zeros(Float64, scf_data.μ, scf_data.μ)
-
+    
     for ii in 1:num_ranges
         scf_data.B[ii] = zeros(T, length(scf_data.Q_ranges[ii]), pq)
         scf_data.W_batches[ii] = zeros(T, length(scf_data.Q_ranges[ii]), scf_data.occ ,scf_data.μ)
         scf_data.V_batches[ii] = zeros(T, length(scf_data.Q_ranges[ii]))
         scf_data.K[ii] = zeros(T, scf_data.μ, scf_data.μ)
-        scf_data.J[ii] = zeros(T, pq)
-  
+        scf_data.J[ii] = zeros(T, pq)  
     end
     # allocate Fock
 

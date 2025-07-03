@@ -632,6 +632,7 @@ function calculate_exchange_block_screen_matrix(scf_data, scf_options, default_n
     block_index = 1
     block_screen_matrix = zeros(Bool, scf_options.df_exchange_n_blocks, scf_options.df_exchange_n_blocks)
 
+    # screen blocks if they all pq pairs in the block are screened
     while block_index <= lower_triangle_length
         pp, qq = exchange_batch_indexes[block_index]
         if scf_options.df_screen_exchange     
