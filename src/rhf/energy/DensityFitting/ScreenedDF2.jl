@@ -9,8 +9,9 @@ function do_dfrhf_screening(scf_options::SCFOptions)
 end
 
 
-function setup_dfrhf_screening!(scf_data::SCFData, scf_options::SCFOptions, jeri_engine_thread, two_center_integrals::Matrix{T}, 
-    basis_sets::CalculationBasisSets, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
+function setup_dfrhf_screening!(scf_data::SCFData, scf_options::SCFOptions, jeri_engine_thread, two_center_integrals::Matrix, 
+    basis_sets::CalculationBasisSets, jc_timing::JCTiming) 
+    T = scf_options.contraction_float_type 
 
     if !do_dfrhf_screening(scf_options)
         return

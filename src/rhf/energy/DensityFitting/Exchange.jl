@@ -22,9 +22,9 @@ function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOption
     
     transA = true
     transB = false
-    alpha = -1.0
+    alpha = scf_options.contraction_float_type(-1.0)    
     # first Q index beta = 0, subsequent has beta = 1 
-    beta = 0.0
+    beta = scf_options.contraction_float_type(0.0)
 
     M = K_block_width
     N = K_block_width
@@ -229,7 +229,7 @@ function call_gemm!(transA::Val, transB::Val,
 
     #if T is Float32, use the single precision BLAS function
     if T == Float32
-        ccall((sgemm_32_, BLAS.libblas), Nothing,
+        ccall((:sgemm_64_, BLAS.libblas), Nothing,
         (Ref{UInt8}, Ref{UInt8}, Ref{BlasInt}, Ref{BlasInt},
             Ref{BlasInt}, Ref{T}, Ptr{T}, Ref{BlasInt},
             Ptr{T}, Ref{BlasInt}, Ref{T}, Ptr{T},
@@ -237,7 +237,7 @@ function call_gemm!(transA::Val, transB::Val,
         convtrans(transA), convtrans(transB), M, N, K,
         alpha, A, lda, B, ldb, beta, C, ldc)   
     elseif T == Float64
-        ccall((dgemm_64_, BLAS.libblas), Nothing,
+        ccall((:dgemm_64_, BLAS.libblas), Nothing,
         (Ref{UInt8}, Ref{UInt8}, Ref{BlasInt}, Ref{BlasInt},
             Ref{BlasInt}, Ref{T}, Ptr{T}, Ref{BlasInt},
             Ptr{T}, Ref{BlasInt}, Ref{T}, Ptr{T},
@@ -249,7 +249,7 @@ function call_gemm!(transA::Val, transB::Val,
     
 end
 
-function setup_dfrhf_exchange_blocks!(scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
+function setup_dfrhf_exchange_blocks!(FloatType::Type, scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
 
     K_block_width = 0
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
@@ -263,7 +263,7 @@ function setup_dfrhf_exchange_blocks!(scf_data::SCFData, scf_options::SCFOptions
     scf_data.screening_data.K_block_width = K_block_width
 
 
-    scf_data.k_blocks = zeros(Float64, K_block_width, K_block_width, lower_triangle_length)
+    scf_data.k_blocks = zeros(FloatType, K_block_width, K_block_width, lower_triangle_length)
 
     the_batch_index = 1
     exchange_batch_indexes = Array{Tuple{Int, Int}}(undef, lower_triangle_length)
@@ -276,8 +276,8 @@ function setup_dfrhf_exchange_blocks!(scf_data::SCFData, scf_options::SCFOptions
       # println("scf_data.μ % scf_options.df_exchange_n_blocks = ", scf_data.μ % scf_options.df_exchange_n_blocks)
     if scf_data.μ % scf_options.df_exchange_n_blocks != 0
         non_square_size = K_block_width + scf_data.μ % scf_options.df_exchange_n_blocks
-        scf_data.k_non_square_blocks = zeros(Float64, non_square_size, K_block_width, scf_options.df_exchange_n_blocks)
-        scf_data.bottom_corner_k_block = zeros(Float64, non_square_size, non_square_size)
+        scf_data.k_non_square_blocks = zeros(FloatType, non_square_size, K_block_width, scf_options.df_exchange_n_blocks)
+        scf_data.bottom_corner_k_block = zeros(FloatType, non_square_size, non_square_size)
     end
 
     scf_data.screening_data.exchange_batch_indexes = exchange_batch_indexes

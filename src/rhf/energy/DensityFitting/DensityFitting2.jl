@@ -23,7 +23,7 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
     scf_options.df_use_K_sym = true
     scf_options.df_use_J_sym = true
 
-    println("float type for contraction: ", scf_options.contraction_float_type)
+    # println("float type for contraction: ", scf_options.contraction_float_type)
     
     if iteration == 1 
 
@@ -45,10 +45,15 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         
         scf_options.df_use_K_sym = true
         if scf_options.df_use_K_sym
-            setup_dfrhf_exchange_blocks!(scf_data, scf_options, jc_timing)
+            setup_dfrhf_exchange_blocks!(scf_options.contraction_float_type, scf_data, scf_options, jc_timing)
         end
         allocate_dfrhf_memory_cpu!(scf_data, scf_options, basis_sets)
         J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals)
+
+        if scf_options.contraction_float_type != Float64
+            J_PQ_INV = convert(Array{scf_options.contraction_float_type}, J_PQ_INV)
+        end
+
         calculate_dfrhf_B!(scf_data, scf_options, J_PQ_INV, basis_sets, 
         jeri_engine_thread_df, jc_timing)
     end
@@ -144,7 +149,6 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
         J_PQ_INV_for_batches[ii] = J_PQ_INV[this_batch_indicies, :] # this allocates memory perhaps needs to be done another way
     end
     # do B[Q,pq] += J_PQ_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
-    println("do thre eri screening", do_three_eri_screening)
     for other_rank in 0:n_ranks-1
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 
             basis_sets,
@@ -158,6 +162,10 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
         if !do_three_eri_screening
             #reshape for matrix multiplication: todo move this to the three center integral calculation
             three_center_integrals = reshape(three_center_integrals, (size(three_center_integrals,1), size(three_center_integrals,2)^2))
+        end
+
+        if scf_options.contraction_float_type != Float64
+            three_center_integrals = convert(Array{scf_options.contraction_float_type}, three_center_integrals)
         end
 
         for batch_index in 1:num_batches
@@ -181,10 +189,9 @@ function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options, J_PQ_INV::A
     n_ranks = 1 
 
     use_screening = do_dfrhf_screening(scf_options)
-    three_eri_time = @elapsed scf_data.B[1] = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
+    three_eri_time = @elapsed scf_data.B[1] .= calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
     scf_data, this_rank, n_ranks, use_screening, false)
 
-    println("size of scf_data.B[1]: ", size(scf_data.B[1]))
     if !use_screening
         #reshape for matrix multiplication: todo move this to the three center integral calculation
         scf_data.B[1] = reshape(scf_data.B[1], (size(scf_data.B[1],1), size(scf_data.B[1],2)^2))
@@ -226,7 +233,7 @@ function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions, 
     scf_data.J = Vector{Array}(undef, num_ranges)
     scf_data.K = Vector{Array}(undef, num_ranges)
     scf_data.two_electron_fock = zeros(Float64, scf_data.μ, scf_data.μ)
-    scf_data.density = zeros(Float64, scf_data.μ, scf_data.μ)
+    scf_data.density = zeros(T, scf_data.μ, scf_data.μ)
     
     for ii in 1:num_ranges
         scf_data.B[ii] = zeros(T, length(scf_data.Q_ranges[ii]), pq)
