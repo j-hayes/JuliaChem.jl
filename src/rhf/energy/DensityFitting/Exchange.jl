@@ -254,6 +254,9 @@ function call_gemm!(transA::Val, transB::Val,
     
 end
 
+# setup the block sizes for the symmetric exchange algorithm 
+# allocates the k_blocks and k_non_square_blocks arrays in scf_data
+# also sets the exchange_batch_indexes which is used to determine which blocks to calculate
 function setup_dfrhf_exchange_blocks!(FloatType::Type, scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
 
     K_block_width = 0

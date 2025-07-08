@@ -20,9 +20,6 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
 
-    scf_options.df_use_K_sym = true
-    scf_options.df_use_J_sym = true
-
     # println("float type for contraction: ", scf_options.contraction_float_type)
     
     if iteration == 1 
@@ -33,8 +30,6 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         scf_data.μ = basis_function_count
         scf_data.A = aux_basis_function_count
         scf_data.occ = Int64(basis_sets.primary.nels)÷2
-
-
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
         if do_dfrhf_screening(scf_options)
             setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
@@ -43,7 +38,6 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
             setup_unscreened_screening_matricies(basis_sets, scf_data) #allows non-screened 3eri calculation to use same code as screened 3eri
         end
         
-        scf_options.df_use_K_sym = true
         if scf_options.df_use_K_sym
             setup_dfrhf_exchange_blocks!(scf_options.contraction_float_type, scf_data, scf_options, jc_timing)
         end
@@ -82,8 +76,7 @@ function get_occupied_orbital_coefficients(scf_data::SCFData, scf_options::SCFOp
     if scf_options.contraction_float_type == Float64
         return occupied_orbital_coefficients        
     end
-    occupied_orbital_coefficients_mixed = zeros(scf_options.contraction_float_type, size(occupied_orbital_coefficients))
-    occupied_orbital_coefficients_mixed .= occupied_orbital_coefficients
+    occupied_orbital_coefficients_mixed = convert(Array{scf_options.contraction_float_type}, occupied_orbital_coefficients)
     return occupied_orbital_coefficients_mixed
 end
 
@@ -113,26 +106,21 @@ end
 # matrix for each MPI rank. The B matrix is calculated by performing a matrix multiplication
 # between the J_PQ_INV matrix and the three-center integrals. 
 # B^Q_{pq} = (pq|P)*J^{-1/2}_{PQ}
-function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, basis_sets::CalculationBasisSets, 
+function calculate_dfrhf_B!(scf_data::SCFData, scf_options::SCFOptions, J_PQ_INV::Array{T}, basis_sets::CalculationBasisSets, 
         jeri_engine_thread_df, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
 
     comm = MPI.COMM_WORLD
     this_rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-
-    
     pq = scf_data.screening_data.screened_indices_count
-
     three_eri_time = 0.0
     B_time = 0.0
 
     num_batches = length(scf_data.Q_ranges)
-
     do_three_eri_screening = do_dfrhf_screening(scf_options)
     if n_ranks == 1 && num_batches == 1
         calculate_dfrhf_B_symmetric(scf_data, scf_options, J_PQ_INV, basis_sets, 
             jeri_engine_thread_df, jc_timing)
-       
         return
     end
 
@@ -169,10 +157,8 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
         end
 
         for batch_index in 1:num_batches
-            scf_data.B[batch_index] .= 0.0 #shouldn't be necessary but just in case
             B_time += @elapsed begin 
-                # this slicing could be on the other dimension and then gemm transposed? TODO(JJH)
-                J_PQ_INV_ranks_slice = J_PQ_INV_for_batches[batch_index][:, other_rank_Q_index_range] #this allocates memory perhaps needs to be done another way
+                J_PQ_INV_ranks_slice = view(J_PQ_INV_for_batches[batch_index], :, other_rank_Q_index_range)
                 BLAS.gemm!('N', 'N', T(1.0), J_PQ_INV_ranks_slice, three_center_integrals, T(1.0), scf_data.B[batch_index])
             end 
         end
@@ -183,7 +169,7 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, 
 end
 
 #this method is used when there is only one MPI rank and one batch of Q indicies
-function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options, J_PQ_INV::Array{T}, basis_sets::CalculationBasisSets, 
+function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options::SCFOptions, J_PQ_INV::Array{T}, basis_sets::CalculationBasisSets,
     jeri_engine_thread_df, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
     this_rank = 0 
     n_ranks = 1 
