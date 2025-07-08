@@ -18,6 +18,9 @@ function calculate_dfrhf_coulomb_no_sym!(scf_data::SCFData, scf_options::SCFOpti
     V_time = 0.0
     J_time = 0.0
     J_copy_time = 0.0
+    one = scf_options.contraction_float_type(1.0)
+    two = scf_options.contraction_float_type(2.0)
+    zero = scf_options.contraction_float_type(0.0)
     for Q_range_index in 1:size(scf_data.B, 1)
       V_time += @elapsed BLAS.gemv!('N', one, scf_data.B[Q_range_index], scf_data.density_array, zero, scf_data.V_batches[Q_range_index])
       J_time += @elapsed BLAS.gemv!('T', two, scf_data.B[Q_range_index], scf_data.V_batches[Q_range_index], zero, scf_data.J[Q_range_index])
