@@ -75,7 +75,7 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
 
   calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)
   
-  ThreadPinning.unpinthreads()
+  ThreadPinning.pinthreads(:affinitymask)
   BLAS.set_num_threads(1)
   return scf_data.two_electron_fock
 end
