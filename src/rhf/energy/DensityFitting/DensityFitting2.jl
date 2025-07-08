@@ -16,6 +16,10 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
     coefficients, iteration, scf_options::SCFOptions, H::Array{Float64},
     jc_timing::JCTiming) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
 
+    #todo this should be stored in scf_options instead of directly using Threads.nthreads()
+    BLAS.set_num_threads(Threads.nthreads())
+
+
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
@@ -64,9 +68,10 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
     if n_ranks > 1
         #reduce the two electron fock matrix to all ranks
-        MPI.Allreduce!(scf_data.two_electron_fock, scf_data.two_electron_fock, MPI.SUM, comm)
+        MPI_time = @elapsed MPI.Allreduce!(scf_data.two_electron_fock, MPI.SUM, comm)  
+        jc_timing.timings[JCTiming_key(JCTC.fock_MPI_time,iteration)] = MPI_time
     end
-
+    BLAS.set_num_threads(1)
     return scf_data.two_electron_fock   
 end
 
