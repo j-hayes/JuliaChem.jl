@@ -144,19 +144,15 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options::SCFOptions, J_PQ_INV
     end
     # do B[Q,pq] += J_PQ_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
     for other_rank in 0:n_ranks-1
+        
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 
             basis_sets,
             scf_options,
             scf_data,
             other_rank,
             n_ranks,
-            do_three_eri_screening, false)
+            true, false)
         other_rank_Q_index_range = load_balance_indicies[other_rank+1][2] #range of indexes managed by rank: other rank 
-
-        if !do_three_eri_screening
-            #reshape for matrix multiplication: todo move this to the three center integral calculation
-            three_center_integrals = reshape(three_center_integrals, (size(three_center_integrals,1), size(three_center_integrals,2)^2))
-        end
 
         if scf_options.contraction_float_type != Float64
             three_center_integrals = convert(Array{scf_options.contraction_float_type}, three_center_integrals)
