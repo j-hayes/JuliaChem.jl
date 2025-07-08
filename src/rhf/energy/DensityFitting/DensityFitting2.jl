@@ -60,8 +60,8 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
     occupied_orbital_coefficients = get_occupied_orbital_coefficients(scf_data, scf_options, coefficients)
    
-    calculate_dfrhf_exchange!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
-    calculate_dfrhf_coulomb!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing)
+    calculate_dfrhf_exchange!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
+    calculate_dfrhf_coulomb!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
 
     if rank == 0
         #add the core hamiltonian to the two electron fock matrix

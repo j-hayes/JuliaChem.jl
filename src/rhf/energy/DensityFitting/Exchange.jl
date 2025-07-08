@@ -1,5 +1,8 @@
-function calculate_dfrhf_exchange!(scf_data::SCFData, scf_options::SCFOptions, occupied_orbital_coefficients::Array{T,2}, jc_timing::JCTiming) where {T<:Union{Float32, Float64}}
+function calculate_dfrhf_exchange!(scf_data::SCFData, scf_options::SCFOptions, occupied_orbital_coefficients::Array{T,2}, 
+        jc_timing::JCTiming, iteration::Int) where {T<:Union{Float32, Float64}}
     use_screening = do_dfrhf_screening(scf_options)
+    W_time = 0.0
+    K_time = 0.0
     if use_screening
         W_time = @elapsed calculate_dfrhf_W_screened!(scf_data, occupied_orbital_coefficients)
     else
@@ -7,14 +10,16 @@ function calculate_dfrhf_exchange!(scf_data::SCFData, scf_options::SCFOptions, o
     end
 
     if scf_options.df_use_K_sym
-       K_time = @elapsed calculate_dfrhf_exchange_sym!(scf_data, scf_options, jc_timing)
+       K_time = @elapsed calculate_dfrhf_exchange_sym!(scf_data, scf_options)
     else
        K_time = @elapsed calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients)
     end
+    jc_timing.timings[JCTiming_key(JCTC.W_time,iteration)] = W_time
+    jc_timing.timings[JCTiming_key(JCTC.K_time,iteration)] = K_time
 end
 
 
-function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming)
+function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOptions)
     p = scf_data.μ
     occ = scf_data.occ
 
