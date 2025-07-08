@@ -35,6 +35,7 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         scf_data.A = aux_basis_function_count
         scf_data.occ = Int64(basis_sets.primary.nels)÷2
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
+        println("type of two center integrals: ", typeof(two_center_integrals))
         if do_dfrhf_screening(scf_options)
             setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
                 two_center_integrals, basis_sets, jc_timing)
@@ -163,7 +164,8 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options::SCFOptions, J_PQ_INV
 
         for batch_index in 1:num_batches
             B_time += @elapsed begin 
-                J_PQ_INV_ranks_slice = view(J_PQ_INV_for_batches[batch_index], :, other_rank_Q_index_range)
+                # J_PQ_INV_ranks_slice = view(J_PQ_INV_for_batches[batch_index], :, other_rank_Q_index_range)
+                J_PQ_INV_ranks_slice = J_PQ_INV_for_batches[batch_index][:, other_rank_Q_index_range]
                 BLAS.gemm!('N', 'N', T(1.0), J_PQ_INV_ranks_slice, three_center_integrals, T(1.0), scf_data.B[batch_index])
             end 
         end
@@ -182,7 +184,6 @@ function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options::SCFOptions,
     use_screening = do_dfrhf_screening(scf_options)
     three_eri_time = @elapsed scf_data.B[1] .= calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
     scf_data, this_rank, n_ranks, use_screening, false)
-
     if !use_screening
         #reshape for matrix multiplication: todo move this to the three center integral calculation
         scf_data.B[1] = reshape(scf_data.B[1], (size(scf_data.B[1],1), size(scf_data.B[1],2)^2))
