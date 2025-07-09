@@ -118,6 +118,8 @@ function calculate_dfrhf_W_noscreen!(scf_data::SCFData, occupied_orbital_coeffic
     one_mixed = T(1.0)
     zero_mixed = T(0.0)
 
+    BLAS.set_num_threads(Threads.nthreads()) # use all threads for BLAS
+
     num_Q_ranges = size(B, 1)
     for Q_range_index in 1:num_Q_ranges
         Q_size = size(scf_data.W_batches[Q_range_index],1)
@@ -130,6 +132,7 @@ end
 
 function calculate_dfrhf_exchange_no_sym!(scf_data, occupied_orbital_coefficients::Array{T,2}) where {T<:Union{Float32, Float64}}
 
+    BLAS.set_num_threads(Threads.nthreads()) # use all threads for BLAS
     M = scf_data.μ 
     N = scf_data.μ
     num_Q_ranges = size(scf_data.B,1)
@@ -180,8 +183,7 @@ function calculate_dfrhf_W_screened!(scf_data::SCFData, occupied_orbital_coeffic
     
 
     # builds non-screened coefficient matrix for each primary basis index (see Huang et al.) "To compute W in (4) ..."
-    # Threads.@threads for pp in 1:p
-    for pp in 1:p
+    Threads.@threads for pp in 1:p
         non_zero_r_index = 1
         for r in 1:p
             if scf_data.screening_data.basis_function_screen_matrix[r, pp]

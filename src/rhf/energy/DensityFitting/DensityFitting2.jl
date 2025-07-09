@@ -23,8 +23,6 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-
-    # println("float type for contraction: ", scf_options.contraction_float_type)
     
     if iteration == 1 
 
@@ -35,7 +33,6 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         scf_data.A = aux_basis_function_count
         scf_data.occ = Int64(basis_sets.primary.nels)÷2
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
-        println("type of two center integrals: ", typeof(two_center_integrals))
         if do_dfrhf_screening(scf_options)
             setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
                 two_center_integrals, basis_sets, jc_timing)
@@ -64,7 +61,8 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
 
     if rank == 0
         #add the core hamiltonian to the two electron fock matrix
-        scf_data.two_electron_fock .+= H
+        H_add_time = @elapsed scf_data.two_electron_fock .+= H
+        jc_timing.timings[JCTiming_key(JCTC.H_add_time,iteration)] = H_add_time
     end
 
     if n_ranks > 1
@@ -143,6 +141,7 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options::SCFOptions, J_PQ_INV
         J_PQ_INV_for_batches[ii] = J_PQ_INV[this_batch_indicies, :] # this allocates memory perhaps needs to be done another way
     end
     # do B[Q,pq] += J_PQ_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
+    println("num_ranges: ", num_batches)
     for other_rank in 0:n_ranks-1
         
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 

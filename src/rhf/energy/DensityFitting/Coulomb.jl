@@ -15,6 +15,8 @@ function calculate_dfrhf_coulomb_sym!(scf_data::SCFData, scf_options::SCFOptions
 end
 
 function calculate_dfrhf_coulomb_no_sym!(scf_data::SCFData, scf_options::SCFOptions , jc_timing::JCTiming, iteration::Int) 
+    blas_threads = BLAS.get_num_threads()
+    BLAS.set_num_threads(Threads.nthreads()) # use all threads for BLAS
     V_time = 0.0
     J_time = 0.0
     J_copy_time = 0.0
@@ -30,11 +32,13 @@ function calculate_dfrhf_coulomb_no_sym!(scf_data::SCFData, scf_options::SCFOpti
     jc_timing.timings[JCTiming_key(JCTC.V_time, iteration)] = V_time
     jc_timing.timings[JCTiming_key(JCTC.J_time, iteration)] = J_time
     jc_timing.timings[JCTiming_key(JCTC.copy_J_time, iteration)] = J_copy_time
+    
+    BLAS.set_num_threads(blas_threads) # restore the number of threads
 end
 
 
-function calculate_coulomb_symmetric_range(scf_data::SCFData,screening_data::ScreeningData, scf_options::SCFOptions, pp::Int64)
-    if do_dfrhf_screening(scf_options)
+function calculate_coulomb_symmetric_range(scf_data::SCFData,screening_data::ScreeningData, scf_options::SCFOptions, pp::Int64, do_screening::Bool)
+    if do_screening
         if pp == scf_data.μ
             return scf_data.screening_data.sparse_p_start_indices[pp]:scf_data.screening_data.screened_indices_count
         end
@@ -50,11 +54,11 @@ function calculate_dfrhf_coulomb_intermediate_sym!(scf_data::SCFData, scf_option
     sparse_pq_index_map = scf_data.screening_data.sparse_pq_index_map
     blas_threads = BLAS.get_num_threads()
     alpha = scf_options.contraction_float_type(1.0)
-    beta = scf_options.contraction_float_type(0.0)
+    BLAS.set_num_threads(1) # use one thread
+    do_screening = do_dfrhf_screening(scf_options)   
     V_time = @elapsed begin 
         last_blas_add_time = 0.0
         p = scf_data.μ
-        BLAS.set_num_threads(1)
         n_threads = min(Threads.nthreads(), p-1)
         num_p_per_thread = p ÷ n_threads
 
@@ -64,7 +68,7 @@ function calculate_dfrhf_coulomb_intermediate_sym!(scf_data::SCFData, scf_option
             W = scf_data.W_batches[Q_range_index]
             V = scf_data.V_batches[Q_range_index]
             rank_Q = size(B, 1)
-            for tt in 1:n_threads
+            Threads.@threads for tt in 1:n_threads
                 p_thread_start = (tt - 1) * num_p_per_thread + 1
                 p_thread_end =  tt * num_p_per_thread
                 if tt == n_threads
@@ -76,14 +80,14 @@ function calculate_dfrhf_coulomb_intermediate_sym!(scf_data::SCFData, scf_option
                     if pp != p_thread_start
                         beta = scf_options.contraction_float_type(1.0)
                     end
-                    range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, pp)
+                    range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, pp, do_screening)
                     BLAS.gemv!('N', alpha, 
                         view(B, :, range), 
                         view(scf_data.density_array, range),
                         beta, thread_V) 
                 end
                 if tt == n_threads  
-                    last_range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, scf_data.μ)
+                    last_range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, scf_data.μ, do_screening)
                     BLAS.gemv!('N', alpha, 
                     view(B, :, last_range),
                     view(scf_data.density_array, last_range),
@@ -102,36 +106,44 @@ end
 
 function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_timing::JCTiming, iteration::Int)
     blas_threads = BLAS.get_num_threads()
+    BLAS.set_num_threads(1)
     p = scf_data.μ
     alpha = scf_options.contraction_float_type(2.0)
     beta = scf_options.contraction_float_type(0.0)
+
     copy_J_time = 0.0
+    do_screening = do_dfrhf_screening(scf_options)
+    J_gemm_time = 0.0
+    last_gemm_time = 0.0
+    num_Q_ranges = length(scf_data.B)
+    
     J_time = @elapsed begin
         # do symm J 
-        num_Q_ranges = length(scf_data.B)
         for Q_range_index in 1:num_Q_ranges
             V = scf_data.V_batches[Q_range_index]
             B = scf_data.B[Q_range_index]
             Threads.@threads for pp in 1:(p-1) #todo use call_gemv to remove view usage?
-                range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, pp)
-                BLAS.gemv!('T', alpha,
-                    view(B, :, range),
+                range_start = scf_data.screening_data.sparse_pq_index_map[pp, pp]
+                range_end = scf_data.screening_data.sparse_p_start_indices[pp+1]-1
+                BLAS.gemv!('T', 2.0,
+                    view(B, :, range_start:range_end),
                     V,
-                    beta, view(scf_data.J[Q_range_index], range))
+                    0.0, view(scf_data.J[Q_range_index], range_start:range_end))
                 if pp == p-1
-                    last_range = calculate_coulomb_symmetric_range(scf_data,scf_data.screening_data, scf_options, scf_data.μ)
-                    BLAS.gemv!('T', alpha,
-                        view(B, :, last_range),
+                    range_start = scf_data.screening_data.screened_indices_count
+                    range_end = scf_data.screening_data.screened_indices_count
+                    BLAS.gemv!('T', 2.0,
+                        view(B, :, size(B, 2)),
                         V,
-                        beta, view(scf_data.J[Q_range_index], last_range))
+                        0.0, view(scf_data.J[Q_range_index], range_start:range_end))
                 end
             end
-            copy_J_time += @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J[Q_range_index], scf_data.two_electron_fock)
         end
+        copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J[1], scf_data.two_electron_fock)
     end
+    
     jc_timing.timings[JCTiming_key(JCTC.copy_J_time, iteration)] = copy_J_time
     jc_timing.timings[JCTiming_key(JCTC.J_time, iteration)] = J_time
-
     BLAS.set_num_threads(blas_threads)
 end
 
