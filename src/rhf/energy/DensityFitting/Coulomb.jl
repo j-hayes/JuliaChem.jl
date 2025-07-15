@@ -125,17 +125,17 @@ function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_t
             Threads.@threads for pp in 1:(p-1) #todo use call_gemv to remove view usage?
                 range_start = scf_data.screening_data.sparse_pq_index_map[pp, pp]
                 range_end = scf_data.screening_data.sparse_p_start_indices[pp+1]-1
-                BLAS.gemv!('T', 2.0,
+                BLAS.gemv!('T', alpha,
                     view(B, :, range_start:range_end),
                     V,
-                    0.0, view(scf_data.J[Q_range_index], range_start:range_end))
+                    beta, view(scf_data.J[Q_range_index], range_start:range_end))
                 if pp == p-1
                     range_start = scf_data.screening_data.screened_indices_count
                     range_end = scf_data.screening_data.screened_indices_count
-                    BLAS.gemv!('T', 2.0,
+                    BLAS.gemv!('T', alpha,
                         view(B, :, size(B, 2)),
                         V,
-                        0.0, view(scf_data.J[Q_range_index], range_start:range_end))
+                        beta, view(scf_data.J[Q_range_index], range_start:range_end))
                 end
             end
         end

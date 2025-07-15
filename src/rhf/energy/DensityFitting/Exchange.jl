@@ -25,11 +25,13 @@ function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOption
 
     K_block_width = scf_data.screening_data.K_block_width
     
+    FloatType = scf_options.contraction_float_type
+
     transA = true
     transB = false
-    alpha = scf_options.contraction_float_type(-1.0)    
+    alpha = FloatType(-1.0)    
     # first Q index beta = 0, subsequent has beta = 1 
-    beta = scf_options.contraction_float_type(0.0)
+    beta = FloatType(0.0)
 
     M = K_block_width
     N = K_block_width
@@ -41,7 +43,7 @@ function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOption
     BLAS.set_num_threads(1)
     
     exchange_blocks = scf_data.k_blocks
-    K_linear_indices = LinearIndices(exchange_blocks)
+    # K_linear_indices = LinearIndices(exchange_blocks)
     K_non_square_block_linear_indices = LinearIndices(scf_data.k_non_square_blocks)
     lower_triangle_length = get_triangle_matrix_length(scf_options.df_exchange_n_blocks)
     use_non_square_blocks = p % scf_options.df_exchange_n_blocks != 0
@@ -55,55 +57,86 @@ function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOption
 
     scf_data.two_electron_fock .= 0.0 #zero out Fock matrix
     num_Q_ranges = length(scf_data.W_batches)
+
+    total_num_blocks = num_Q_ranges * lower_triangle_length
     #loop over the batches of Q ranges
+    Q_range_focks = zeros(FloatType, p, p, num_Q_ranges)
+    bottom_corner_k_block_row_size = size(scf_data.bottom_corner_k_block, 1)
+    bottom_corner_k_block_col_size = size(scf_data.bottom_corner_k_block, 2)
+    non_square_k_blocks_row_size = size(scf_data.k_non_square_blocks, 1)
+    non_square_k_blocks_col_size = size(scf_data.k_non_square_blocks, 2)
+    non_square_k_blocks_count = size(scf_data.k_non_square_blocks, 3)
+    # Q_range_bottom_corner_focks = Vector{FloatType}(undef, num_Q_ranges)
+    Q_range_bottom_corner_focks = zeros(FloatType, bottom_corner_k_block_row_size, bottom_corner_k_block_col_size, num_Q_ranges)
+    Q_range_non_square_focks = zeros(FloatType, non_square_k_blocks_row_size, non_square_k_blocks_col_size, non_square_k_blocks_count, num_Q_ranges)
+    Q_range_exchange_blocks = zeros(FloatType, K_block_width, K_block_width, lower_triangle_length, num_Q_ranges)
+    K_linear_indices = LinearIndices(Q_range_exchange_blocks)
+
+    # for block_index in 1:total_num_blocks
+    # Threads.@threads for block_index in 1:total_num_blocks
+
     for Q_range_index in 1:num_Q_ranges
+        for index in 1:lower_triangle_length
+        # Q_range_index = (block_index - 1) ÷ lower_triangle_length + 1
+        # index = (block_index - 1) % lower_triangle_length + 1
         W = scf_data.W_batches[Q_range_index]
         Q = size(W, 1) 
         K = Q * occ
         linear_indices = LinearIndices(W)
-        Threads.@threads for index in lower_triangle_length:-1:1 
-            pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
-            p_start = (pp - 1) * K_block_width + 1
-            p_range = p_start:pp*K_block_width
-            if p_range[end] == k_block_p_limit
-                p_range = p_start:p
-            end
-            
-            q_start = (qq - 1) * K_block_width + 1
-            q_range = q_start:qq*K_block_width
-            if q_range[end] == k_block_q_limit
-                q_range = q_start:p
-            end
+        # println("Q range index: ", Q_range_index, " index: ", index, " block_index: ", block_index, " total_num_blocks: ", total_num_blocks)
+        
+        fock = view(Q_range_focks, :, :, Q_range_index)
 
-            # Will be changing what W_index is
-            # pointers to place in memory where matrix multiplication will be done
-            A_ptr = pointer(W, linear_indices[1, 1, p_start])
-            B_ptr = pointer(W, linear_indices[1, 1, q_start])
+        pp, qq = scf_data.screening_data.exchange_batch_indexes[index]
 
-            if p_range[end] == p && q_range[end] == p && use_non_square_blocks #bottom corner block
-                C_ptr = pointer(scf_data.bottom_corner_k_block, 1)
-                call_gemm!(Val(transA), Val(transB), length(p_range), length(q_range), K, alpha, A_ptr, B_ptr, beta, C_ptr)
-                # will be .+=, need to zero out Fock matrix in first iteration at beginning of function
-                scf_data.two_electron_fock[p_range, q_range] .+= scf_data.bottom_corner_k_block
-            elseif (p_range[end] == p || q_range[end] == p) && use_non_square_blocks #non square block
-                C_ptr = pointer(scf_data.k_non_square_blocks, K_non_square_block_linear_indices[1,1, qq])
-                C_block = view(scf_data.k_non_square_blocks, :, :, qq)
-                call_gemm!(Val(transA), Val(transB), length(p_range), length(q_range), K, alpha, A_ptr, B_ptr, beta, C_ptr)
-                scf_data.two_electron_fock[p_range, q_range] .+= C_block
-                if pp != qq
-                    scf_data.two_electron_fock[q_range, p_range] .+= transpose(C_block) 
-                end
-            else #square block (normal)
-                C_ptr = pointer(exchange_blocks, K_linear_indices[1, 1, index])
-                call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
-                scf_data.two_electron_fock[p_range, q_range] .+= view(exchange_blocks, :,:, index)
-                if pp != qq
-                    scf_data.two_electron_fock[q_range, p_range] .+= transpose(view(exchange_blocks, :,:, index)) 
-                end
+        p_start = (pp - 1) * K_block_width + 1
+        p_range = p_start:pp*K_block_width
+        if p_range[end] == k_block_p_limit
+            p_range = p_start:p
+        end
+        
+        q_start = (qq - 1) * K_block_width + 1
+        q_range = q_start:qq*K_block_width
+        if q_range[end] == k_block_q_limit
+            q_range = q_start:p
+        end
+
+        # Will be changing what W_index is
+        # pointers to place in memory where matrix multiplication will be done
+        A_ptr = pointer(W, linear_indices[1, 1, p_start])
+        B_ptr = pointer(W, linear_indices[1, 1, q_start])
+
+
+        if p_range[end] == p && q_range[end] == p && use_non_square_blocks #bottom corner block
+            C_ptr = pointer(Q_range_bottom_corner_focks, (Q_range_index - 1) * bottom_corner_k_block_row_size * bottom_corner_k_block_col_size + 1)
+            call_gemm!(Val(transA), Val(transB), length(p_range), length(q_range), K, alpha, A_ptr, B_ptr, beta, C_ptr)
+            # will be .+=, need to zero out Fock matrix in first iteration at beginning of function
+            fock[p_range, q_range] .+= scf_data.bottom_corner_k_block
+        elseif (p_range[end] == p || q_range[end] == p) && use_non_square_blocks #non square block
+            C_ptr = pointer(Q_range_non_square_focks, (Q_range_index - 1) * non_square_k_blocks_row_size * non_square_k_blocks_col_size * non_square_k_blocks_count + 1)
+            C_block = view(Q_range_non_square_focks, :, :, qq, Q_range_index)
+            call_gemm!(Val(transA), Val(transB), length(p_range), length(q_range), K, alpha, A_ptr, B_ptr, beta, C_ptr)
+            fock[p_range, q_range] .+= C_block
+            if pp != qq
+                fock[q_range, p_range] .+= transpose(C_block) 
             end
-        end#sync
-    end
+        else #square block (normal)
+            C_ptr = pointer(Q_range_exchange_blocks, K_linear_indices[1, 1, index, Q_range_index])
+            call_gemm!(Val(transA), Val(transB), M, N, K, alpha, A_ptr, B_ptr, beta, C_ptr)
+            fock[p_range, q_range] .+= view(Q_range_exchange_blocks, :,:, index, Q_range_index)
+            if pp != qq
+                fock[q_range, p_range] .+= transpose(view(Q_range_exchange_blocks, :,:, index, Q_range_index)) 
+            end
+        end
+
+        end
+    end#sync
+
+    #add the Q range focks to the two electron fock matrix
+    # for Q_range_index in 1:num_Q_ranges
+    #     scf_data.two_electron_fock .+= Q_range_focks[:, :, Q_range_index]
+    # end
 
     BLAS.set_num_threads(blas_threads)
     
