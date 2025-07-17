@@ -1,6 +1,7 @@
 function calculate_dfrhf_coulomb!(scf_data::SCFData, scf_options::SCFOptions, 
         occupied_orbital_coefficients::Array{T,2}, jc_timing::JCTiming, iteration::Int) where {T<:Union{Float32, Float64}}
     calculate_density!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
+    scf_options.df_use_J_sym = false
     if scf_options.df_use_J_sym
         calculate_dfrhf_coulomb_sym!(scf_data, scf_options, jc_timing, iteration)
     else
@@ -124,7 +125,7 @@ function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_t
             B = scf_data.B[Q_range_index]
             Threads.@threads for pp in 1:(p-1) #todo use call_gemv to remove view usage?
                 range_start = scf_data.screening_data.sparse_pq_index_map[pp, pp]
-                range_end = scf_data.screening_data.sparse_p_start_indices[pp+1]-1
+                range_end = scf_data.screening_data.sparse_pq_index_map[pp+1, pp+1]-1
                 BLAS.gemv!('T', alpha,
                     view(B, :, range_start:range_end),
                     V,

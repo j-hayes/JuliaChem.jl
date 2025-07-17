@@ -32,6 +32,13 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         scf_data.μ = basis_function_count
         scf_data.A = aux_basis_function_count
         scf_data.occ = Int64(basis_sets.primary.nels)÷2
+
+                #ranges for each MPI rank
+        shell_aux_indicies, aux_indicies, basis_index_map = static_load_rank_indicies(rank, n_ranks, basis_sets)
+        this_rank_Q_range_length = length(aux_indicies)
+        scf_options.num_Q_ranges = calculate_on_rank_ranges!(scf_data, scf_options, aux_indicies)
+        
+
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
         if do_dfrhf_screening(scf_options)
             setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
@@ -43,7 +50,8 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         if scf_options.df_use_K_sym
             setup_dfrhf_exchange_blocks!(scf_options.contraction_float_type, scf_data, scf_options, jc_timing)
         end
-        allocate_dfrhf_memory_cpu!(scf_data, scf_options, basis_sets)
+        
+        allocate_dfrhf_memory_cpu!(scf_data, scf_options)
         J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals)
 
         if scf_options.contraction_float_type != Float64
@@ -71,6 +79,15 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
         jc_timing.timings[JCTiming_key(JCTC.fock_MPI_time,iteration)] = MPI_time
     end
     BLAS.set_num_threads(1)
+
+    # display(scf_data.two_electron_fock)
+    # print the fock matrix for debugging in a table format in scientific notation with 8 decimal places
+    # for i in 1:scf_data.μ
+    #     for j in 1:scf_data.μ
+    #         print(@sprintf("%.8e ", scf_data.two_electron_fock[i,j]))
+    #     end
+    #     println()
+    # end
     return scf_data.two_electron_fock   
 end
 
@@ -141,7 +158,6 @@ function calculate_dfrhf_B!(scf_data::SCFData, scf_options::SCFOptions, J_PQ_INV
         J_PQ_INV_for_batches[ii] = J_PQ_INV[this_batch_indicies, :] # this allocates memory perhaps needs to be done another way
     end
     # do B[Q,pq] += J_PQ_INV[Q, P] * three_center_integrals[P,pq] where Q is the aux range managed by this_rank and P is the aux range managed by other_rank(s)
-    println("num_ranges: ", num_batches)
     for other_rank in 0:n_ranks-1
         
         three_eri_time += @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, 
@@ -178,11 +194,11 @@ function calculate_dfrhf_B_symmetric(scf_data::SCFData, scf_options::SCFOptions,
 
     use_screening = do_dfrhf_screening(scf_options)
     three_eri_time = @elapsed scf_data.B[1] .= calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
-    scf_data, this_rank, n_ranks, use_screening, false)
-    if !use_screening
-        #reshape for matrix multiplication: todo move this to the three center integral calculation
-        scf_data.B[1] = reshape(scf_data.B[1], (size(scf_data.B[1],1), size(scf_data.B[1],2)^2))
-    end
+    scf_data, this_rank, n_ranks, true, false)
+    # if !use_screening
+    #     #reshape for matrix multiplication: todo move this to the three center integral calculation
+    #     scf_data.B[1] = reshape(scf_data.B[1], (size(scf_data.B[1],1), size(scf_data.B[1],2)^2))
+    # end
     B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_PQ_INV, scf_data.B[1])    
     jc_timing.timings[JCTC.B_time] = B_time
     jc_timing.timings[JCTC.three_eri_time] = three_eri_time
@@ -194,17 +210,12 @@ end
 # 2) Auxiliary Ranges are divided into smaller ranges to allow for the ranges created for the Mixed Precision implementation 
 # These ranges in the tensor contractions for V,W,J,K are treated as equivalent. Reduction into the Rank Fock Matrix and the 
 # Reduction to the other MPI ranks are handled above these contraction functions. 
-function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions, basis_sets::CalculationBasisSets)
+function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions)
     T = scf_options.contraction_float_type 
-    rank = MPI.Comm_rank(MPI.COMM_WORLD)
-    n_ranks = MPI.Comm_size(MPI.COMM_WORLD) 
-
-    #ranges for each MPI rank
-    shell_aux_indicies, aux_indicies, basis_index_map = static_load_rank_indicies(rank, n_ranks, basis_sets)
-    this_rank_Q_range_length = length(aux_indicies)
+  
 
     # divide MPI rank ranges into ranges for Mixed Precision
-    num_ranges = calculate_on_rank_ranges!(scf_data, scf_options, aux_indicies)
+    num_ranges = scf_options.num_Q_ranges
 
     do_screened = do_dfrhf_screening(scf_options)
     pq = scf_data.μ^2
@@ -236,7 +247,7 @@ end
 function calculate_on_rank_ranges!(scf_data, scf_options::SCFOptions, aux_indicies)
     this_rank_Q_range_length = length(aux_indicies)
     num_Q_ranges = get_num_Q_ranges(scf_options, this_rank_Q_range_length)
-
+    scf_options.num_Q_ranges = num_Q_ranges
     scf_data.Q_ranges = Array{UnitRange{Int64}}(undef, num_Q_ranges)
     num_Q_per_range = this_rank_Q_range_length ÷ num_Q_ranges
     #the on rank ranges are indexed starting at 1, if it needs to be adjusted to all rank indicies
