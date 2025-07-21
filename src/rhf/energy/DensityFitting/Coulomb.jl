@@ -1,7 +1,6 @@
 function calculate_dfrhf_coulomb!(scf_data::SCFData, scf_options::SCFOptions, 
         occupied_orbital_coefficients::Array{T,2}, jc_timing::JCTiming, iteration::Int) where {T<:Union{Float32, Float64}}
     calculate_density!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
-    scf_options.df_use_J_sym = false
     if scf_options.df_use_J_sym
         calculate_dfrhf_coulomb_sym!(scf_data, scf_options, jc_timing, iteration)
     else
@@ -140,7 +139,9 @@ function calculate_dfrhf_J_sym!(scf_data::SCFData, scf_options::SCFOptions, jc_t
                 end
             end
         end
-        copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J[1], scf_data.two_electron_fock)
+        for Q_range_index in 1:num_Q_ranges
+            copy_J_time = @elapsed copy_screened_coulomb_to_fock!(scf_data, scf_data.J[Q_range_index], scf_data.two_electron_fock)
+        end
     end
     
     jc_timing.timings[JCTiming_key(JCTC.copy_J_time, iteration)] = copy_J_time
@@ -153,9 +154,7 @@ function calculate_density!(scf_data::SCFData, scf_options::SCFOptions,
     occupied_orbital_coefficients::Array{T,2}, jc_timing::JCTiming, iteration::Int) where {T<:Union{Float32, Float64}}
     blas_threads = BLAS.get_num_threads()
 
-    if scf_data.μ < 1000
-        BLAS.set_num_threads(1)
-    end
+    BLAS.set_num_threads(1)
     density_time = @elapsed begin
         BLAS.gemm!('T', 'N', T(1.0), occupied_orbital_coefficients, occupied_orbital_coefficients, T(0.0), scf_data.density)
         if do_dfrhf_screening(scf_options)

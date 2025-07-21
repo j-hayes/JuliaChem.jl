@@ -71,10 +71,12 @@ function calculate_dfrhf_exchange_sym!(scf_data::SCFData, scf_options::SCFOption
     end
 
     total_num_blocks = num_Q_ranges * lower_triangle_length
-    Threads.@sync for thread in 1:Threads.nthreads()
+    
+    num_threads = min(Threads.nthreads(), total_num_blocks)
+    Threads.@sync for thread in 1:num_threads
         Threads.@spawn begin
-            thread_block_range = (thread - 1) * total_num_blocks ÷ Threads.nthreads() + 1:thread * total_num_blocks ÷ Threads.nthreads()
-            if thread == Threads.nthreads()
+            thread_block_range = (thread - 1) * total_num_blocks ÷ num_threads + 1:thread * total_num_blocks ÷ num_threads
+            if thread == num_threads
                 thread_block_range = thread_block_range[1]:total_num_blocks #last thread gets the rest
             end
             for block_index in thread_block_range
