@@ -145,18 +145,21 @@ function create_scf_options(scf_flags)
     df_max_num_GPU_exchange_blocks = haskey(scf_flags, GPUAlgorithms.df_max_num_GPU_exchange_blocks) ?
         scf_flags[GPUAlgorithms.df_max_num_GPU_exchange_blocks] : GPUAlgorithms.df_max_num_GPU_exchange_blocks_default
 
-    do_mixed_precision = haskey(scf_flags, MixedPrecision.do_mixed_precision) ?
-        scf_flags[MixedPrecision.do_mixed_precision] : MixedPrecision.do_mixed_precision_default
-
+    # do_mixed_precision = haskey(scf_flags, MixedPrecision.do_mixed_precision) ?
+    #     scf_flags[MixedPrecision.do_mixed_precision] : MixedPrecision.do_mixed_precision_default
+    do_mixed_precision = false
     contraction_float_type = MixedPrecision.contraction_float_type_default 
     if haskey(scf_flags, MixedPrecision.contraction_float_type) && !isnothing(scf_flags[MixedPrecision.contraction_float_type])
         contraction_float_type_value = lowercase(scf_flags[MixedPrecision.contraction_float_type])
         if contraction_float_type_value == MixedPrecision.single_precision 
             contraction_float_type = Float32
+            do_mixed_precision = true
         elseif contraction_float_type_value ==  MixedPrecision.double_precision
             contraction_float_type = Float64
         elseif contraction_float_type_value == MixedPrecision.half_precision
             contraction_float_type = Float16
+            do_mixed_precision = true
+            error("Half precision is not supported yet, please use single or double precision for now.")
         else
             error("Density-fitting mixed precision level chosen: $(contraction_float_type_value) is not a valid option")
         end

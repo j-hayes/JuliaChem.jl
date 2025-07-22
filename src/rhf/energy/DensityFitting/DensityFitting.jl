@@ -53,7 +53,6 @@ function df_rhf_fock_build!(scf_data, jeri_engine_thread_df::Vector{T}, jeri_eng
     if scf_options.contraction_mode == "dense" || scf_options.df_force_dense 
       # df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df,
       # basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
-
       if scf_options.do_mixed_precision 
         df_rhf_fock_build_BLAS_mixed_precision!(scf_options.contraction_float_type, scf_data, jeri_engine_thread_df,
         basis_sets, occupied_orbital_coefficients, iteration, scf_options, jc_timing) 
@@ -139,28 +138,41 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
 
   n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
   rank = MPI.Comm_rank(MPI.COMM_WORLD)
-  
+  J_AB_invt = zeros(scf_options.contraction_float_type, (2,2))
   form_J_AB_inv_time = @elapsed begin
     if rank == 0 # avoid convergence problems always do this on rank 0
+      # if scf_options.contraction_float_type != Float64
+      #   two_center_integrals = scf_options.contraction_float_type.(two_center_integrals)
+      # end
       LAPACK.potrf!('L', two_center_integrals)
       LAPACK.trtri!('L', 'N', two_center_integrals)
     end
+    
+    J_AB_invt = zeros(scf_options.contraction_float_type, size(two_center_integrals))
+    J_AB_invt .= two_center_integrals
+
     if n_ranks > 1
-        broadcast_two_center_integrals(two_center_integrals)
+        broadcast_two_center_integrals(J_AB_invt)
     end
-    J_AB_invt = two_center_integrals
+
   end
+
   B_time = 0.0
   three_eri_time = 0.0
   three_center_integrals = []
- 
+  one = scf_options.contraction_float_type(1.0)
+  zero = scf_options.contraction_float_type(0.0)
+  
+  scf_data.D = zeros(scf_options.contraction_float_type, size(scf_data.D))
+
   if n_ranks == 1  #single rank case
     AA = scf_data.A
     three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
     scf_data, rank,n_ranks, false, false)
     
-    scf_data.D = three_center_integrals
-    B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
+    scf_data.D = zeros(scf_options.contraction_float_type, size(three_center_integrals))
+    scf_data.D .= three_center_integrals
+    B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', one, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
   else
 
     setup_unscreened_screening_matricies(basis_sets, scf_data)
@@ -274,8 +286,8 @@ occupied_orbital_coefficients_mixed = zeros(FloatT, size(occupied_orbital_coeffi
 occupied_orbital_coefficients_mixed .= occupied_orbital_coefficients
 scf_data.two_electron_fock .= 0.0
 
-calculate_coulomb_mixed_precision!(FloatT, scf_data, occupied_orbital_coefficients_mixed, iteration, Q_ranges, num_Q_ranges)
 calculate_exchange_mixed_precision!(FloatT, scf_data, occupied_orbital_coefficients_mixed, iteration, Q_ranges, num_Q_ranges)
+calculate_coulomb_mixed_precision!(FloatT, scf_data, occupied_orbital_coefficients_mixed, iteration, Q_ranges, num_Q_ranges)
 
 
 end
