@@ -369,7 +369,8 @@ function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, 
   ooc = occupied_orbital_coefficients
   B = scf_data.D
   W = scf_data.D_tilde
-  fock = scf_data.two_electron_fock
+  # fock = scf_data.two_electron_fock
+  fock = zeros(Float64, (p, p))
 
   W_time = @elapsed begin
     BLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q * p, p)), 0.0, reshape(W, (n_ooc, Q * p)))
@@ -380,6 +381,9 @@ function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, 
   jc_timing.timings[JCTiming_key(JCTC.W_time,iteration)] = W_time
   jc_timing.timings[JCTiming_key(JCTC.K_time,iteration)] = K_time
 
+  println("K")
+  display(fock)
+  scf_data.two_electron_fock += fock
 end
 
 function calculate_memory_usage(scf_data, iteration, scf_options, jc_timing)

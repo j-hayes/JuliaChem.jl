@@ -154,7 +154,13 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         jc_timing.non_timing_data[JCTC.contraction_algorithm] = "screened cpu"
     end
 
+    
     calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
+
+    # if iteration == 1
+    #     println("exchange")
+    #     display(scf_data.two_electron_fock)
+    # end
     calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing, iteration)
 
 end
@@ -235,6 +241,9 @@ function reduce_B_other_rank(B, length_of_B, rank, other_rank)
 end
 
 function calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing::JCTiming, iteration)
+
+
+
     W_time = @elapsed calculate_W_screened(scf_data, occupied_orbital_coefficients)
     
 
@@ -289,6 +298,10 @@ function calculate_W_screened(scf_data, occupied_orbital_coefficients)
         end
     end
     BLAS.set_num_threads(blas_threads)
+
+    println("non zero coeffs")
+    display(scf_data.non_zero_coefficients)
+
 end
 
 function calculate_K_small(scf_data)

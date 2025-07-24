@@ -388,9 +388,20 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   jeri_engine_thread_df = do_density_fitting ? [JERI.DFRHFTEIEngine(basis.basis_cxx, auxiliary_basis.basis_cxx, basis.shpdata_cxx, auxiliary_basis.shpdata_cxx) for thread in 1:nthreads ] : []
   jeri_engine_thread = [JERI.RHFTEIEngine(basis.basis_cxx, basis.shpdata_cxx)  for thread in 1:nthreads ]
   gpu_data = SCFGPUDataNone()
-  if scf_options.contraction_mode == "GPU"
-    gpu_data = get_default_gpu_data_cuda() #CUDA GPU
+  if scf_options.contraction_mode == "GPU" || scf_options.contraction_mode == "denseGPU"
+
+    # gpu_data = get_default_gpu_data_cuda() #CUDA GPU
+    #check if AMD is available
+
+    if CUDA_GPU_enabled()
+      gpu_data = get_default_gpu_data_cuda(scf_options.num_devices) #CUDA GPU
+      println("using CUDA GPU")
+    elseif AMD_GPU_enabled()
+      gpu_data = get_default_gpu_data_AMD(scf_options.num_devices) #AMD GPU
+      println("using AMD GPU")
+    end
   end
+
   scf_data = SCFData(gpu_data)
 
   density_fitting_converged = false
