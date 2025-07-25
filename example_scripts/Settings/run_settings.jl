@@ -27,7 +27,7 @@ function DF_RHF_screenedCPU()
     scf_keywords["scf_type"] = "df"
     # scf_keywords["ndiis"] = 2
     scf_keywords["guess"] = "hcore"
-    scf_keywords["dele"] = 1E-4
+    scf_keywords["dele"] = 1E-6
     scf_keywords["rmsd"] = 1E-4
     scf_keywords["df_sigma"] = 1E-6
     scf_keywords["load"] = "static"
@@ -60,8 +60,8 @@ function RHF_staticCPU()
     scf_keywords["scf_type"] = "rhf"
     scf_keywords["guess"] = "hcore"
     scf_keywords["load"] = "static"
-    scf_keywords["dele"] = 1E-4
-    scf_keywords["rmsd"] = 1E-4
+    scf_keywords["dele"] = 1E-6
+    scf_keywords["rmsd"] = 1E-6
     scf_keywords["niter"] = 50
     return scf_keywords
 end
@@ -76,8 +76,8 @@ function DF_RHF_GPU_adaptive()
     scf_keywords = Dict{String,Any}()
     scf_keywords["scf_type"] = "df"
     scf_keywords["guess"] = "hcore"
-    scf_keywords["dele"] = 1E-4
-    scf_keywords["rmsd"] = 1E-4
+    scf_keywords["dele"] = 1E-6
+    scf_keywords["rmsd"] = 1E-6
     scf_keywords["df_sigma"] = 1E-6
     scf_keywords["load"] = "static"
     scf_keywords["contraction_mode"] = "GPU"
@@ -95,8 +95,8 @@ function DF_RHF_GPU_dense()
     scf_keywords = Dict{String,Any}()
     scf_keywords["scf_type"] = "df"
     scf_keywords["guess"] = "hcore"
-    scf_keywords["dele"] = 1E-4
-    scf_keywords["rmsd"] = 1E-4
+    scf_keywords["dele"] = 1E-6
+    scf_keywords["rmsd"] = 1E-6
     scf_keywords["df_sigma"] = 1E-6
     scf_keywords["load"] = "static"
     scf_keywords["contraction_mode"] = "GPU"

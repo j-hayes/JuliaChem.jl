@@ -206,6 +206,8 @@ function calculate_dfrhf_W_screened!(scf_data::SCFData, occupied_orbital_coeffic
     alpha = T(1.0)
     beta = T(0.0)
     
+    println("type T: ", T)
+    
 
     # builds non-screened coefficient matrix for each primary basis index (see Huang et al.) "To compute W in (4) ..."
     Threads.@threads for pp in 1:p

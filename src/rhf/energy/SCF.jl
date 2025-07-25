@@ -391,7 +391,15 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   if scf_options.contraction_mode == "GPU"
     gpu_data = get_default_gpu_data_cuda() #CUDA GPU
   end
-  scf_data = SCFData(gpu_data)
+
+  mixed_precision_scf_data_dict = Dict{Type,SCFData}()
+  if scf_options.do_mixed_precision
+    mixed_precision_scf_data_dict[Float32] = SCFData(gpu_data)
+    mixed_precision_scf_data_dict[Float64] = SCFData(gpu_data)
+  else
+    mixed_precision_scf_data_dict[Float64] = SCFData(gpu_data)
+  end
+  scf_data = mixed_precision_scf_data_dict[Float64]
 
   density_fitting_converged = false
 
@@ -461,8 +469,25 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = fock_build_end_time - fock_build_start_time 
     else
       MPI.Bcast!(C, 0, comm)
-      fock_build_time = @elapsed F = df_rhf_fock_build_2!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
-      # fock_build_time = @elapsed F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
+
+      use_switch_precision = false
+      if haskey(ENV, "SWITCH_PRECISION") && ENV["SWITCH_PRECISION"] == "true"
+        use_switch_precision = true
+      end
+
+      switch_precision = iter > 1 && (abs(ΔE) <= .001 || iter >= 15) &&
+         scf_options.contraction_float_type != Float64 && use_switch_precision
+      if switch_precision 
+        scf_options.contraction_float_type = Float64
+      end
+
+      if haskey(ENV, "USE_NEW_CODE") && ENV["USE_NEW_CODE"] == "true"
+        fock_build_time = @elapsed F = df_rhf_fock_build_2!(mixed_precision_scf_data_dict, jeri_engine_thread_df, jeri_engine_thread, 
+          basis_sets, C, iter, scf_options, H, jc_timing, switch_precision)
+      else
+        fock_build_time = @elapsed F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
+      end
+    
       jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = fock_build_time
     end
     

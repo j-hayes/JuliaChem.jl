@@ -42,12 +42,13 @@ mutable struct SCFData
     V_batches::Vector{Array} 
     Q_ranges::Vector{UnitRange{Int}} # ranges of the auxiliary basis functions for on a rank, used for mixed precision DF-RHF
     thread_focks # fock matrices for each thread, used for mixed precision DF-RHF
+    allocated::Bool
 end
 
 function SCFData(gpu_data::SCFGPUData)
     sd = ScreeningData([], [], [], [], [], [], [], falses(1, 1), zeros(Int, 0), Array{Tuple{Int,Int}}(undef, 0),
         Array{Array{UnitRange{Int}}}(undef, 0), Array{Array{UnitRange{Int}}}(undef, 0), 0, 0, 0)
-    return SCFData([], [], [], [], [],[], [], [],[], [], [], [], [], sd, gpu_data, 0, 0, 0, 0, 0, [], [], [], [], [])
+    return SCFData([], [], [], [], [],[], [], [],[], [], [], [], [], sd, gpu_data, 0, 0, 0, 0, 0, [], [], [], [], [], false)
 end
 
 export SCFData, ScreeningData

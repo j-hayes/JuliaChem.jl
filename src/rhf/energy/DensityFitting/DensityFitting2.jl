@@ -11,7 +11,7 @@
     jc_timing::JCTiming -> struct with timing information for the SCF calculation
 ==#
 
-function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T}, jeri_engine_thread ::Vector{T2},
+function df_rhf_fock_build_2!(mixed_precision_scf_data_dict::Dict{Type,SCFData}, jeri_engine_thread_df::Vector{T}, jeri_engine_thread ::Vector{T2},
     basis_sets::CalculationBasisSets,
     coefficients, iteration, scf_options::SCFOptions, H::Array{Float64},
     jc_timing::JCTiming, switch_precision::Bool=false) where {T<:DFRHFTEIEngine, T2<:RHFTEIEngine }
@@ -23,45 +23,83 @@ function df_rhf_fock_build_2!(scf_data::SCFData, jeri_engine_thread_df::Vector{T
     comm = MPI.COMM_WORLD
     rank = MPI.Comm_rank(comm)
     n_ranks = MPI.Comm_size(comm)
-    if iteration == 1 || switch_precision   
-        # if rank == 0 && switch_precision
-        #     println("switching to precision: ", scf_options.contraction_float_type)
-        # end
-        aux_basis_function_count = basis_sets.auxillary.norb
-        basis_function_count = basis_sets.primary.norb
-  
-        scf_data.μ = basis_function_count
-        scf_data.A = aux_basis_function_count
-        scf_data.occ = Int64(basis_sets.primary.nels)÷2
-
-                #ranges for each MPI rank
-        shell_aux_indicies, aux_indicies, basis_index_map = static_load_rank_indicies(rank, n_ranks, basis_sets)
-        this_rank_Q_range_length = length(aux_indicies)
-        scf_options.num_Q_ranges = calculate_on_rank_ranges!(scf_data, scf_options, aux_indicies)
-        
-
+    scf_data = mixed_precision_scf_data_dict[scf_options.contraction_float_type] 
+    #THE BELOW CHANGES ARE CURSED DO NOT CHECK THEM INTO THE MAIN MIXED PRECISION BRANCH
+    # OR ESPECIALLY NOT INTO THE MAIN BRANCH
+    if iteration == 1 || switch_precision
         two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
-        if do_dfrhf_screening(scf_options)
-            setup_dfrhf_screening!(scf_data, scf_options, jeri_engine_thread, 
-                two_center_integrals, basis_sets, jc_timing)
-        else
-            setup_unscreened_screening_matricies(basis_sets, scf_data) #allows non-screened 3eri calculation to use same code as screened 3eri
-        end
-        
-        if scf_options.df_use_K_sym
-            setup_dfrhf_exchange_blocks!(scf_options.contraction_float_type, scf_data, scf_options, jc_timing)
-        end
-        
-        allocate_dfrhf_memory_cpu!(scf_data, scf_options)
-        J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals, scf_options)
 
-        # if scf_options.contraction_float_type != Float64
-        #     J_PQ_INV = convert(Array{scf_options.contraction_float_type}, J_PQ_INV)
-        # end
+        temp_scf_options_contraction_float_type = scf_options.contraction_float_type
 
-        calculate_dfrhf_B!(scf_data, scf_options, J_PQ_INV, basis_sets, 
-        jeri_engine_thread_df, jc_timing)
+        calculate_B_float_type = scf_options.contraction_float_type
+        if haskey(ENV, "USE_FP_64_FOR_B") && ENV["USE_FP_64_FOR_B"] == "true" && iteration == 1
+            calculate_B_float_type = Float64
+        end
+        if rank == 0
+            println("calculating B using precision: ", calculate_B_float_type)
+        end
+        for (scf_data_contraction_type, scf_data_loop) in mixed_precision_scf_data_dict
+
+            if scf_data_loop.allocated
+                continue
+            end
+            scf_options.contraction_float_type = scf_data_contraction_type
+            aux_basis_function_count = basis_sets.auxillary.norb
+            basis_function_count = basis_sets.primary.norb
+            scf_data_loop.μ = basis_function_count
+            scf_data_loop.A = aux_basis_function_count
+            scf_data_loop.occ = Int64(basis_sets.primary.nels)÷2
+
+            shell_aux_indicies, aux_indicies, basis_index_map = static_load_rank_indicies(rank, n_ranks, basis_sets)
+            scf_options.num_Q_ranges = calculate_on_rank_ranges!(scf_options, aux_indicies)
+          
+
+            if do_dfrhf_screening(scf_options)
+                setup_dfrhf_screening!(scf_data_loop, scf_options, jeri_engine_thread,
+                    two_center_integrals, basis_sets, jc_timing)
+            else
+                setup_unscreened_screening_matricies(basis_sets, scf_data_loop) #allows non-screened 3eri calculation to use same code as screened 3eri
+            end
+            if scf_options.df_use_K_sym
+                setup_dfrhf_exchange_blocks!(scf_options.contraction_float_type, scf_data_loop, scf_options, jc_timing)
+            end
+            
+            allocate_Q_ranges!(scf_data_loop, scf_options, aux_indicies)
+            allocate_dfrhf_memory_cpu!(scf_data_loop, scf_options)
+
+        end
+
+
+        scf_data = mixed_precision_scf_data_dict[calculate_B_float_type]
+        scf_options.contraction_float_type = calculate_B_float_type
+
+        if !scf_data.allocated
+            J_PQ_INV = calculate_J_PQ_inv!(two_center_integrals, scf_options)
+
+            if scf_options.contraction_float_type != Float64
+                J_PQ_INV = convert(Array{scf_options.contraction_float_type}, J_PQ_INV)
+            end
+
+            calculate_dfrhf_B!(scf_data, scf_options, J_PQ_INV, basis_sets, 
+            jeri_engine_thread_df, jc_timing) 
+        end
+
+        if temp_scf_options_contraction_float_type != calculate_B_float_type && !switch_precision
+            println("putting Float64 B into Float32 scf_data.B")
+            scf_data = mixed_precision_scf_data_dict[Float32]
+            scf_options.contraction_float_type = Float32
+            for ii in 1:scf_options.num_Q_ranges
+                scf_data.B[ii] .= mixed_precision_scf_data_dict[Float64].B[ii]
+            end
+        end
+        scf_options.contraction_float_type = temp_scf_options_contraction_float_type
+
+        for (scf_data_contraction_type, scf_data_loop) in mixed_precision_scf_data_dict
+           scf_data_loop.allocated = true
+        end
     end
+    println("contraction float type for this iteration: ", scf_options.contraction_float_type)
+    println("typeof scf_data.B[1][1]: ", typeof(scf_data.B[1][1]))
 
     occupied_orbital_coefficients = get_occupied_orbital_coefficients(scf_data, scf_options, coefficients)
    
@@ -248,23 +286,26 @@ function allocate_dfrhf_memory_cpu!(scf_data::SCFData, scf_options::SCFOptions)
         scf_data.K[ii] = zeros(T, scf_data.μ, scf_data.μ)
         scf_data.J[ii] = zeros(T, pq)  
     end
-    # allocate Fock
-
 end
 
-function calculate_on_rank_ranges!(scf_data, scf_options::SCFOptions, aux_indicies)
+function calculate_on_rank_ranges!(scf_options::SCFOptions, aux_indicies)
     this_rank_Q_range_length = length(aux_indicies)
     num_Q_ranges = get_num_Q_ranges(scf_options, this_rank_Q_range_length)
     scf_options.num_Q_ranges = num_Q_ranges
-    scf_data.Q_ranges = Array{UnitRange{Int64}}(undef, num_Q_ranges)
-    num_Q_per_range = this_rank_Q_range_length ÷ num_Q_ranges
+   
+    return num_Q_ranges
+end
+
+function allocate_Q_ranges!(scf_data::SCFData, scf_options::SCFOptions, aux_indicies)
+    this_rank_Q_range_length = length(aux_indicies)
+    num_Q_per_range = this_rank_Q_range_length ÷ scf_options.num_Q_ranges
     #the on rank ranges are indexed starting at 1, if it needs to be adjusted to all rank indicies
     #add to the values based on the start of the aux_indicies for that rank 
-    for ii in 1:num_Q_ranges
+    scf_data.Q_ranges = Array{UnitRange{Int64}}(undef, scf_options.num_Q_ranges)
+    for ii in 1:scf_options.num_Q_ranges
         scf_data.Q_ranges[ii] = (ii-1)*num_Q_per_range+1:ii*num_Q_per_range
-        if ii == num_Q_ranges
+        if ii == scf_options.num_Q_ranges
             scf_data.Q_ranges[ii] = (ii-1)*num_Q_per_range+1:this_rank_Q_range_length
         end
     end
-    return num_Q_ranges
 end
