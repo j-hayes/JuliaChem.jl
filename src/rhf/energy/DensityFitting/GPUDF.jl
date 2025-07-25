@@ -3,9 +3,12 @@ using CUDA
 using CUDA.CUBLAS
 using CUDA.CUSOLVER
 
-using AMDGPU
-import AMDGPU.rocSOLVER: potrf!
-import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
+import CUDA.CUBLAS: gemm!, gemv!, trmm!
+import CUDA.CUSOLVER: potrf!
+
+# using AMDGPU
+# import AMDGPU.rocSOLVER: potrf!
+# import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
 
 using LinearAlgebra
 using Base.Threads

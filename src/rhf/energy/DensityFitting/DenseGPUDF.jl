@@ -1,12 +1,17 @@
-# using CUDA
-# using CUDA.CUBLAS
-# using CUDA.CUSOLVER
+using CUDA
+using CUDA.CUBLAS
+using CUDA.CUSOLVER
 # import CUDA.CUSOLVER: potrf!, trtri!, 
 # import CUDA.CUBLAS: gemm!, gemm!, gemv!
 
-using AMDGPU
-import AMDGPU.rocSOLVER: potrf!
-import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
+# using AMDGPU
+# import AMDGPU.rocSOLVER: potrf!
+# import AMDGPU.rocBLAS: trmm!, gemm!, gemv!
+
+# using oneAPI
+# using oneAPI.oneMKL
+# import oneAPI.oneMKL: potrf!
+# import oneAPI.oneMKL: gemm!, gemv!, trmm!
 
 using LinearAlgebra
 using Base.Threads
@@ -41,7 +46,7 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
         scf_data.gpu_data.device_Q_index_lengths = Q_device_range_lengths
         #clear the memory 
         
-         for setup_device_id in 1:num_devices
+        Threads.@threads for setup_device_id in 1:num_devices
             set_gpu_device(setup_device_id-1, scf_data.gpu_data.GPU_Type)
             Q = scf_data.gpu_data.device_Q_index_lengths[setup_device_id]
 
@@ -68,14 +73,17 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
     end
 
 
-
+    J_times = zeros(Float64, num_devices)
+    W_times = zeros(Float64, num_devices)
+    K_times = zeros(Float64, num_devices)
+    V_times = zeros(Float64, num_devices)
     gpu_fock_times = zeros(Float64, num_devices)
     density_times = zeros(Float64, num_devices)
     GPU_H_add_time = 0.0
-    timings_dicts = Vector{Dict{String, Float64}}(undef, num_devices)
+
+
     total_fock_gpu_time = @elapsed begin
-        #  for device_id in 1:num_devices
-        for device_id in 1:num_devices
+        Threads.@threads for device_id in 1:num_devices
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             Q = scf_data.gpu_data.device_Q_index_lengths[device_id]
             ooc = scf_data.gpu_data.device_occupied_orbital_coefficients[device_id]
@@ -89,40 +97,64 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
             gpu_fock_times[device_id] = @elapsed begin
                 copyto!(ooc, occupied_orbital_coefficients)
                 GPU_synchronize(scf_data.gpu_data.GPU_Type)
-        if num_devices > 1 #performance tweak for small systems and single device don't use threads because it intermittenly takes longer to spin up threads than to build the fock matrix
-            Threads.@threads for device_id in 1:num_devices 
-                timings_dicts[device_id] = fock_build_kernel_dense_GPU(device_id, scf_data, occupied_orbital_coefficients, iteration, scf_options, jc_timing)
-            end
-        else 
-            timings_dicts[1] = fock_build_kernel_dense_GPU(1, scf_data, occupied_orbital_coefficients, iteration, scf_options, jc_timing)
-        end
+
+                density_times[device_id] = @elapsed begin 
+                    gemm!('N', 'T', 1.0, ooc, ooc, 0.0, density)
+                    GPU_synchronize(scf_data.gpu_data.GPU_Type)          
+                end
+                V_times[device_id] = @elapsed begin
+                    gemv!('N', 1.0, reshape(B, (Q, pq)), reshape(density, pq), 0.0, V)
+                    GPU_synchronize(scf_data.gpu_data.GPU_Type)      
+                end    
+                J_times[device_id] = @elapsed begin
+                    gemv!('T', 2.0, reshape(B, (Q, pq)), V, 0.0, reshape(fock, pq))
+                    GPU_synchronize(scf_data.gpu_data.GPU_Type)          
+                end
+                W_times[device_id] = @elapsed begin
+                    gemm!('T', 'T', 1.0, ooc, reshape(B, (Q * p, p)), 0.0, reshape(W, (n_ooc, Q* p)))
+                    GPU_synchronize(scf_data.gpu_data.GPU_Type)  
+                end
+                K_times[device_id] = @elapsed begin
+                    gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q, p)), reshape(W, (n_ooc * Q, p)), 1.0, fock)
+                    GPU_synchronize(scf_data.gpu_data.GPU_Type)          
+                end
+                if device_id == 1
+                    GPU_H_add_time = @elapsed begin
+                        CUDA.axpy!(1.0, scf_data.gpu_data.device_H, fock)
+                        GPU_synchronize(scf_data.gpu_data.GPU_Type)   
+                    end
+                end
+     
+            end # end gpu_fock_time
+        end # end Threads.@threads
     end # end total_fock_gpu_time
 
-    for timing_dict in timings_dicts
-        for timing_key in keys(timing_dict)
-            jc_timing.timings[timing_key] = timing_dict[timing_key]
-        end
-    end
 
     fock_copy_time = @elapsed begin
-        if num_devices > 1
-            Threads.@threads for device_id in 1:num_devices
-                CUDA.copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])
-            end
-        else #performance tweak for small systems and single device don't use threads because it intermittenly takes longer to spin up threads than to build the fock matrix
-            CUDA.copyto!(scf_data.gpu_data.host_fock[1], scf_data.gpu_data.device_fock[1])
-        end
+        copyto!(scf_data.gpu_data.host_fock[1], scf_data.gpu_data.device_fock[1])
         scf_data.two_electron_fock = scf_data.gpu_data.host_fock[1]
+        Threads.@threads for device_id in 2:num_devices
+            copyto!(scf_data.gpu_data.host_fock[device_id], scf_data.gpu_data.device_fock[device_id])
+        end
         for device_id in 2:num_devices
             axpy!(1.0, scf_data.gpu_data.host_fock[device_id], scf_data.two_electron_fock)
         end
     end
 
-    # jc_timing.timings[JCTiming_key(JCTC.K_time, iteration)] = maximum(K_times)
-    # jc_timing.timings[JCTiming_key(JCTC.W_time, iteration)] = maximum(W_times)
-    # jc_timing.timings[JCTiming_key(JCTC.V_time, iteration)] = maximum(V_times)
-    # jc_timing.timings[JCTiming_key(JCTC.J_time, iteration)] = maximum(J_times)
-    jc_timing.timings[JCTiming_key(JCTC.fock_time, iteration)] = total_fock_gpu_time + fock_copy_time
+    for device_id in 1:num_devices
+        jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_W_time, device_id, iteration)] = W_times[device_id]
+        jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_V_time, device_id, iteration)] = V_times[device_id]
+        jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_J_time, device_id, iteration)] = J_times[device_id]
+        jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_K_time, device_id, iteration)] = K_times[device_id]
+        jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_density_time, device_id, iteration)] = density_times[device_id]
+        jc_timing.timings[JCTiming_GPUkey(JCTC.gpu_fock_time, device_id, iteration)] = gpu_fock_times[device_id]
+    end
+
+    jc_timing.timings[JCTiming_key(JCTC.K_time, iteration)] = maximum(K_times)
+    jc_timing.timings[JCTiming_key(JCTC.W_time, iteration)] = maximum(W_times)
+    jc_timing.timings[JCTiming_key(JCTC.V_time, iteration)] = maximum(V_times)
+    jc_timing.timings[JCTiming_key(JCTC.J_time, iteration)] = maximum(J_times)
+    jc_timing.timings[JCTiming_key(JCTC.fock_time, iteration)] = maximum(gpu_fock_times)
     jc_timing.timings[JCTiming_GPUkey(JCTC.GPU_H_add_time, 1, iteration)] = GPU_H_add_time
 
 
@@ -131,74 +163,9 @@ function df_rhf_fock_build_dense_GPU!(scf_data, jeri_engine_thread_df::Vector{T}
 
 end
 
-function fock_build_kernel_dense_GPU(device_id, scf_data, occupied_orbital_coefficients, iteration, scf_options, jc_timing)
-    CUDA.device!(device_id-1)
-    Q = scf_data.gpu_data.device_Q_index_lengths[device_id]
-    n_ooc = scf_data.occ 
-    ooc = scf_data.gpu_data.device_occupied_orbital_coefficients[device_id]
-    density = scf_data.gpu_data.device_density[device_id]
-    pq = scf_data.μ^2
-    p = scf_data.μ
-
-
-    B = scf_data.gpu_data.device_B[device_id]
-    V = scf_data.gpu_data.device_coulomb_intermediate[device_id]
-    W = scf_data.gpu_data.device_exchange_intermediate[device_id]
-    fock = scf_data.gpu_data.device_fock[device_id]
-    
-    density_time = 0.0
-    V_time = 0.0
-    W_time = 0.0
-    J_time = 0.0
-    K_time = 0.0
-    GPU_H_add_time = 0.0
-    gpu_fock_time = @elapsed begin
-        CUDA.copyto!(ooc, occupied_orbital_coefficients)
-
-        density_time = @elapsed begin 
-            CUDA.CUBLAS.gemm!('N', 'T', 1.0, ooc, ooc, 0.0, density)
-            CUDA.synchronize()   
-
-        end
-        V_time = @elapsed begin
-            CUDA.CUBLAS.gemv!('N', 1.0, reshape(B, (Q, pq)), reshape(density, pq), 0.0, V)
-            CUDA.synchronize()   
-        end    
-        J_time = @elapsed begin
-            CUDA.CUBLAS.gemv!('T', 2.0, reshape(B, (Q, pq)), V, 0.0, reshape(fock, pq))
-            CUDA.synchronize()   
-        end
-        W_time = @elapsed begin
-            CUDA.CUBLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q * p, p)), 0.0, reshape(W, (n_ooc, Q* p)))
-            CUDA.synchronize()   
-        end
-        K_time = @elapsed begin
-            CUDA.CUBLAS.gemm!('T', 'N', -1.0, reshape(W, (n_ooc * Q, p)), reshape(W, (n_ooc * Q, p)), 1.0, fock)
-            CUDA.synchronize()   
-        end
-        if device_id == 1
-            GPU_H_add_time = @elapsed begin
-                CUDA.axpy!(1.0, scf_data.gpu_data.device_H, fock)
-                CUDA.synchronize()   
-            end
-        end
-    end # end gpu_fock_time
-
-    timings = Dict{String, Float64}()
-
-    timings[JCTiming_GPUkey(JCTC.GPU_W_time, device_id, iteration)] = W_time
-    timings[JCTiming_GPUkey(JCTC.GPU_V_time, device_id, iteration)] = V_time
-    timings[JCTiming_GPUkey(JCTC.GPU_J_time, device_id, iteration)] = J_time
-    timings[JCTiming_GPUkey(JCTC.GPU_K_time, device_id, iteration)] = K_time
-    timings[JCTiming_GPUkey(JCTC.GPU_H_add_time, device_id, iteration)] = GPU_H_add_time
-    timings[JCTiming_GPUkey(JCTC.GPU_density_time, device_id, iteration)] = density_time
-    timings[JCTiming_GPUkey(JCTC.gpu_fock_time, device_id, iteration)] = gpu_fock_time
-    return timings
-end
-
 function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_engine_thread_df, basis_sets, scf_options, F_ARR_type::Type)
 
-    two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
+    two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time, 1)] = two_eri_time
 
     device_B = scf_data.gpu_data.device_B
@@ -213,15 +180,8 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
     end
     
    
-    form_J_AB_inv_time = @elapsed begin
-        copyto!(device_J_AB_invt[1], two_center_integrals)
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)
-        potrf!('L', device_J_AB_invt[1])
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)
-        GPU_trtri!(scf_data.gpu_data.GPU_Type, 'L', 'N',  device_J_AB_invt[1])
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)        
-    end
-    jc_timing.timings[JCTC.form_J_AB_inv_time] = form_J_AB_inv_time
+    jc_timing.timings[JCTC.form_J_AB_inv_time] =
+        @elapsed calculate_J_AB_INV_GPU!(scf_data.gpu_data.GPU_Type, two_center_integrals, device_J_AB_invt[1])
 
     pq = scf_data.μ^2
     if num_devices == 1
@@ -234,14 +194,8 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
         GPU_synchronize(scf_data.gpu_data.GPU_Type)
         
         B_time = @elapsed begin
-            trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
-            GPU_synchronize(scf_data.gpu_data.GPU_Type)
+            trmm_GPU!(scf_data.gpu_data.GPU_Type, 'L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])
         end
-    
-        copyto!(two_center_integrals, device_J_AB_invt[1]) # copy back because taking subarrays on the GPU is slow / doesn't work. Need to look into if this is possible with CUDA.jl
-        GPU_synchronize(scf_data.gpu_data.GPU_Type)
-
-
         jc_timing.timings[JCTiming_key(JCTC.three_eri_time, 1)] = three_eri_time
         jc_timing.timings[JCTC.B_time] = B_time
 
@@ -254,7 +208,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
         setup_unscreened_screening_matricies(basis_sets, scf_data)
         #copy J_AB_INV to all devices
         copyto!(two_center_integrals, device_J_AB_invt[1])
-         for device_id in 2:num_devices
+        Threads.@threads for device_id in 2:num_devices
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             copyto!(device_J_AB_invt[device_id], two_center_integrals)
             GPU_synchronize(scf_data.gpu_data.GPU_Type)
@@ -262,7 +216,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
 
         device_Q_index_lengths = zeros(Int, num_devices)
         aux_ranges = Array{UnitRange{Int}}(undef, num_devices)
-         for device_id in 1:num_devices
+        Threads.@threads for device_id in 1:num_devices
             device_shell_aux_indicies, 
             device_aux_indicies, 
             device_basis_index_map = static_load_rank_indicies(device_id-1,num_devices,basis_sets) 
@@ -272,7 +226,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
 
         max_device_Q_range_length = maximum(device_Q_index_lengths)
 
-         for device_id in 1:num_devices
+        Threads.@threads for device_id in 1:num_devices
             set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
             device_three_center_integrals[device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type,Float64, (max_device_Q_range_length*pq))
             device_B[device_id] = GPU_zeros(scf_data.gpu_data.GPU_Type,Float64, (device_Q_index_lengths[device_id],pq))
@@ -288,7 +242,7 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
                 scf_data, other_device_id-1, num_devices, true, false)
             end
 
-             for device_id in 1:num_devices
+            Threads.@threads for device_id in 1:num_devices
                 set_gpu_device(device_id-1, scf_data.gpu_data.GPU_Type)
                 device_aux_indicies = aux_ranges[device_id]
                 three_eri_view = view(device_three_center_integrals[device_id], 1:(device_Q_index_lengths[other_device_id]*pq))

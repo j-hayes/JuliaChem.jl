@@ -397,8 +397,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       gpu_data = get_default_gpu_data_cuda(scf_options.num_devices) #CUDA GPU
       println("using CUDA GPU")
     elseif AMD_GPU_enabled()
-      gpu_data = get_default_gpu_data_AMD(scf_options.num_devices) #AMD GPU
-      println("using AMD GPU")
+      # gpu_data = get_default_gpu_data_AMD(scf_options.num_devices) #AMD GPU
+      # println("using AMD GPU")
     end
   end
 
@@ -472,8 +472,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
       jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = fock_build_end_time - fock_build_start_time 
     else
       MPI.Bcast!(C, 0, comm)
-      fock_build_time = @elapsed F = df_rhf_fock_build_2!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
-      # fock_build_time = @elapsed F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
+      if haskey(ENV["use_new_code"]) && ENV["use_new_code"] == "true"
+        fock_build_time = @elapsed F = df_rhf_fock_build_2!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
+      else
+          fock_build_time = @elapsed F = df_rhf_fock_build!(scf_data, jeri_engine_thread_df, jeri_engine_thread, basis_sets, C, iter, scf_options, H, jc_timing)
+      end
       jc_timing.timings[JCTiming_key(JCTC.fock_time,iter)] = fock_build_time
     end
     

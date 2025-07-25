@@ -4,7 +4,6 @@ authors = ["davpoolechem <davpoole@iastate.edu>", "j-hayes <jhayes1@iastate.edu>
 version = "0.4.5"
 
 [deps]
-AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 BinDeps = "9e28174c-4ba2-5203-b857-d8d62c4213ee"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
@@ -27,6 +26,5 @@ libcxxwrap_julia_jll = "3eaa8342-bff7-56a5-9981-c04077f7cee7"
 libint_jll = "5fdff7f3-485e-5122-bc58-379aa217adcc"
 
 [compat]
-AMDGPU = "1.2.7"
 Atomix = "1.1.1"
 CxxWrap = "0.14.2"
