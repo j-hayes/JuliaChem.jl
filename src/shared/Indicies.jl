@@ -56,10 +56,17 @@ function get_value_from_index(array, index)
     return i,j,k
 end
 
+function lower_triangular_index(i, j)
+    return ((i * (i -1)) ÷ 2) + j
+end
 
 
-export get_n_shell_indicies, decompose_shell_index_ijkl, triangular_index, decompose, get_value_from_index
+function upper_triangular_index(i, j, width)
+    return i*width - (i*(i+1))÷2 + j
+end
 
+
+export get_n_shell_indicies, decompose_shell_index_ijkl, triangular_index, decompose, get_value_from_index, lower_triangular_index, upper_triangular_index
 
 #=
 """

@@ -12,6 +12,7 @@ const do_continue_print = false
 const print_eri = false 
 const get_next_index_tag = 1111
 
+
 function rhf_energy(mol::Molecule, basis_sets::CalculationBasisSets,
   scf_flags::Union{Dict{String,Any},Dict{Any,Any},Dict{String,String}}; output)
 
@@ -102,11 +103,22 @@ function rhf_kernel(mol::Molecule,
   H_time = @elapsed H .= T .+ V
 
   jc_timing.timings[JCTC.H_time] = T_time + V_time + H_time
- 
+  D = zeros(Float64, (basis.norb, basis.norb))
   #== build the initial matrices with guesss ==#
   if scf_options.guess == Guess.sad
+    atoms_str = ""
+    #loop over mol.atoms and build the atoms string
+    for at in mol.atoms
+      x = round(at.atom_center[1], digits=6)
+      y = round(at.atom_center[2], digits=6)
+      z = round(at.atom_center[3], digits=6)
+      atoms_str *= "$(at.symbol) $x $y $z; "
+    end
     guess_matrix = sad_guess(mol, basis)
-    D = guess_matrix
+    D .= guess_matrix
+    println("Using SAD guess for RHF SCF calculation:")
+    display(guess_matrix)
+    println("trace of guess matrix: ", tr(guess_matrix))
     F = zeros(size(H))
   elseif scf_options.guess == Guess.hcore || scf_options.guess == Guess.density_fitting
     guess_matrix = deepcopy(H)

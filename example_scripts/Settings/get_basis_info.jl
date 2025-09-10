@@ -14,6 +14,8 @@ function get_basis_names(basis_id)
         return "6-311++G(2d,2p)", "aug-cc-pVTZ-JKFIT"
     elseif lower_basis_id == lowercase("6-31G(d,p)")
         return "6-31G**", "6-31G**-RIFIT"
+elseif lower_basis_id == lowercase("6-31G")
+        return "6-31G", "cc-pVDZ-RIFIT"
     end
     error("basis_id not found: $basis_id")
 

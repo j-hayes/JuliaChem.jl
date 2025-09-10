@@ -89,6 +89,12 @@ function run(mol::Molecule, basis_sets::CalculationBasisSets, scf_flags = Dict()
   rhfenergy["Timings"].non_timing_data[JCTC.n_atoms] = string(length(mol))
   return rhfenergy 
 end
+
+# function __init__()
+#     copy!(psyscf_gto, pyimport_conda("pyscf.gto", "pyscf"))
+#     copy!(psyscf_scf, pyimport_conda("pyscf.scf", "pyscf"))
+# end
+
 export run
 
 end

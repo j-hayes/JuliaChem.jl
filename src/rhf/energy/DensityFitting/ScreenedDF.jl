@@ -7,7 +7,7 @@ using ThreadPinning
 using Serialization
 using JuliaChem.Shared.JCTC
 using JuliaChem.Shared.Constants
-
+using HDF5 
 @inline function twoD_to1Dindex(i, j, p)
     return (i - 1) * p + j
 end
@@ -74,6 +74,13 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
     jc_timing.timings[JCTC.screening_metadata_time] = screning_metadata_time
     jc_timing.timings[JCTC.screened_indices_count] = scf_data.screening_data.screened_indices_count
 
+     #open for modify
+    h5file = h5open("schwarz_screening_data-gly8.h5", "r+")
+    #add screened_p_start_indices
+    write(h5file, "screened_p_start_indices", scf_data.screening_data.sparse_p_start_indices)
+    #non_screened_p_indices_count
+    write(h5file, "non_screened_p_indices_count", scf_data.screening_data.non_screened_p_indices_count)
+    close(h5file)
 end
 
 
@@ -88,7 +95,10 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         rank = MPI.Comm_rank(MPI.COMM_WORLD)
         two_eri_time = @elapsed two_center_integrals = calculate_two_center_integrals(jeri_engine_thread_df, basis_sets, scf_options)
         s_metadata_time = @elapsed get_screening_metadata!(scf_data, scf_options.df_screening_sigma, jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
-        j_ab_inv_time = @elapsed begin 
+        #open an hdf5 file for two_center_integrals
+        h5file = h5open("two_center_integrals-gly8.h5", "w")
+        write(h5file, "two_center_integrals", two_center_integrals)
+        j_ab_inv_time = @elapsed begin
             if rank == 0 # avoid convergence problems always do this on rank 0
                 LAPACK.potrf!('L', two_center_integrals)
                 LAPACK.trtri!('L', 'N', two_center_integrals)
@@ -98,6 +108,9 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
             end
             J_AB_invt = two_center_integrals
         end
+        #write J_PQ 
+        write(h5file, "J_PQ", two_center_integrals)
+        close(h5file)
         B_time = 0.0
         three_eri_time = 0.0
         if n_ranks > 1 
@@ -105,9 +118,12 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         else
             three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
                 scf_data, rank, n_ranks, true, false)
-            B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)    
-            jc_timing.timings[JCTC.B_time] = B_time
-            jc_timing.timings[JCTC.three_eri_time] = three_eri_time
+            h5file = h5open("three_center_integrals-gly8.h5", "w")
+            write(h5file, "three_center_integrals", scf_data.D)
+            B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)
+            write(h5file, "B", scf_data.D)
+            close(h5file)
+            
         end
 
         num_Q_ranges = get_num_Q_ranges(scf_options, scf_data.A)
@@ -155,8 +171,34 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
     end
 
     calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
-    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing, iteration)
+    # save W and K to hdf5 
+    if iteration == 1
+        h5file = h5open("exchange-gly8.h5", "w")
+        write(h5file, "W", scf_data.W_batches[1])
+        write(h5file, "K", scf_data.two_electron_fock)
+        close(h5file)
+    end
+    temp_fock = deepcopy(scf_data.two_electron_fock)
+    scf_data.two_electron_fock .= 0.0
 
+    calculate_coulomb_screened(scf_data, occupied_orbital_coefficients, jc_timing, iteration)
+    if iteration == 1
+        h5file = h5open("coulomb-gly8.h5", "w")
+        write(h5file, "J_pq_screened", scf_data.J)
+        write(h5file, "J", scf_data.two_electron_fock)
+        write(h5file, "V", scf_data.V_batches[1])
+        close(h5file)
+    
+    
+    end
+
+    scf_data.two_electron_fock .+= temp_fock
+
+    if iteration == 1
+        h5file = h5open("fock-gly8.h5", "w")
+        write(h5file, "fock", scf_data.two_electron_fock)
+        close(h5file)
+    end
 end
 
 function calculate_B_multi_rank(scf_data, J_AB_INV, basis_sets, jeri_engine_thread_df, scf_options, jc_timing::JCTiming)

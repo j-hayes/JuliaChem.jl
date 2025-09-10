@@ -143,14 +143,15 @@ function sad_guess(mol::Molecule, basis::Basis)
   basis_symbol = basis.model
 
   sad_guess = zeros(Float64, (basis.norb, basis.norb))
-  h5open(joinpath(@__DIR__, "../../../records/sadgss.h5"),"r") do sadgss 
+  h5open(joinpath(@__DIR__, "../../../records/cc-pvdz_sadgss.h5"),"r") do sadgss 
+  # h5open(joinpath(@__DIR__, "../../../records/sadgss.h5"),"r") do sadgss 
     anchor = 1
     for atom in mol
       atom_symbol = atom.symbol
-     
-      sadgss_buf = read(sadgss["$atom_symbol/$basis_symbol"])
+
+      sadgss_buf = read(sadgss["$(lowercase(atom_symbol))"])
       #println("$anchor, $atom")
-      #display(sadgss_buf); println()
+      # display(sadgss_buf); println()
 
       sqrt_nbas_guess = trunc(Int,sqrt(length(sadgss_buf)))
 

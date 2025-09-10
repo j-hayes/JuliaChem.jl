@@ -80,3 +80,8 @@ function xyz_to_molecule(input, charge = 0)
   return molecule
 end 
 export xyz_to_molecule
+a =  xyz_to_molecule("/home/jackson/Downloads/C6.xyz",0)
+#write to a file
+open("/home/jackson/Downloads/C6.json", "w") do file
+    write(file, JSON.json(a))
+end

@@ -1,3 +1,4 @@
+using HDF5
 """ Schwarz screening for DF-RHF as described in Huang et al. 2020 https://doi.org/10.1063/1.5129452
 if σ is a threshold on the size of (pq|P), 
 then (pq|P) can be neglected if (pq∣pq) < σ^2 / maxP(P∣P) 
@@ -7,6 +8,12 @@ Arguments
 σ = 10^(−12) is used in huang et. al 2020 screening parameter
 """
 function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engine_thread)
+
+
+    #hdf5 file for adding schwarz screening information
+    #open the file and create if it doesn't exist 
+
+    
 
     basis = basis_sets.primary
     basis_set_length = length(basis)
@@ -19,15 +26,33 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
     nthreads = Threads.nthreads()
     eri_quartet_batch_thread = [ Vector{Float64}(undef, batch_size) for thread in 1:nthreads ]
 
+    debug_pqpq_dict = Dict{Int, Vector{Float64}}() # [index, (pq|pq) integrals]
+    debug_pqpq_dict_upper_triangular = Dict{Int, Vector{Float64}}() # [index, (pq|pq) integrals]
+    debug_index_to_pq = Dict{Int64, Tuple{Int, Int}}() # [index, (ish,jsh)]
+    debug_index_to_pq_upper_triangular = Dict{Int64, Tuple{Int, Int}}() # [index, (ish,jsh)]
+    shell_info = Dict{Int, Tuple{Int, Int, Int}}() # [shell_index, (n_bas, am, pos)]
+
+    for (i, shell) in enumerate(basis)
+        shell_info[i] = (shell.nbas, shell.am, shell.pos - 1)
+    end
+
+    println("sigma squared: ", σ^2)
+    println("max_P_P: ", max_P_P)
+    println("threshold for screening: ", (σ^2) / max_P_P)
+
     threshold = (σ^2) / max_P_P #10.0^-10 hardcode for comparison with EXESS GPU DF-RHF
-    Threads.@sync for thread in 1:nthreads
-        Threads.@spawn begin
+    for thread in 1:nthreads
+        begin
             for index in thread:nthreads:n_shell_indicies
                 bra_pair = index
                 ket_pair = index
                 ish = decompose(index)
                 jsh = index - triangular_index(ish)
 
+                upper_t_index = upper_triangular_index(jsh-1, ish-1, basis_set_length)
+
+                debug_index_to_pq[index] = (ish, jsh)
+                debug_index_to_pq_upper_triangular[upper_t_index] = (jsh-1, ish-1)
                 μ_shell = basis[ish]
                 ν_shell = basis[jsh]
             
@@ -37,14 +62,21 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
                 μ_position = μ_shell.pos
                 ν_position = ν_shell.pos
 
+
+
                 eri_quartet_batch_thread[thread] .= 0.0
                 JERI.compute_eri_block(jeri_engine_thread[thread], eri_quartet_batch_thread[thread],
                     ish, jsh, ish, jsh, bra_pair, ket_pair, nμ * nν, nμ * nν)
 
                 axial_normalization_factor(eri_quartet_batch_thread[thread], μ_shell, ν_shell, μ_shell, ν_shell, nμ, nν, nμ, nν)
+                debug_pqpq_dict[index] = copy(eri_quartet_batch_thread[thread])
+                debug_pqpq_dict_upper_triangular[upper_t_index] = copy(eri_quartet_batch_thread[thread])
 
                 shell_pair_contracted = sum(eri_quartet_batch_thread[thread])
 
+                if ish == 1 && jsh == 37 || ish == 37 && jsh == 1
+                    println("shell pair (ish, jsh): ($ish, $jsh), shell_pair_contracted: $shell_pair_contracted")
+                end  
 
                 shell_screen_matrix[ish, jsh] = !(Base.abs_float(shell_pair_contracted) < threshold)
                 shell_screen_matrix[jsh, ish] = shell_screen_matrix[ish, jsh]
@@ -79,6 +111,68 @@ function schwarz_screen_itegrals_df(scf_data, σ, max_P_P, basis_sets, jeri_engi
             end
         end
     end
+
+  #sort the dictionaries and put keys and values in arrays to go into hdf5
+  debug_pqpq_keys = Vector{Int64}(undef, length(debug_pqpq_dict))
+  debug_pqpq_values = Matrix{Float64}(undef, length(first(values(debug_pqpq_dict))), length(debug_pqpq_dict))
+  
+  for (i, key) in enumerate(sort(collect(keys(debug_pqpq_dict))))
+      debug_pqpq_keys[i] = key
+      debug_pqpq_values[:, i] .= debug_pqpq_dict[key]
+  end
+
+  debug_pqpq_keys_upper_triangular = Vector{Int64}(undef, length(debug_pqpq_dict_upper_triangular))
+  debug_pqpq_values_upper_triangular = Matrix{Float64}(undef, length(first(values(debug_pqpq_dict_upper_triangular))), length(debug_pqpq_dict_upper_triangular))
+
+  for (i, key) in enumerate(sort(collect(keys(debug_pqpq_dict_upper_triangular))))
+      debug_pqpq_keys_upper_triangular[i] = key
+      debug_pqpq_values_upper_triangular[:, i] .= debug_pqpq_dict_upper_triangular[key]
+  end
+
+  debug_index_to_pq_keys = Vector{Int64}(undef, length(debug_index_to_pq))
+  debug_index_to_pq_values = Matrix{Int64}(undef, 2, length(debug_index_to_pq))
+  for (i, key) in enumerate(sort(collect(keys(debug_index_to_pq))))
+      debug_index_to_pq_keys[i] = key
+      debug_index_to_pq_values[:, i] .= debug_index_to_pq[key] .- 1
+  end
+
+  debug_index_to_pq_keys_upper_triangular = Vector{Int64}(undef, length(debug_index_to_pq_upper_triangular))
+  debug_index_to_pq_values_upper_triangular = Matrix{Int64}(undef, 2, length(debug_index_to_pq_upper_triangular))
+  
+  #print the sorted upper triangle keys
+  println(sort(collect(keys(debug_index_to_pq_upper_triangular))))
+  for (i, key) in enumerate(sort(collect(keys(debug_index_to_pq_upper_triangular))))
+      debug_index_to_pq_keys_upper_triangular[i] = key
+      debug_index_to_pq_values_upper_triangular[:, i] .= debug_index_to_pq_upper_triangular[key]
+  end
+
+  shell_info_keys = Vector{Int64}(undef, length(shell_info))
+  shell_info_values = Array{Int,2}(undef, 3, length(shell_info))
+  for (i, key) in enumerate(sort(collect(keys(shell_info))))
+      shell_info_keys[i] = key
+      shell_info_values[:, i] .= shell_info[key]
+  end
+
+ unscreened_pq_count = count(!, basis_function_screen_matrix)
+ shell_screen_as_int = Int.(shell_screen_matrix)
+ basis_screen_as_int = Int.(basis_function_screen_matrix)
+ h5file = h5open("schwarz_screening_data-gly8.h5", "w")   
+   write(h5file, "shell_screen_matrix", shell_screen_as_int)
+   write(h5file, "basis_function_screen_matrix", basis_screen_as_int)
+   write(h5file, "sparse_pq_index_map", sparse_pq_index_map .-1 )
+   write(h5file, "debug_pqpq_keys", debug_pqpq_keys .-1)
+   write(h5file, "debug_pqpq_values", debug_pqpq_values)
+   write(h5file, "debug_pqpq_keys_upper_triangular", debug_pqpq_keys_upper_triangular)
+   write(h5file, "debug_pqpq_values_upper_triangular", debug_pqpq_values_upper_triangular)
+   write(h5file, "debug_index_to_pq_keys", debug_index_to_pq_keys .- 1)
+   write(h5file, "debug_index_to_pq_values",  debug_index_to_pq_values .- 1)
+   write(h5file, "debug_index_to_pq_keys_upper_triangular", debug_index_to_pq_keys_upper_triangular )
+   write(h5file, "debug_index_to_pq_values_upper_triangular", debug_index_to_pq_values_upper_triangular)
+   write(h5file, "unscreened_basis_count", [unscreened_pq_count])
+   write(h5file, "shell_info_keys",  shell_info_keys)
+   write(h5file, "shell_info_values", shell_info_values)
+   close(h5file)
+
     return shell_screen_matrix, basis_function_screen_matrix, sparse_pq_index_map
 end
 

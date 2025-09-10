@@ -125,8 +125,47 @@ function df_rhf_fock_build_BLAS!(scf_data, jeri_engine_thread_df::Vector{T}, bas
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time,iteration)] = two_eri_time
     jc_timing.non_timing_data[JCTC.contraction_algorithm] = "dense cpu"
   end  
+  if iteration == 1
+    calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  aux_indicies, jc_timing, iteration)
+    temp_fock = copy(scf_data.two_electron_fock)
+    #save coulomb to hdf5
+    hdf5_file = HDF5.h5open("coulomb.h5", "w")
+    write(hdf5_file, "coulomb", scf_data.two_electron_fock)
+    println("dimensions of occupied_orbital_coefficients: ", size(occupied_orbital_coefficients))
+    write(hdf5_file, "occupied_orbital_coefficients", permutedims(occupied_orbital_coefficients, (2,1)))
+    write(hdf5_file, "density", scf_data.density)
+    println("dimensions of density: ", size(scf_data.density))
+    #write coulomb_intermediate
+    write(hdf5_file, "coulomb_intermediate", scf_data.coulomb_intermediate)
+    println("dimensions of coulomb_intermediate: ", size(scf_data.coulomb_intermediate))
+    HDF5.close(hdf5_file)
+    scf_data.two_electron_fock .= 0.0
+
+    calculate_exchange!(scf_data, occupied_orbital_coefficients, aux_indicies, jc_timing, iteration)
+    println("dimensions of occupied_orbital_coefficients: ", size(occupied_orbital_coefficients))
+
+    hdf5_file = HDF5.h5open("exchange.h5", "w")
+    write(hdf5_file, "exchange", scf_data.two_electron_fock)
+    write(hdf5_file, "occupied_orbital_coefficients", permutedims(occupied_orbital_coefficients, (2,1)))
+    #write exchange intermediate
+    permuted_W = collect(reshape(permutedims(scf_data.D_tilde, (3,2,1)), (scf_data.occ*scf_data.A*scf_data.μ)))
+    write(hdf5_file, "exchange_intermediate", permuted_W)
+    println("dimensions of exchange_intermediate: ", size(scf_data.D_tilde))
+    HDF5.close(hdf5_file)
+
+
+
+
+    scf_data.two_electron_fock .+= temp_fock
+  
+    #write fock to hdf5 
+    hdf5_file = HDF5.h5open("fock.h5", "w")
+    write(hdf5_file, "fock", scf_data.two_electron_fock)
+    HDF5.close(hdf5_file)
+  end
   calculate_coulomb!(scf_data, occupied_orbital_coefficients ,  aux_indicies, jc_timing, iteration)
   calculate_exchange!(scf_data, occupied_orbital_coefficients, aux_indicies, jc_timing, iteration)
+  
 end
 
 
@@ -139,6 +178,11 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
   n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
   rank = MPI.Comm_rank(MPI.COMM_WORLD)
   J_AB_invt = zeros(scf_options.contraction_float_type, (2,2))
+
+   #write two center integrals to an HDF5 file called two_center_integrals.h5 for debugging
+  hdf5_file = HDF5.h5open("two_center_integrals.h5", "w")
+  write(hdf5_file, "two_center_integrals", two_center_integrals)
+
   form_J_AB_inv_time = @elapsed begin
     if rank == 0 # avoid convergence problems always do this on rank 0
       # if scf_options.contraction_float_type != Float64
@@ -147,7 +191,11 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
       LAPACK.potrf!('L', two_center_integrals)
       LAPACK.trtri!('L', 'N', two_center_integrals)
     end
+
+    #write two center integrals to HDF5 for debugging 
     
+    write(hdf5_file, "J_PQ_inv", two_center_integrals)
+
     J_AB_invt = zeros(scf_options.contraction_float_type, size(two_center_integrals))
     J_AB_invt .= two_center_integrals
 
@@ -157,6 +205,7 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
 
   end
 
+
   B_time = 0.0
   three_eri_time = 0.0
   three_center_integrals = []
@@ -165,14 +214,26 @@ function calculate_B!(scf_data, two_center_integrals, jc_timing::JCTiming,
   
   scf_data.D = zeros(scf_options.contraction_float_type, size(scf_data.D))
 
+  hdf5_file = HDF5.h5open("three_center_integrals.h5", "w")
+
   if n_ranks == 1  #single rank case
     AA = scf_data.A
     three_eri_time = @elapsed three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options, 
     scf_data, rank,n_ranks, false, false)
-    
+
+    #write three_center_integrals to hdf5
+    # three_eri_for_hdf5 = permutedims(three_center_integrals, (2,3,1))
+    println("dimensions of three center integrals: ", size(three_center_integrals))
+    write(hdf5_file, "three_center_integrals", reshape(three_center_integrals, (AA,μμ*νν)))
+
     scf_data.D = zeros(scf_options.contraction_float_type, size(three_center_integrals))
     scf_data.D .= three_center_integrals
     B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', one, two_center_integrals, reshape(scf_data.D, (AA, μμ * νν)))
+
+    #write B to hdf5
+    # B_for_hdf5 = permutedims(scf_data.D, (2,3,1))
+    println("dimensions of B: ", size(scf_data.D))
+    write(hdf5_file, "B", reshape(scf_data.D, (AA, μμ*νν)))
   else
 
     setup_unscreened_screening_matricies(basis_sets, scf_data)
