@@ -19,7 +19,7 @@ function rhf_energy(mol::Molecule, basis::Basis,
   rmsd::Float64 = haskey(scf_flags, "rmsd") ? scf_flags["rmsd"] : 1E-6
   load::String = haskey(scf_flags, "load") ? scf_flags["load"] : "static"
   fdiff::Bool = haskey(scf_flags, "fdiff") ? scf_flags["fdiff"] : false
-
+  guess = "sad"
   return rhf_kernel(mol,basis; output=output, debug=debug, 
     niter=niter, guess=guess, ndiis=ndiis, dele=dele, rmsd=rmsd, load=load, 
     fdiff=fdiff)
@@ -121,8 +121,12 @@ function rhf_kernel(mol::Molecule,
   #  workspace_b, workspace_a, 0.0, ortho)
   #LinearAlgebra.BLAS.gemm!('N', 'N', 1.0, workspace_a, ortho, 0.0, ortho) 
  
-  ortho = workspace_a*(LinearAlgebra.Diagonal(workspace_b)^-0.5)*transpose(workspace_a)
+  # ortho = workspace_a*(LinearAlgebra.Diagonal(workspace_b)^-0.5)*transpose(workspace_a)
   
+
+  ortho = inv(sqrt(S)) #A = S^-0.5 => ASA = I
+
+
   if debug && MPI.Comm_rank(comm) == 0
     h5write("debug.h5","RHF/Iteration-None/X", ortho)
   end
@@ -137,9 +141,19 @@ function rhf_kernel(mol::Molecule,
 
   E_elec = 0.0
   F_eval = zeros(size(F)[1])
+  nocc = basis.nels >> 1
+  norb = basis.norb
   if guess == "hcore"
-    E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a, 
-      workspace_b, ortho, basis, 0, debug)
+    F_p = ortho*H*transpose(ortho)
+    F_eval[:], F_evec[:,:] = eigen!(F_p)
+    C .= ortho*F_evec
+    C_occ = C[:,1:nocc]
+    LinearAlgebra.BLAS.gemm!('N', 'T', 2.0, C_occ, C_occ, 0.0, D)
+    # F.=H
+    # E_elec, F_eval[:] = iteration(F, D, C, H, F_eval, F_evec, workspace_a, 
+    #   workspace_b, ortho, basis, 0, debug)
+    F.=0.0
+    
   end
   
   F_old = deepcopy(F)
@@ -148,7 +162,7 @@ function rhf_kernel(mol::Molecule,
   E_old = E
 
   #if MPI.Comm_rank(comm) == 0 && output == "verbose"
-  #  @printf("0     %.10f\n", E)
+  #  @printf("0     12.10f\n", E)
   #end
 
   #=============================#
@@ -188,7 +202,7 @@ function rhf_kernel(mol::Molecule,
       println("   The SCF calculation has converged!   ")
       println("----------------------------------------")
       #println("Total SCF Energy: ",E," h")
-      @printf("Total SCF Energy: %.10f h\n",E)
+      @printf("Total SCF Energy: 12.10f h\n",E)
       println(" ")
 
       calculation_success = Dict(
@@ -322,7 +336,8 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   B_dim = 1
   D_rms = 1.0
   ΔE = 1.0 
-  cutoff = fdiff ? 5E-11 : 1E-10
+  cutoff = 0.0 
+  # fdiff ? 5E-11 : 1E-10
 
   #length_eri_sizes = length(eri_sizes)
 
@@ -342,7 +357,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
   F_thread = [ zeros(size(F)) for thread in 1:nthreads ]
   jeri_engine_thread = [ JERI.TEIEngine(basis.basis_cxx, basis.shpdata_cxx) 
     for thread in 1:nthreads ]
-  
+
   while !iter_converged
     #== reset eri arrays ==#
     #if quartet_batch_num_old != 1 && iter != 1
@@ -419,7 +434,7 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     end
 
     #== do DIIS ==#
-    if ndiis > 0
+    if ndiis > 0 && iter > 0
       BLAS.symm!('L', 'U', 1.0, F, D, 0.0, workspace_a)
       BLAS.gemm!('N', 'N', 1.0, workspace_a, S, 0.0, FDS)
       
@@ -477,9 +492,11 @@ function scf_cycles_kernel(F::Matrix{Float64}, D::Matrix{Float64},
     E = E_elec + E_nuc
     ΔE = E - E_old
 
+    
+
     if MPI.Comm_rank(comm) == 0 && output == "verbose"
       #println(iter,"     ", E,"     ", ΔE,"     ", D_rms)
-      @printf("%d      %.10f      %.10f      %.10f\n", iter, E, ΔE, D_rms)
+      @printf("%d      %12.10f      %12.10f      %12.10f\n", iter, E, ΔE, D_rms)
     end
 
     iter_converged = Base.abs_float(ΔE) <= dele && D_rms <= rmsd
@@ -901,22 +918,15 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
 
   comm=MPI.COMM_WORLD
  
-  transpose!(workspace_b, LinearAlgebra.Hermitian(ortho)) 
+  # transpose!(workspace_b, LinearAlgebra.Hermitian(ortho)) 
 
   #== obtain new orbital coefficients ==#
-  BLAS.symm!('L', 'U', 1.0, workspace_b, F_μν, 0.0, workspace_a)
-  BLAS.gemm!('N', 'N', 1.0, workspace_a, ortho, 0.0, workspace_b)
- 
-  F_eval[:], F_evec[:,:] = eigen!(LinearAlgebra.Hermitian(workspace_b)) 
+  # BLAS.symm!('L', 'U', 1.0, workspace_b, F_μν, 0.0, workspace_a)
+  # BLAS.gemm!('N', 'N', 1.0, workspace_a, ortho, 0.0, workspace_b)
+
   
-  #@views F_evec .= F_evec[:,sortperm(F_eval)] #sort evecs according to sorted evals
-
-  if debug && MPI.Comm_rank(comm) == 0
-    h5write("debug.h5","RHF/Iteration-$iter/F_evec", F_evec)
-  end
-
-  #C .= ortho*F_evec
-  BLAS.symm!('L', 'U', 1.0, ortho, F_evec, 0.0, C)
+  
+  # BLAS.symm!('L', 'U', 1.0, ortho, F_evec, 0.0, C)
   
   if debug && MPI.Comm_rank(comm) == 0
     h5write("debug.h5","RHF/Iteration-$iter/C", C)
@@ -926,17 +936,12 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
   nocc = basis.nels >> 1
   norb = basis.norb
 
-  #fill!(D, 0.0)
-  for i in 1:basis.norb, j in 1:basis.norb
-    D[i,j] = 2.0*BLAS.dot(nocc,pointer(C,i),norb,pointer(C,j),norb)
-  end
- 
   #== compute new SCF energy ==#
-  #EHF1 = LinearAlgebra.dot(D, F_μν)
-  #EHF2 = LinearAlgebra.dot(D, H)
-  EHF1 = LinearAlgebra.BLAS.dot(length(D), D, 1, F_μν, 1)
-  EHF2 = LinearAlgebra.BLAS.dot(length(D), D, 1, H, 1)
-  E_elec = (EHF1 + EHF2)/2.0
+  EHF1 = LinearAlgebra.dot(D, F_μν)
+  EHF2 = LinearAlgebra.dot(D, H)
+  # EHF1 = LinearAlgebra.BLAS.dot(length(D), D, 1, F_μν, 1)
+  # EHF2 = LinearAlgebra.BLAS.dot(length(D), D, 1, H, 1)
+  E_elec =(EHF1 + EHF2)/2.0
   
   if debug && MPI.Comm_rank(comm) == 0
     h5write("debug.h5","RHF/Iteration-$iter/D", D)
@@ -944,6 +949,23 @@ function iteration(F_μν::Matrix{Float64}, D::Matrix{Float64},
     h5write("debug.h5","RHF/Iteration-$iter/E/EHF2", EHF2)
     h5write("debug.h5","RHF/Iteration-$iter/E/EHF", E_elec)
   end
+
+  F_p = ortho*F_μν*transpose(ortho)
+
+
+ 
+  # F_eval[:], F_evec[:,:] = eigen!(LinearAlgebra.Hermitian(workspace_b)) 
+  F_eval[:], F_evec[:,:] = eigen!(F_p) 
+  
+  #@views F_evec .= F_evec[:,sortperm(F_eval)] #sort evecs according to sorted evals
+
+  if debug && MPI.Comm_rank(comm) == 0
+    h5write("debug.h5","RHF/Iteration-$iter/F_evec", F_evec)
+  end
+
+  C .= ortho*F_evec
+  C_occ = view(C, :, 1:nocc)
+  LinearAlgebra.BLAS.gemm!('N', 'T', 2.0, C_occ, C_occ, 0.0, D)
 
   return E_elec, F_eval
 end
