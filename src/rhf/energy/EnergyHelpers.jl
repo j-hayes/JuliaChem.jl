@@ -143,32 +143,58 @@ function sad_guess(mol::Molecule, basis::Basis)
   basis_symbol = basis.model
 
   sad_guess = zeros(Float64, (basis.norb, basis.norb))
-  h5open(joinpath(@__DIR__, "../../../records/cc-pvdz_sadgss.h5"),"r") do sadgss 
-  # h5open(joinpath(@__DIR__, "../../../records/sadgss.h5"),"r") do sadgss 
+  h5open("/home/jackson/source/guess_basis_stuff/cc-pvdz_sad_guess_test.h5","r") do sadgss 
     anchor = 1
     for atom in mol
       atom_symbol = atom.symbol
-
-      sadgss_buf = read(sadgss["$(lowercase(atom_symbol))"])
+     
+      sadgss_buf = read(sadgss["$atom_symbol"])
       #println("$anchor, $atom")
-      # display(sadgss_buf); println()
+      #display(sadgss_buf); println()
 
-      sqrt_nbas_guess = trunc(Int,sqrt(length(sadgss_buf)))
+      # sqrt_nbas_guess = trunc(Int,sqrt(length(sadgss_buf)))
+      atom_basis_length = size(sadgss_buf,1)
 
       sadgss_idx = 1
-      for i in anchor:(anchor+sqrt_nbas_guess-1) 
-        for j in anchor:(anchor+sqrt_nbas_guess-1)
+      for i in anchor:(anchor+atom_basis_length-1)
+        for j in anchor:(anchor+atom_basis_length-1)
           sad_guess[i,j] = sadgss_buf[sadgss_idx]
           sadgss_idx += 1 
         end  
       end
-      anchor += sqrt_nbas_guess
+      anchor += atom_basis_length
     end  
   end
+  println("SAD Guess from HDF5: ")
+  # display(sad_guess)
+ 
+  # sad_guess = zeros(Float64, (basis.norb, basis.norb))
+  # h5open(joinpath(@__DIR__, "../../../records/sadgss.h5"),"r") do sadgss 
+  #   anchor = 1
+  #   for atom in mol
+  #     atom_symbol = atom.symbol
+     
+  #     sadgss_buf = read(sadgss["$atom_symbol/$basis_symbol"])
+  #     #println("$anchor, $atom")
+  #     #display(sadgss_buf); println()
+
+  #     sqrt_nbas_guess = trunc(Int,sqrt(length(sadgss_buf)))
+
+  #     sadgss_idx = 1
+  #     for i in anchor:(anchor+sqrt_nbas_guess-1) 
+  #       for j in anchor:(anchor+sqrt_nbas_guess-1)
+  #         sad_guess[i,j] = sadgss_buf[sadgss_idx]
+  #         sadgss_idx += 1 
+  #       end  
+  #     end
+  #     anchor += sqrt_nbas_guess
+  #   end  
+  # end
  
   #display(sad_guess) 
   return sad_guess  
 end
+
 
 function compute_schwarz_bounds(schwarz_bounds::Matrix{Float64}, 
   basis::Basis, nsh::Int64)

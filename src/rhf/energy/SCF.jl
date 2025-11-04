@@ -116,9 +116,9 @@ function rhf_kernel(mol::Molecule,
     end
     guess_matrix = sad_guess(mol, basis)
     D .= guess_matrix
-    println("Using SAD guess for RHF SCF calculation:")
-    display(guess_matrix)
-    println("trace of guess matrix: ", tr(guess_matrix))
+    # println("Using SAD guess for RHF SCF calculation:")
+    # display(guess_matrix)
+    # println("trace of guess matrix: ", tr(guess_matrix))
     F = zeros(size(H))
   elseif scf_options.guess == Guess.hcore || scf_options.guess == Guess.density_fitting
     guess_matrix = deepcopy(H)

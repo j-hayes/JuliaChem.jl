@@ -432,6 +432,10 @@ function calculate_exchange!(scf_data, occupied_orbital_coefficients, indicies, 
   W = scf_data.D_tilde
   fock = scf_data.two_electron_fock
 
+
+  BLAS.gemm!('N', 'T', 1.0, occupied_orbital_coefficients, occupied_orbital_coefficients, 0.0, density)
+
+
   W_time = @elapsed begin
     BLAS.gemm!('T', 'T', 1.0, ooc, reshape(B, (Q * p, p)), 0.0, reshape(W, (n_ooc, Q * p)))
   end

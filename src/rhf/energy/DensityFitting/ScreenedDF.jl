@@ -75,12 +75,12 @@ function get_screening_metadata!(scf_data, sigma, jeri_engine_thread, two_center
     jc_timing.timings[JCTC.screened_indices_count] = scf_data.screening_data.screened_indices_count
 
      #open for modify
-    h5file = h5open("schwarz_screening_data-gly8.h5", "r+")
+    # h5file = h5open("schwarz_screening_data-gly8.h5", "r+")
     #add screened_p_start_indices
-    write(h5file, "screened_p_start_indices", scf_data.screening_data.sparse_p_start_indices)
+    # write(h5file, "screened_p_start_indices", scf_data.screening_data.sparse_p_start_indices)
     #non_screened_p_indices_count
-    write(h5file, "non_screened_p_indices_count", scf_data.screening_data.non_screened_p_indices_count)
-    close(h5file)
+    # write(h5file, "non_screened_p_indices_count", scf_data.screening_data.non_screened_p_indices_count)
+    # close(h5file)
 end
 
 
@@ -118,11 +118,11 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
         else
             three_eri_time = @elapsed scf_data.D = calculate_three_center_integrals(jeri_engine_thread_df, basis_sets, scf_options,
                 scf_data, rank, n_ranks, true, false)
-            h5file = h5open("three_center_integrals-gly8.h5", "w")
-            write(h5file, "three_center_integrals", scf_data.D)
+            # h5file = h5open("three_center_integrals-gly8.h5", "w")
+            # write(h5file, "three_center_integrals", scf_data.D)
             B_time = @elapsed BLAS.trmm!('L', 'L', 'N', 'N', 1.0, J_AB_invt, scf_data.D)
-            write(h5file, "B", scf_data.D)
-            close(h5file)
+            # write(h5file, "B", scf_data.D)
+            # close(h5file)
             
         end
 
@@ -169,15 +169,15 @@ function df_rhf_fock_build_screened!(scf_data, jeri_engine_thread_df::Vector{T},
 
         jc_timing.non_timing_data[JCTC.contraction_algorithm] = "screened cpu"
     end
-
-    calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
+    calculate_exchange_B_D!(scf_data, scf_options, jc_timing)
+    # calculate_exchange_screened!(scf_data, scf_options, occupied_orbital_coefficients, jc_timing, iteration)
     # save W and K to hdf5 
-    if iteration == 1
-        h5file = h5open("exchange-gly8.h5", "w")
-        write(h5file, "W", scf_data.W_batches[1])
-        write(h5file, "K", scf_data.two_electron_fock)
-        close(h5file)
-    end
+    # if iteration == 1
+    #     h5file = h5open("exchange-gly8.h5", "w")
+    #     write(h5file, "W", scf_data.W_batches[1])
+    #     write(h5file, "K", scf_data.two_electron_fock)
+    #     close(h5file)
+    # end
     temp_fock = deepcopy(scf_data.two_electron_fock)
     scf_data.two_electron_fock .= 0.0
 
