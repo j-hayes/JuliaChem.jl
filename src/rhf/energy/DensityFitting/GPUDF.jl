@@ -85,7 +85,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         end
         
 
-        calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
+        calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
        
 
 
@@ -832,7 +832,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
    CUDA.synchronize()
 end
 
-function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
+function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
     COMM = MPI.COMM_WORLD
     rank = MPI.Comm_rank(COMM)
     n_ranks = MPI.Comm_size(COMM)
@@ -847,6 +847,11 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
  
     device_Q_range_lengths = scf_data.gpu_data.device_Q_range_lengths
     device_Q_indices = scf_data.gpu_data.device_Q_indices
+
+    println("device Q range lengths: ")
+    display(device_Q_range_lengths)
+    println("device Q indices: ")
+    display(device_Q_indices)
    
 
     device_id_offset = rank * num_devices
@@ -899,6 +904,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
     if n_ranks == 1 && num_devices == 1
         CUDA.copyto!(device_J_AB_invt[1], two_center_integrals)
         CUDA.synchronize()
+
         B_time = @elapsed begin
             CUDA.CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, device_J_AB_invt[1], device_three_center_integrals[1], device_B[1])   
             CUDA.synchronize() 
@@ -907,7 +913,7 @@ function calculate_B_GPU!(two_center_integrals, three_center_integrals, scf_data
         CUDA.unsafe_free!(device_three_center_integrals[1])
         CUDA.reclaim()
         jc_timing.timings[JCTC.B_time] = B_time
-        return
+        return [scf_data.A]
     end
 
     for device_id_two_eri in 2:num_devices
