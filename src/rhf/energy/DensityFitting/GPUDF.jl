@@ -85,7 +85,8 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         end
         
 
-        calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
+        calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
+         scf_data, num_devices, num_devices_global,max_device_Q_range_length, jc_timing)
        
 
 
@@ -108,15 +109,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
         scf_data.gpu_data.device_K_block = Array{CuArray{Float64}}(undef, num_devices)
         scf_data.gpu_data.device_non_square_K_block = Array{CuArray{Float64}}(undef, num_devices)
 
-        scf_data.gpu_data.device_range_p = Array{CuArray{Int64,1}}(undef, num_devices)
-        scf_data.gpu_data.device_range_start = Array{CuArray{Int64,1}}(undef, num_devices)
-        scf_data.gpu_data.device_range_end = Array{CuArray{Int64,1}}(undef, num_devices)
-        scf_data.gpu_data.device_range_sparse_start = Array{CuArray{Int64,1}}(undef, num_devices)
-        scf_data.gpu_data.device_range_sparse_end = Array{CuArray{Int64,1}}(undef, num_devices)
-        scf_data.gpu_data.device_sparse_to_p = Array{CuArray{Int64,1}}(undef, num_devices)
-        scf_data.gpu_data.device_sparse_to_q = Array{CuArray{Int64,1}}(undef, num_devices)
-
-        scf_data.gpu_data.sparse_pq_index_map = Array{CuArray{Int64,2}}(undef, num_devices)
+        setup_gpu_screening_device_arrays(scf_data, num_devices)
         
         scf_data.gpu_data.host_fock = Array{Array{Float64,2}}(undef, num_devices)
         scf_data.density = zeros(Float64, (scf_data.μ,scf_data.μ ))
@@ -221,7 +214,7 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
           
         end 
         
-        gpu_screening_setup = @elapsed setup_gpu_screening_data!(scf_data, scf_options, num_devices)
+        gpu_screening_setup = @elapsed setup_gpu_screening_data!(scf_data, num_devices)
 
 
         jc_timing.non_timing_data[JCTC.contraction_algorithm] = "screened gpu"
@@ -358,6 +351,16 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
     jc_timing.timings[JCTiming_key(JCTC.total_fock_gpu_time, iteration)] = total_fock_gpu_time
 end
 
+function setup_gpu_screening_device_arrays(scf_data::SCFData, num_devices::Int64)
+    scf_data.gpu_data.device_range_p = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_range_start = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_range_end = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_range_sparse_start = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_range_sparse_end = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_sparse_to_p = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_sparse_to_q = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.sparse_pq_index_map = Array{CuArray{Int64,2}}(undef, num_devices)
+end
 
 #to remove branching I need a map from screened[1d index] to unscreened 2d[p,q] indices 
 #not a huge performance hit at the moment so not proritiezed 
@@ -399,7 +402,7 @@ function form_screened_density!(scf_data::SCFData, device_id::Int64)
 
 end
 
-function setup_gpu_screening_data!(scf_data::SCFData, scf_options, num_devices::Int64)
+function setup_gpu_screening_data!(scf_data::SCFData, num_devices::Int64)
     n_ranges = 0
     p = scf_data.μ
     n_ranges_arr = zeros(Int64, p)
@@ -459,12 +462,19 @@ function setup_gpu_screening_data!(scf_data::SCFData, scf_options, num_devices::
             CUDA.synchronize() 
         end
     end
+    
+    run_create_sparse_to_p_q_kernel(scf_data, num_devices, n_ranges, p)
+    
+    
+end
 
+function run_create_sparse_to_p_q_kernel(scf_data::SCFData, num_devices::Int64, kernel_block_thread::Int64, p::Int64)
+    println("num devices: ", num_devices, " kernel block thread: ", kernel_block_thread)
     Threads.@sync for device_id in 1:num_devices
         Threads.@spawn begin
             CUDA.device!(device_id-1)
-            numblocks = ceil(Int64, n_ranges/256)
-            threads = min(256, n_ranges)
+            numblocks = ceil(Int64, kernel_block_thread/256)
+            threads = min(256, kernel_block_thread)
 
             @cuda threads=threads blocks=numblocks create_sparse_to_p_q_kernel(scf_data.gpu_data.device_sparse_to_p[device_id],
                 scf_data.gpu_data.device_sparse_to_q[device_id], 
@@ -472,8 +482,6 @@ function setup_gpu_screening_data!(scf_data::SCFData, scf_options, num_devices::
             CUDA.synchronize()
         end 
     end
-    
-    
 end
 
 function create_sparse_to_p_q_kernel(sparse_to_p::CuDeviceArray{Int64}, 
@@ -832,7 +840,8 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
    CUDA.synchronize()
 end
 
-function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals, scf_data, num_devices, num_devices_global, basis_sets, jc_timing)
+function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
+     scf_data, num_devices, num_devices_global, max_device_Q_range_length, jc_timing)
     COMM = MPI.COMM_WORLD
     rank = MPI.Comm_rank(COMM)
     n_ranks = MPI.Comm_size(COMM)
@@ -847,12 +856,6 @@ function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
  
     device_Q_range_lengths = scf_data.gpu_data.device_Q_range_lengths
     device_Q_indices = scf_data.gpu_data.device_Q_indices
-
-    println("device Q range lengths: ")
-    display(device_Q_range_lengths)
-    println("device Q indices: ")
-    display(device_Q_indices)
-   
 
     device_id_offset = rank * num_devices
     

@@ -181,6 +181,67 @@ function fock_build_kernel_dense_GPU(device_id, scf_data, occupied_orbital_coeff
     return timings
 end
 
+function copy_sparse_to_dense_B_kernel!(dense_B::CuDeviceArray{Float64}, sparse_B::CuDeviceArray{Float64},
+    sparse_to_p::CuDeviceArray{Int64}, sparse_to_q::CuDeviceArray{Int64},
+    screened_count::Int64, device_num_Q::Int64)
+
+    pq_prime = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    aux = (blockIdx().y - 1) * blockDim().y + threadIdx().y
+
+    if pq_prime <= screened_count && aux <= device_num_Q
+        pp = sparse_to_p[pq_prime]
+        qq = sparse_to_q[pq_prime]
+        @inbounds dense_B[aux, pp, qq] = sparse_B[aux, pq_prime]
+    end
+    return
+end
+
+function copy_sparse_to_dense_B!(scf_data, num_devices)
+    screened_count = scf_data.screening_data.screened_indices_count
+    μ = scf_data.μ
+    p = scf_data.μ
+    scf_data.gpu_data.device_sparse_to_p = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.device_sparse_to_q = Array{CuArray{Int64,1}}(undef, num_devices)
+    scf_data.gpu_data.sparse_pq_index_map = Array{CuArray{Int,2}}(undef, num_devices)
+
+    Threads.@sync for device_id in 1:num_devices
+        Threads.@spawn begin
+            scf_data.gpu_data.device_sparse_to_p[device_id] = CUDA.zeros(Int64, scf_data.screening_data.screened_indices_count)
+            scf_data.gpu_data.device_sparse_to_q[device_id] = CUDA.zeros(Int64, scf_data.screening_data.screened_indices_count)
+            scf_data.gpu_data.sparse_pq_index_map[device_id] = CUDA.zeros(Int, (p, p))
+            copyto!(scf_data.gpu_data.sparse_pq_index_map[device_id], scf_data.screening_data.sparse_pq_index_map)
+        end
+    end
+    CUDA.synchronize()
+
+    run_create_sparse_to_p_q_kernel(scf_data, num_devices, p, p)
+    
+    Threads.@sync for device_id in 1:num_devices
+        Threads.@spawn begin
+            device_num_Q = scf_data.gpu_data.device_Q_range_lengths[device_id] # Assuming all devices have the same Q range length
+
+            d_sparse_to_p = scf_data.gpu_data.device_sparse_to_p[device_id]
+            d_sparse_to_q = scf_data.gpu_data.device_sparse_to_q[device_id]
+
+            sparse_B = scf_data.gpu_data.device_B[device_id]
+            dense_B  = CUDA.zeros(Float64, (device_num_Q, μ, μ))
+
+            threads_x = 32
+            threads_y = 8
+            blocks_x  = ceil(Int64, screened_count / threads_x)
+            blocks_y  = ceil(Int64, device_num_Q / threads_y)
+
+            @cuda threads=(threads_x, threads_y) blocks=(blocks_x, blocks_y) copy_sparse_to_dense_B_kernel!(
+                dense_B, sparse_B, d_sparse_to_p, d_sparse_to_q, screened_count, device_num_Q)
+            
+            scf_data.gpu_data.device_B[device_id] = dense_B
+            
+        end
+    end
+    CUDA.synchronize()
+
+end
+
 function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_engine_thread_df, jeri_engine_thread,basis_sets, scf_options)
 
     n_ranks = MPI.Comm_size(MPI.COMM_WORLD)
@@ -235,27 +296,16 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
                      basis_sets, scf_options, scf_data, global_device_id-1,num_devices_global, true)
             end
         end
+
         calculate_B_GPU_Screened!(two_center_integrals, 
             three_center_integrals, 
             scf_data, 
             num_devices, 
             num_devices_global, 
-            basis_sets, jc_timing)
+            max_device_Q_range_length,
+            jc_timing)
         
-        #copy back back the B matrix decompress and copy back as a test (one GPU for now)
-        B_cpu = zeros(Float64, (scf_data.A, pq))
-        CUDA.copyto!(B_cpu, scf_data.gpu_data.device_B[1])
-
-        D = zeros(Float64, (scf_data.A, scf_data.μ, scf_data.μ))
-        decompress_three_eri_time = @elapsed begin 
-        Threads.@threads for pq_prime in 1:scf_data.screening_data.screened_indices_count
-                pp,qq = scf_data.screening_data.sparse_index_to_pq[pq_prime]
-                D[:, pp, qq] .= B_cpu[:, pq_prime]
-            end 
-        end
-        scf_data.gpu_data.device_B[1] = CUDA.zeros(Float64, (scf_data.A, scf_data.μ, scf_data.μ))
-        CUDA.copyto!(scf_data.gpu_data.device_B[1],  D)
-        CUDA.synchronize() 
+        copy_sparse_to_dense_B!(scf_data, num_devices)
         return device_Q_range_lengths
     else # don't use screening
 

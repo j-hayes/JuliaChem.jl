@@ -4,7 +4,6 @@ using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
 using HDF5
-using ThreadPinning
 
 
 

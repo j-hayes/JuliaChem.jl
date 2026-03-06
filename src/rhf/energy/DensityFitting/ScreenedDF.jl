@@ -3,7 +3,6 @@ using LinearAlgebra
 using JuliaChem.Shared.Constants.SCF_Keywords
 using JuliaChem.Shared
 using Serialization
-using ThreadPinning 
 using Serialization
 using JuliaChem.Shared.JCTC
 using JuliaChem.Shared.Constants
