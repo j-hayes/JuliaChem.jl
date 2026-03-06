@@ -249,13 +249,13 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
     two_eri_time = @elapsed two_center_integrals = calculate_two_center_intgrals(jeri_engine_thread_df, basis_sets, scf_options)
     jc_timing.timings[JCTiming_key(JCTC.two_eri_time, 1)] = two_eri_time
 
-    use_screening = haskey(ENV, "DENSE_DF_USE_SCREENING") && parse(Bool, ENV["DENSE_DF_USE_SCREENING"])
+    use_screening = scf_options.df_screening_sigma != 0.0
     if use_screening
-        if scf_options.df_screening_sigma == 0.0
-            scf_options.df_screening_sigma = 1E-6
-        end
+        println("Using screening in dense GPU DF with sigma: $(scf_options.df_screening_sigma), calculating screening metadata")
         get_screening_metadata!(scf_data, scf_options.df_screening_sigma, 
                 jeri_engine_thread, two_center_integrals, basis_sets, jc_timing)
+    else
+        println("Not using screening in dense GPU DF, calculating full B matrix")
     end
 
     scf_data.gpu_data.device_B = Array{CuArray{Float64}}(undef, num_devices)
@@ -297,13 +297,16 @@ function calculate_B_dense_GPU(scf_data, num_devices, jc_timing::JCTiming, jeri_
             end
         end
 
+        jc_timing.timings[JCTC.three_eri_time] = three_eri_time
+        
         calculate_B_GPU_Screened!(two_center_integrals, 
             three_center_integrals, 
             scf_data, 
             num_devices, 
             num_devices_global, 
             max_device_Q_range_length,
-            jc_timing)
+            jc_timing, jeri_engine_thread_df, 
+            basis_sets, scf_options)
         
         copy_sparse_to_dense_B!(scf_data, num_devices)
         return device_Q_range_lengths
