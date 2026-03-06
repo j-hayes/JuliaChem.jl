@@ -76,15 +76,6 @@ function df_rhf_fock_build_GPU!(scf_data, jeri_engine_thread_df::Vector{T}, jeri
             jc_timing)
         end
         
-        # three_eri_time = @elapsed begin
-        #     for device_id in 1:num_devices #the method being called uses many threads do not need to thread by device
-        #         global_device_id = device_id + (rank)*num_devices
-        #         three_center_integrals[device_id] = calculate_three_center_integrals(jeri_engine_thread_df,
-        #              basis_sets, scf_options, scf_data, global_device_id-1,num_devices_global, true)
-        #     end
-        # end
-        
-
         calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
          scf_data, num_devices, num_devices_global,max_device_Q_range_length, 
          jc_timing,jeri_engine_thread_df, basis_sets, scf_options)
@@ -840,7 +831,7 @@ function calculate_K_lower_diagonal_block_no_screen_GPU(host_fock::Array{Float64
    CUDA.synchronize()
 end
 
-function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
+function calculate_B_GPU_Screened!(two_center_integrals,
      scf_data, num_devices, num_devices_global, max_device_Q_range_length, jc_timing, 
      jeri_engine_thread_df,
      basis_sets, scf_options)
@@ -887,6 +878,32 @@ function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
         #broadcast two_center_integrals to all ranks
         MPI.Bcast!(two_center_integrals, 0, COMM)
     end
+
+    if num_devices_global == 1 
+        CUDA.device!(0)
+        three_eri_time = @elapsed begin
+            three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df,
+                     basis_sets, scf_options, scf_data, 0,num_devices_global, true)
+        end
+        device_three_center_integrals = CUDA.zeros(Float64, scf_data.A,pq)
+        copyto!(device_three_center_integrals, three_center_integrals)
+        CUDA.synchronize()
+        B_time = @elapsed begin
+            CUDA.CUBLAS.trmm!('L', 'L', 'N', 'N', 1.0, 
+            device_J_AB_invt[1], 
+            device_three_center_integrals, 
+            device_B[1])   
+            CUDA.synchronize()
+        end
+        jc_timing.timings[JCTC.B_time] = B_time
+        jc_timing.timings[JCTC.three_eri_time] = three_eri_time
+
+        CUDA.unsafe_free!(device_J_AB_invt[1])
+        CUDA.unsafe_free!(device_three_center_integrals)
+        CUDA.synchronize()
+
+        return device_Q_range_lengths
+    end
     
 
     # redoing calculate B multi gpu/rank in a simpler way
@@ -907,7 +924,9 @@ function calculate_B_GPU_Screened!(two_center_integrals, three_center_integrals,
         other_device_three_center_integrals = calculate_three_center_integrals(jeri_engine_thread_df,
                      basis_sets, scf_options, scf_data, other_device_id-1,num_devices_global, true)
             
-        for device_id in 1:num_devices
+        Threads.@threads for device_id in 1:num_devices
+            CUDA.device!(device_id-1)
+
             three_eri_view = reshape(
                 view(device_three_center_integrals[device_id], 1:P_range_length*pq),
                 (P_range_length,pq))
